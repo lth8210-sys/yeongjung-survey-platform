@@ -1,0 +1,80 @@
+# yeongjung-survey-platform
+
+영중종합사회복지관 직원이 쉽게 사용할 수 있도록 설계한 React + Vite 기반 설문 플랫폼 초기 프로젝트입니다.
+
+## 포함 기능
+
+- Google 로그인
+- 관리자 대시보드
+- 설문 목록 페이지
+- 새 설문 만들기
+- 질문 추가/삭제
+- 응답 페이지
+- Firestore 저장
+- 관리자 응답 결과 조회
+
+## 시작 방법
+
+```bash
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+개발 중 Google 로그인은 기본적으로 `http://localhost:5173`에서 테스트하세요.
+`http://127.0.0.1:5173`로 접속하면 Firebase Authentication 승인 도메인 설정에 따라
+`auth/unauthorized-domain` 오류가 날 수 있습니다.
+
+## Firebase 설정 순서
+
+1. Firebase 콘솔에서 프로젝트를 생성합니다.
+2. Authentication에서 Google 로그인을 활성화합니다.
+3. Firestore Database를 생성합니다.
+4. `.env.local`에 Firebase 웹 앱 값을 입력합니다.
+5. 관리자 이메일은 `VITE_ADMIN_EMAILS`에 쉼표로 구분해 입력합니다.
+
+Authentication > Settings > Authorized domains에는 아래 도메인을 등록하세요.
+
+- `localhost`
+- `127.0.0.1`
+- `yeongjung-survey-platform.web.app`
+
+## Firestore 권장 컬렉션
+
+- `surveys`
+- `responses`
+
+## 관리자 권한
+
+`.env.local`의 `VITE_ADMIN_EMAILS`에 쉼표로 구분된 관리자 이메일 목록을 넣으면 관리자 화면 접근을 제어할 수 있습니다.
+
+## Firestore 보안 규칙
+
+프로젝트 루트의 [firestore.rules](/Users/itaehui/Library/CloudStorage/OneDrive-개인/영중종합사회복지관/yeongjung-survey-platform/firestore.rules)를 참고해 적용할 수 있습니다.
+
+핵심 정책은 다음과 같습니다.
+
+- 누구나 활성 설문은 읽을 수 있음
+- 활성 상태의 `super_admin`, `admin`, `creator`는 설문 생성 가능
+- `creator`는 본인이 만든 설문만 수정 가능
+- 응답 작성은 누구나 가능
+- 응답 조회는 관리자와 해당 설문 제작자만 가능
+
+## Firebase CLI 배포
+
+로컬에서 `firestore.rules`를 배포할 수 있도록 [firebase.json](/Users/itaehui/Library/CloudStorage/OneDrive-개인/영중종합사회복지관/yeongjung-survey-platform/firebase.json) 과 [.firebaserc](/Users/itaehui/Library/CloudStorage/OneDrive-개인/영중종합사회복지관/yeongjung-survey-platform/.firebaserc) 를 추가했습니다.
+
+```bash
+npm install
+npm run firebase:login
+npm run firebase:use
+npm run firestore:deploy
+```
+
+배포 전에는 Firebase Console의 `Firestore Database > Rules` 화면과 로컬 `firestore.rules` 내용을 비교하고, 배포 후에는 관리자 계정과 일반 계정으로 권한 동작을 각각 테스트하는 것을 권장합니다.
+
+## 관리자 화면
+
+- `/admin`: 운영 요약 대시보드
+- `/admin/surveys/new`: 새 설문 생성
+- `/admin/surveys/:surveyId/responses`: 설문별 응답 조회

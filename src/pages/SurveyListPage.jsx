@@ -1,0 +1,396 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import QrModal from '../components/QrModal';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  changeSurveyStatus,
+  deleteSurvey,
+  duplicateSurvey,
+  fetchManagedSurveys,
+  fetchPublishedSurveys,
+  fetchResponseCountForSurvey,
+  getClosedSurveyMessage,
+  getDraftSurveyMessage,
+  getFormTypeMeta,
+  getFirestoreErrorMessage,
+  getQuotaSummary,
+  getSurveyStatusMeta,
+  hydrateSurveyResponseCounts,
+  isDeletedSurvey,
+  permanentlyDeleteSurvey,
+  normalizeSurveyStatus,
+  restoreSurvey,
+  SURVEY_STATUSES,
+} from '../firebase/surveys';
+
+function SurveyListPage() {
+  const {
+    canAccessAdmin,
+    canChangeSurveyStatus,
+    canDownloadResponses,
+    canEditSurvey,
+    canViewSurveyResponses,
+    role,
+    user,
+    firebaseStatusMessage,
+    isFirebaseConfigured,
+  } = useAuth();
+  const [surveys, setSurveys] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [activeSurveyId, setActiveSurveyId] = useState('');
+  const [qrTarget, setQrTarget] = useState(null);
+  const [showDeleted, setShowDeleted] = useState(false);
+
+  const loadSurveys = async () => {
+    if (!isFirebaseConfigured) {
+      setError(firebaseStatusMessage || 'Firebase 설정이 필요합니다.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+      const result = canAccessAdmin
+        ? await fetchManagedSurveys(
+            { uid: user?.uid, email: user?.email ?? '', role },
+            { includeDeleted: showDeleted },
+          )
+        : await fetchPublishedSurveys();
+      setSurveys(await hydrateSurveyResponseCounts(result));
+    } catch (loadError) {
+      console.error('설문 목록 조회 실패:', {
+        code: loadError?.code,
+        message: loadError?.message,
+        role,
+        uid: user?.uid,
+        email: user?.email,
+      });
+      setError(
+        getFirestoreErrorMessage(
+          loadError,
+          '현재 계정으로 조회 가능한 설문이 없거나 권한이 없습니다.',
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSurveys();
+  }, [canAccessAdmin, firebaseStatusMessage, isFirebaseConfigured, role, showDeleted, user?.email, user?.uid]);
+
+  const getPublicSurveyUrl = (targetSurveyId) => {
+    if (typeof window === 'undefined') {
+      return `/surveys/${targetSurveyId}`;
+    }
+
+    return `${window.location.origin}/surveys/${targetSurveyId}`;
+  };
+
+  const handleDuplicate = async (surveyId) => {
+    try {
+      setActiveSurveyId(surveyId);
+      await duplicateSurvey(surveyId, {
+        uid: user?.uid ?? '',
+        name: user?.displayName ?? '',
+        email: user?.email ?? '',
+      });
+      await loadSurveys();
+    } catch (actionError) {
+      setError(actionError.message || '설문 복제에 실패했습니다.');
+    } finally {
+      setActiveSurveyId('');
+    }
+  };
+
+  const handleDelete = async (surveyId) => {
+    try {
+      setActiveSurveyId(surveyId);
+      const targetSurvey = surveys.find((survey) => survey.id === surveyId);
+      const responseCount = targetSurvey ? await fetchResponseCountForSurvey(targetSurvey) : 0;
+      const warningMessage =
+        responseCount > 0
+          ? `이미 ${responseCount}개의 응답이 있습니다. 정말 삭제하시겠습니까?`
+          : '정말 이 설문을 삭제하시겠습니까?';
+
+      if (!window.confirm(warningMessage)) {
+        return;
+      }
+
+      await deleteSurvey(surveyId, {
+        uid: user?.uid ?? '',
+        email: user?.email ?? '',
+        name: user?.displayName ?? '',
+      });
+      await loadSurveys();
+    } catch (actionError) {
+      setError(actionError.message || '설문 삭제에 실패했습니다.');
+    } finally {
+      setActiveSurveyId('');
+    }
+  };
+
+  const handleStatusChange = async (surveyId, nextStatus) => {
+    try {
+      setActiveSurveyId(surveyId);
+      setSurveys((current) =>
+        current.map((survey) =>
+          survey.id === surveyId
+            ? { ...survey, status: normalizeSurveyStatus(nextStatus) }
+            : survey,
+        ),
+      );
+      await changeSurveyStatus(surveyId, nextStatus);
+      await loadSurveys();
+    } catch (actionError) {
+      setError(actionError.message || '설문 상태 변경에 실패했습니다.');
+      await loadSurveys();
+    } finally {
+      setActiveSurveyId('');
+    }
+  };
+
+  const handleRestore = async (surveyId) => {
+    try {
+      setActiveSurveyId(surveyId);
+      await restoreSurvey(surveyId);
+      await loadSurveys();
+    } catch (actionError) {
+      setError(actionError.message || '설문 복구에 실패했습니다.');
+    } finally {
+      setActiveSurveyId('');
+    }
+  };
+
+  const handlePermanentDelete = async (surveyId) => {
+    const targetSurvey = surveys.find((survey) => survey.id === surveyId);
+    const responseCount = targetSurvey ? await fetchResponseCountForSurvey(targetSurvey) : 0;
+    const confirmMessage =
+      responseCount > 0
+        ? `응답 ${responseCount}건이 연결되어 있습니다. 영구 삭제하면 설문은 복구할 수 없고 응답 기록만 남습니다. 정말 삭제하시겠습니까?`
+        : '영구 삭제하면 설문을 복구할 수 없습니다. 정말 삭제하시겠습니까?';
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      setActiveSurveyId(surveyId);
+      await permanentlyDeleteSurvey(surveyId, {
+        uid: user?.uid ?? '',
+        email: user?.email ?? '',
+        name: user?.displayName ?? '',
+      });
+      await loadSurveys();
+    } catch (actionError) {
+      setError(actionError.message || '영구 삭제에 실패했습니다.');
+    } finally {
+      setActiveSurveyId('');
+    }
+  };
+
+  if (loading) {
+    return <div className="empty-state">설문 목록을 불러오는 중입니다.</div>;
+  }
+
+  if (error) {
+    return <div className="empty-state">{error}</div>;
+  }
+
+  return (
+    <section className="stack-section">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">설문 목록</span>
+          <h1>{canAccessAdmin ? '내부 설문 관리' : '현재 참여 가능한 설문'}</h1>
+          <p>
+            {canAccessAdmin
+              ? '역할에 따라 수정, 복제, 삭제, 상태 변경 버튼이 다르게 표시됩니다.'
+              : '게시 중이거나 마감된 설문만 목록에 표시됩니다.'}
+          </p>
+        </div>
+        {canAccessAdmin && (
+          <label className="field inline-field">
+            <span>목록 보기</span>
+            <select
+              value={showDeleted ? 'withDeleted' : 'activeOnly'}
+              onChange={(event) => setShowDeleted(event.target.value === 'withDeleted')}
+            >
+              <option value="activeOnly">정상 설문만</option>
+              <option value="withDeleted">삭제된 설문 포함</option>
+            </select>
+          </label>
+        )}
+      </div>
+
+      {surveys.length === 0 ? (
+        <div className="empty-state">
+          {canAccessAdmin
+            ? '내가 만든 설문이 없습니다.'
+            : '현재 참여 가능한 설문이 없습니다.'}
+        </div>
+      ) : (
+        <div className="survey-grid">
+          {surveys.map((survey) => {
+            const normalizedStatus = normalizeSurveyStatus(survey.status);
+            const deletedSurvey = isDeletedSurvey(survey);
+            const statusMeta = getSurveyStatusMeta(normalizedStatus);
+            const formTypeMeta = getFormTypeMeta(survey.formType);
+            const quotaSummary = getQuotaSummary(survey);
+            const canEditTarget = canEditSurvey(survey);
+            const canViewResponsesTarget = canViewSurveyResponses(survey);
+            const canChangeStatusTarget = canChangeSurveyStatus(survey);
+
+            return (
+              <article className="survey-card" key={survey.id}>
+                <span className={statusMeta.className}>{statusMeta.label}</span>
+                <h2>{survey.title}</h2>
+                <p className="survey-card-description">
+                  {survey.description || '설문 설명이 아직 등록되지 않았습니다.'}
+                </p>
+                <small className="muted-label">폼 유형: {formTypeMeta.label}</small>
+                <small>질문 수 {survey.questions?.length ?? 0}개</small>
+                <small>
+                  응답 {quotaSummary.responseCount}건
+                  {quotaSummary.quotaEnabled && quotaSummary.maxResponses
+                    ? ` / 최대 ${quotaSummary.maxResponses}건`
+                    : ' / 제한 없음'}
+                </small>
+
+                <div className="card-actions">
+                  {(normalizedStatus !== SURVEY_STATUSES.DRAFT || canAccessAdmin) && (
+                    <Link className="primary-button" to={`/surveys/${survey.id}`}>
+                      {normalizedStatus === SURVEY_STATUSES.CLOSED ? '설문 보기' : '설문 참여하기'}
+                    </Link>
+                  )}
+
+                  {canEditTarget && (
+                    <>
+                      <Link className="secondary-button" to={`/admin/surveys/${survey.id}/edit`}>
+                        수정
+                      </Link>
+                      <button
+                        className="secondary-button"
+                        disabled={activeSurveyId === survey.id}
+                        onClick={() => handleDuplicate(survey.id)}
+                        type="button"
+                      >
+                        복제
+                      </button>
+                      {deletedSurvey ? (
+                        <>
+                          <button
+                            className="secondary-button"
+                            disabled={activeSurveyId === survey.id}
+                            onClick={() => handleRestore(survey.id)}
+                            type="button"
+                          >
+                            복구
+                          </button>
+                          {role !== 'creator' && (
+                            <button
+                              className="text-button danger-text"
+                              disabled={activeSurveyId === survey.id}
+                              onClick={() => handlePermanentDelete(survey.id)}
+                              type="button"
+                            >
+                              영구 삭제
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          className="secondary-button"
+                          disabled={activeSurveyId === survey.id}
+                          onClick={() => handleDelete(survey.id)}
+                          type="button"
+                        >
+                          삭제
+                        </button>
+                      )}
+                      {normalizedStatus === SURVEY_STATUSES.DRAFT ? (
+                        <Link className="secondary-button" to={`/admin/surveys/${survey.id}/edit`}>
+                          수정 계속하기
+                        </Link>
+                      ) : (
+                        canViewResponsesTarget && (
+                          <Link className="secondary-button" to={`/admin/surveys/${survey.id}/responses`}>
+                            응답 결과
+                          </Link>
+                        )
+                      )}
+                      {normalizedStatus !== SURVEY_STATUSES.DRAFT &&
+                        normalizedStatus !== SURVEY_STATUSES.DELETED &&
+                        canDownloadResponses && (
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            setQrTarget({
+                              title: survey.title,
+                              url: getPublicSurveyUrl(survey.id),
+                            })
+                          }
+                          type="button"
+                        >
+                          QR 보기
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {!deletedSurvey && canChangeStatusTarget && (
+                  <label className="field inline-field">
+                    <span>상태 변경</span>
+                    <select
+                      disabled={activeSurveyId === survey.id}
+                      value={normalizedStatus}
+                      onChange={(event) => handleStatusChange(survey.id, event.target.value)}
+                    >
+                      <option value={SURVEY_STATUSES.DRAFT}>임시저장</option>
+                      <option value={SURVEY_STATUSES.PUBLISHED}>게시중</option>
+                      <option value={SURVEY_STATUSES.CLOSED}>마감</option>
+                    </select>
+                  </label>
+                )}
+
+                {normalizedStatus === SURVEY_STATUSES.CLOSED && (
+                  <div className="inline-note">
+                    {getClosedSurveyMessage(survey.formType)}
+                    {quotaSummary.quotaEnabled && quotaSummary.maxResponses
+                      ? ` 현재 ${quotaSummary.responseCount}/${quotaSummary.maxResponses}건이며 공개 페이지에서는 제출할 수 없습니다.`
+                      : ' 공개 페이지에서는 안내만 보이고 제출은 할 수 없습니다.'}
+                  </div>
+                )}
+
+                {normalizedStatus === SURVEY_STATUSES.DRAFT && canAccessAdmin && (
+                  <div className="inline-note">
+                    임시저장 상태입니다. {getDraftSurveyMessage(survey.formType)} 수정 후 게시중으로 바꾸면 공개 링크로 진행할 수 있습니다.
+                  </div>
+                )}
+
+                {deletedSurvey && (
+                  <div className="inline-note">
+                    삭제된 설문입니다. 응답 기록은 유지되며, 필요하면 복구해서 다시 관리할 수 있습니다.
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      <QrModal
+        isOpen={Boolean(qrTarget)}
+        onClose={() => setQrTarget(null)}
+        title={qrTarget ? `${qrTarget.title} QR` : ''}
+        url={qrTarget?.url ?? ''}
+      />
+    </section>
+  );
+}
+
+export default SurveyListPage;

@@ -1,0 +1,386 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userEmail() {
+      return isSignedIn() ? request.auth.token.email : '';
+    }
+
+    function isInternalUser() {
+      return isSignedIn() && userEmail().matches('.*@yeongjung\\.or\\.kr$');
+    }
+
+    // SYNC REQUIRED: 이 목록을 변경하면 아래 protectedSuperAdminEmail()과
+    // src/firebase/users.js의 SUPER_ADMIN_EMAILS도 함께 변경해야 합니다.
+    function isSuperAdminEmail() {
+      return userEmail() in [
+        "lth8210@yeongjung.or.kr",
+        "yj100@yeongjung.or.kr"
+      ];
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasUserDoc() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentRole() {
+      return isSuperAdminEmail()
+        ? 'super_admin'
+        : !isInternalUser()
+          ? ''
+          : hasUserDoc()
+            ? normalizeStoredRole(userDoc().data.role)
+            : 'creator';
+    }
+
+    function currentStatus() {
+      return isSuperAdminEmail()
+        ? 'active'
+        : !isInternalUser()
+          ? ''
+          : hasUserDoc()
+            ? normalizeStoredStatus(userDoc().data.status)
+            : '';
+    }
+
+    function normalizeStoredRole(role) {
+      return role == '슈퍼관리자'
+        ? 'super_admin'
+        : role == '관리자'
+          ? 'admin'
+          : role == '제작자'
+            ? 'creator'
+            : role == '조회자'
+              ? 'viewer'
+              : role;
+    }
+
+    function normalizeStoredStatus(status) {
+      return status == '활성'
+        ? 'active'
+        : status == '승인 대기'
+          ? 'pending'
+          : status == '비활성'
+            ? 'inactive'
+            : status == '차단'
+              ? 'blocked'
+              : status == null
+                ? 'active'
+                : status;
+    }
+
+    function isAtLeastAdmin() {
+      return currentStatus() == 'active' && currentRole() in ['super_admin', 'admin'];
+    }
+
+    function isCreator() {
+      return currentStatus() == 'active' && currentRole() == 'creator';
+    }
+
+    function isViewer() {
+      return currentStatus() == 'active' && currentRole() == 'viewer';
+    }
+
+    function requestRole() {
+      return normalizeStoredRole(request.resource.data.role);
+    }
+
+    function membershipDoc(email) {
+      return get(/databases/$(database)/documents/memberships/$(email));
+    }
+
+    function membershipById(membershipId) {
+      return get(/databases/$(database)/documents/memberships/$(membershipId));
+    }
+
+    function hasMembership(email) {
+      return exists(/databases/$(database)/documents/memberships/$(email));
+    }
+
+    function hasMembershipById(membershipId) {
+      return membershipId is string &&
+        exists(/databases/$(database)/documents/memberships/$(membershipId));
+    }
+
+    function normalizedMembershipRole(email) {
+      return hasMembership(email)
+        ? normalizeStoredRole(membershipDoc(email).data.role)
+        : '';
+    }
+
+    function normalizedMembershipRoleById(membershipId) {
+      return hasMembershipById(membershipId)
+        ? normalizeStoredRole(membershipById(membershipId).data.role)
+        : '';
+    }
+
+    function membershipEmailById(membershipId) {
+      return hasMembershipById(membershipId)
+        ? membershipById(membershipId).data.email
+        : '';
+    }
+
+    // SYNC REQUIRED: 위 isSuperAdminEmail() 및 src/firebase/users.js SUPER_ADMIN_EMAILS와 동일하게 유지.
+    function protectedSuperAdminEmail(email) {
+      return email in [
+        "lth8210@yeongjung.or.kr",
+        "yj100@yeongjung.or.kr"
+      ];
+    }
+
+    function protectedSuperAdminData(data) {
+      return data.role == 'super_admin' || protectedSuperAdminEmail(data.email);
+    }
+
+    function isLegacyPublishedStatus(data) {
+      return data.status == "active";
+    }
+
+    function surveyStatusForRead(data) {
+      return data.status in ["published", "closed"] || isLegacyPublishedStatus(data);
+    }
+
+    function surveyStatusForResponse(data) {
+      return data.status == "published" || isLegacyPublishedStatus(data);
+    }
+
+    function isSurveyOwner(data) {
+      return isSignedIn() && (
+        data.ownerUid == request.auth.uid ||
+        data.createdByUid == request.auth.uid ||
+        data.ownerEmail == userEmail() ||
+        data.createdByEmail == userEmail()
+      );
+    }
+
+    function isResponseOwner(data) {
+      return isSignedIn() && (
+        data.surveyOwnerUid == request.auth.uid ||
+        data.surveyCreatedByUid == request.auth.uid ||
+        data.surveyOwnerEmail == userEmail() ||
+        data.surveyCreatedByEmail == userEmail()
+      );
+    }
+
+    function canReadManagedSurvey(data) {
+      return isInternalUser() && (
+        isAtLeastAdmin() ||
+        isViewer() ||
+        (isCreator() && isSurveyOwner(data))
+      );
+    }
+
+    function canEditManagedSurvey(data) {
+      return isInternalUser() && (
+        isAtLeastAdmin() ||
+        (isCreator() && isSurveyOwner(data))
+      );
+    }
+
+    function validManagedSurveyCreate() {
+      return isInternalUser() &&
+        currentStatus() == 'active' &&
+        currentRole() in ['super_admin', 'admin', 'creator'] &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.ownerEmail == userEmail();
+    }
+
+    function validPublicSurveyCounterUpdate() {
+      let changedKeys = request.resource.data.diff(resource.data).changedKeys();
+
+      return changedKeys.hasOnly(["optionQuotaCounts", "responseCount", "status", "updatedAt"]) &&
+        surveyStatusForResponse(resource.data) &&
+        request.resource.data.status in ["published", "closed"] &&
+        (
+          (!(resource.data.responseCount is int) && request.resource.data.responseCount == 1) ||
+          (resource.data.responseCount is int &&
+            request.resource.data.responseCount == resource.data.responseCount + 1)
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAtLeastAdmin());
+      allow create: if isSignedIn() &&
+        request.auth.uid == userId &&
+        isInternalUser() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.email == userEmail() &&
+        (
+          (isSuperAdminEmail() && request.resource.data.role == 'super_admin') ||
+          (!isSuperAdminEmail() && (
+            (
+              request.resource.data.email is string &&
+              hasMembership(request.resource.data.email) &&
+              normalizedMembershipRole(request.resource.data.email) == request.resource.data.role &&
+              request.resource.data.status == 'active'
+            ) ||
+            (
+              request.resource.data.email is string &&
+              request.resource.data.membershipId is string &&
+              hasMembershipById(request.resource.data.membershipId) &&
+              membershipEmailById(request.resource.data.membershipId) == request.resource.data.email &&
+              normalizedMembershipRoleById(request.resource.data.membershipId) == request.resource.data.role &&
+              request.resource.data.status == 'active'
+            ) ||
+            (
+              request.resource.data.role == 'viewer' &&
+              request.resource.data.status == 'pending' &&
+              !hasMembership(request.resource.data.email)
+            )
+          ))
+        );
+      allow update: if isSignedIn() && (
+        (isAtLeastAdmin() && (!protectedSuperAdminData(resource.data) || isSuperAdminEmail())) ||
+        (
+          request.auth.uid == userId &&
+          resource.data.role == request.resource.data.role &&
+          request.resource.data.email == resource.data.email
+        )
+      );
+      allow delete: if isAtLeastAdmin() && (!protectedSuperAdminData(resource.data) || isSuperAdminEmail());
+    }
+
+    match /memberships/{membershipId} {
+      allow read: if isAtLeastAdmin() || (
+        isInternalUser() &&
+        (
+          membershipId == userEmail() ||
+          resource.data.email == userEmail()
+        )
+      );
+      allow create, update: if isAtLeastAdmin() &&
+        (
+          requestRole() != 'super_admin' ||
+          isSuperAdminEmail()
+        );
+      allow delete: if isAtLeastAdmin();
+    }
+
+    match /surveys/{surveyId} {
+      allow read: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data);
+      allow create: if validManagedSurveyCreate();
+      allow delete: if canEditManagedSurvey(resource.data);
+      allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
+    }
+
+    match /surveys/{surveyId}/applicationApplicantLocks/{lockId} {
+      allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      allow create: if
+        request.resource.data.surveyId == surveyId &&
+        request.resource.data.applicantHash is string &&
+        request.resource.data.responseId is string &&
+        request.resource.data.lockType in ['form_duplicate', 'one_slot_per_person'] &&
+        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      allow update, delete: if false;
+    }
+
+    match /surveys/{surveyId}/applicationSlotLocks/{lockId} {
+      allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      allow create: if
+        request.resource.data.surveyId == surveyId &&
+        request.resource.data.questionId is string &&
+        request.resource.data.slotValue is string &&
+        request.resource.data.applicantHash is string &&
+        request.resource.data.responseId is string &&
+        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      allow update, delete: if false;
+    }
+
+    match /surveys/{surveyId}/clientSubmitLocks/{lockId} {
+      allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        surveyStatusForRead(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      allow create: if
+        request.resource.data.surveyId == surveyId &&
+        request.resource.data.clientSubmitIdHash is string &&
+        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      allow update, delete: if false;
+    }
+
+    match /responses/{responseId} {
+      allow create: if
+        request.resource.data.surveyId is string &&
+        request.resource.data.surveyTitle is string &&
+        request.resource.data.answers is list &&
+        request.resource.data.respondent is map &&
+        exists(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)) &&
+        surveyStatusForResponse(
+          get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data
+        ) &&
+        (
+          (
+            !(get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount is int) &&
+            getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount == 1
+          ) ||
+          (
+            get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount is int &&
+            getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount ==
+              get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount + 1
+          )
+        ) &&
+        getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.status in ["published", "closed"];
+      allow read: if isAtLeastAdmin() || (
+        isCreator() &&
+        (
+          isResponseOwner(resource.data) ||
+          isSurveyOwner(get(/databases/$(database)/documents/surveys/$(resource.data.surveyId)).data)
+        )
+      );
+      allow update: if isAtLeastAdmin() || (
+        isCreator() &&
+        (
+          isResponseOwner(resource.data) ||
+          isSurveyOwner(get(/databases/$(database)/documents/surveys/$(resource.data.surveyId)).data)
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow create: if isAtLeastAdmin() &&
+        request.resource.data.keys().hasOnly([
+          "action",
+          "surveyId",
+          "responseId",
+          "actor",
+          "metadata",
+          "createdAt"
+        ]) &&
+        request.resource.data.action is string &&
+        request.resource.data.surveyId is string &&
+        (
+          request.resource.data.responseId == null ||
+          request.resource.data.responseId is string
+        ) &&
+        request.resource.data.actor is map &&
+        request.resource.data.actor.keys().hasOnly([
+          "uid",
+          "email",
+          "displayName"
+        ]) &&
+        request.resource.data.actor.uid is string &&
+        request.resource.data.actor.email is string &&
+        request.resource.data.actor.displayName is string &&
+        request.resource.data.metadata is map &&
+        request.resource.data.createdAt == request.time;
+      allow read: if isAtLeastAdmin();
+      allow update, delete: if false;
+    }
+
+    match /draftResponses/{draftId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create, update: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}
