@@ -354,6 +354,8 @@ service cloud.firestore {
           "surveyId",
           "responseId",
           "actor",
+          "deletedBy",
+          "deletedAt",
           "metadata",
           "createdAt"
         ]) &&
@@ -372,6 +374,24 @@ service cloud.firestore {
         request.resource.data.actor.uid is string &&
         request.resource.data.actor.email is string &&
         request.resource.data.actor.displayName is string &&
+        (
+          request.resource.data.deletedBy == null ||
+          (
+            request.resource.data.deletedBy is map &&
+            request.resource.data.deletedBy.keys().hasOnly([
+              "uid",
+              "email",
+              "displayName"
+            ]) &&
+            request.resource.data.deletedBy.uid is string &&
+            request.resource.data.deletedBy.email is string &&
+            request.resource.data.deletedBy.displayName is string
+          )
+        ) &&
+        (
+          request.resource.data.deletedAt == null ||
+          request.resource.data.deletedAt == request.time
+        ) &&
         request.resource.data.metadata is map &&
         request.resource.data.createdAt == request.time;
       allow read: if isAtLeastAdmin();

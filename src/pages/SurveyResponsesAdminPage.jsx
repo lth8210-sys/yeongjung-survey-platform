@@ -9,6 +9,7 @@ import {
   detectPrivacyQuestions,
   changeSurveyStatus,
   deleteSurvey,
+  deleteSurveyResponse,
   duplicateSurvey,
   extractApplicationResponseSummary,
   extractSlotSelections,
@@ -301,7 +302,16 @@ function downloadCsv(filename, rows) {
 
 function SurveyResponsesAdminPage() {
   const navigate = useNavigate();
-  const { user, role, canDownloadResponses, canManageUsers, canEditSurvey, canViewSurveyResponses, canChangeSurveyStatus } = useAuth();
+  const {
+    user,
+    role,
+    canDownloadResponses,
+    canDeleteResponses,
+    canManageUsers,
+    canEditSurvey,
+    canViewSurveyResponses,
+    canChangeSurveyStatus,
+  } = useAuth();
   const { surveyId } = useParams();
   const [survey, setSurvey] = useState(null);
   const [responses, setResponses] = useState([]);
@@ -317,6 +327,7 @@ function SurveyResponsesAdminPage() {
   const [missingSurveyNotice, setMissingSurveyNotice] = useState('');
   const [pendingDownload, setPendingDownload] = useState(null);
   const [pendingAnonymize, setPendingAnonymize] = useState(null);
+  const [pendingDeleteResponse, setPendingDeleteResponse] = useState(null);
   const [responseLastDoc, setResponseLastDoc] = useState(null);
   const [hasMoreResponses, setHasMoreResponses] = useState(false);
   const [loadingMoreResponses, setLoadingMoreResponses] = useState(false);
@@ -612,6 +623,34 @@ function SurveyResponsesAdminPage() {
       });
     } catch (actionError) {
       setError(actionError.message || '관리 메모 저장에 실패했습니다.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleResponseDelete = async (responseId) => {
+    if (!responseId || !canDeleteResponses) {
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      await deleteSurveyResponse(responseId, auditActor);
+      setResponses((current) => current.filter((response) => response.id !== responseId));
+      setEditingStates((current) => {
+        const { [responseId]: _removed, ...nextState } = current;
+        return nextState;
+      });
+      setSurvey((current) =>
+        current
+          ? {
+              ...current,
+              responseCount: Math.max(0, Number(current.responseCount ?? 0) - 1),
+            }
+          : current,
+      );
+    } catch (actionError) {
+      setError(actionError.message || '응답 삭제에 실패했습니다.');
     } finally {
       setActionLoading(false);
     }
@@ -1496,14 +1535,26 @@ function SurveyResponsesAdminPage() {
                         />
                       </td>
                       <td>
-                        <button
-                          className="secondary-button"
-                          disabled={actionLoading}
-                          onClick={() => handleAdminNoteSave(response.id)}
-                          type="button"
-                        >
-                          메모 저장
-                        </button>
+                        <div className="card-actions">
+                          <button
+                            className="secondary-button"
+                            disabled={actionLoading}
+                            onClick={() => handleAdminNoteSave(response.id)}
+                            type="button"
+                          >
+                            메모 저장
+                          </button>
+                          {canDeleteResponses && (
+                            <button
+                              className="secondary-button danger-button"
+                              disabled={actionLoading}
+                              onClick={() => setPendingDeleteResponse(response.id)}
+                              type="button"
+                            >
+                              응답 삭제
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1577,6 +1628,16 @@ function SurveyResponsesAdminPage() {
                           {response.anonymizedAt ? '익명화 완료' : '개인정보 익명화'}
                         </button>
                       )}
+                      {canDeleteResponses && (
+                        <button
+                          className="secondary-button danger-button"
+                          disabled={actionLoading}
+                          onClick={() => setPendingDeleteResponse(response.id)}
+                          type="button"
+                        >
+                          응답 삭제
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1645,6 +1706,19 @@ function SurveyResponsesAdminPage() {
           handleAnonymize(responseId);
         }}
         onCancel={() => setPendingAnonymize(null)}
+      />
+      <ConfirmModal
+        isOpen={pendingDeleteResponse !== null}
+        title="이 응답을 삭제하시겠습니까?"
+        message="삭제된 응답은 복구할 수 없습니다."
+        confirmLabel="응답 삭제"
+        cancelLabel="취소"
+        onConfirm={() => {
+          const responseId = pendingDeleteResponse;
+          setPendingDeleteResponse(null);
+          handleResponseDelete(responseId);
+        }}
+        onCancel={() => setPendingDeleteResponse(null)}
       />
     </section>
   );

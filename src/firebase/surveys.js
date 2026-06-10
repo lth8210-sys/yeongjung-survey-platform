@@ -224,6 +224,7 @@ function mapResponseDoc(item) {
   return {
     id: item.id,
     ...data,
+    deleted: Boolean(data.deleted),
     status: normalizeResponseStatus(data.status ?? data.applicationStatus),
     applicationStatus: normalizeResponseProcessingStatus(data.applicationStatus),
   };
@@ -1527,6 +1528,7 @@ export function isPermanentlyDeletedSurvey(survey = {}) {
 
 export function isDeletedSurveyResponse(response = {}, linkedSurvey = null) {
   if (
+    response?.deleted ||
     response?.surveyPermanentlyDeleted ||
     response?.surveyDeleted ||
     response?.hiddenFromDefaultList
@@ -1543,6 +1545,10 @@ export function getDeletedSurveyResponseMeta(response = {}, linkedSurvey = null)
     (linkedSurvey ? isPermanentlyDeletedSurvey(linkedSurvey) : false);
   const deleted = permanentlyDeleted || isDeletedSurveyResponse(response, linkedSurvey);
 
+  if (response?.deleted) {
+    return { deleted, label: '삭제된 응답', className: 'status-chip danger-chip' };
+  }
+
   if (permanentlyDeleted) {
     return { deleted, label: '영구 삭제된 설문', className: 'status-chip danger-chip' };
   }
@@ -1552,6 +1558,51 @@ export function getDeletedSurveyResponseMeta(response = {}, linkedSurvey = null)
   }
 
   return { deleted: false, label: '정상 설문', className: 'status-chip published-chip' };
+}
+
+function filterDeletedResponses(responses = [], includeDeleted = false) {
+  const responseList = Array.isArray(responses) ? responses : [];
+  return includeDeleted
+    ? responseList
+    : responseList.filter((response) => !isDeletedSurveyResponse(response));
+}
+
+function getSelectedQuotaValues(answer) {
+  if (Array.isArray(answer)) {
+    return answer.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+
+  if (answer && typeof answer === 'object') {
+    if (Array.isArray(answer.values)) {
+      return getSelectedQuotaValues(answer.values);
+    }
+
+    if (Array.isArray(answer.selectedValues)) {
+      return getSelectedQuotaValues(answer.selectedValues);
+    }
+
+    if (typeof answer.value === 'string') {
+      return getSelectedQuotaValues(answer.value);
+    }
+  }
+
+  const normalizedAnswer = String(answer ?? '').trim();
+  return normalizedAnswer ? [normalizedAnswer] : [];
+}
+
+function decrementOptionQuotaCounts(optionQuotaCounts = {}, questionId, selectedValues = []) {
+  const nextCounts = { ...optionQuotaCounts };
+
+  selectedValues.forEach((selectedValue) => {
+    const quotaKey = buildOptionQuotaKey(questionId, selectedValue);
+    const currentCount = Number(nextCounts[quotaKey] ?? 0);
+
+    nextCounts[quotaKey] = Number.isFinite(currentCount)
+      ? Math.max(0, currentCount - 1)
+      : 0;
+  });
+
+  return nextCounts;
 }
 
 function sortSurveysByCreatedAtDesc(items = []) {
@@ -2410,7 +2461,7 @@ export async function fetchRecentResponses(limitCount = 20) {
     query(responsesCollection, orderBy('submittedAt', 'desc'), limit(limitCount)),
   );
 
-  return snapshot.docs.map(mapResponseDoc);
+  return filterDeletedResponses(snapshot.docs.map(mapResponseDoc));
 }
 
 export async function createAuditLog({
@@ -2517,8 +2568,7 @@ export async function fetchManagedRecentResponses(userAccess = {}, limitCount = 
     return result;
   }, new Map());
 
-  return [...mergedDocs.values()]
-    .map(mapResponseDoc)
+  return filterDeletedResponses([...mergedDocs.values()].map(mapResponseDoc))
     .sort((first, second) => {
       const firstTime =
         first.submittedAt instanceof Timestamp ? first.submittedAt.toMillis() : 0;
@@ -2532,7 +2582,7 @@ export async function fetchManagedRecentResponses(userAccess = {}, limitCount = 
 
 function buildResponsePage(snapshot, pageSize) {
   return {
-    responses: snapshot.docs.map(mapResponseDoc),
+    responses: filterDeletedResponses(snapshot.docs.map(mapResponseDoc)),
     lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
     hasMore: Number.isFinite(pageSize) && pageSize > 0
       ? snapshot.docs.length === pageSize
@@ -2565,7 +2615,7 @@ export async function fetchResponsesBySurveyId(surveyId, options = {}) {
     };
   }
 
-  return snapshot.docs.map(mapResponseDoc);
+  return filterDeletedResponses(snapshot.docs.map(mapResponseDoc));
 }
 
 export async function fetchResponsesBySurveyTitle(surveyTitle, options = {}) {
@@ -2600,7 +2650,7 @@ export async function fetchResponsesBySurveyTitle(surveyTitle, options = {}) {
     };
   }
 
-  return snapshot.docs.map(mapResponseDoc);
+  return filterDeletedResponses(snapshot.docs.map(mapResponseDoc));
 }
 
 export async function fetchResponsesForSurvey(survey, userAccess = {}, options = {}) {
@@ -2656,8 +2706,7 @@ export async function fetchResponsesForSurvey(survey, userAccess = {}, options =
       return result;
     }, new Map());
 
-    return [...mergedDocs.values()]
-      .map(mapResponseDoc)
+    return filterDeletedResponses([...mergedDocs.values()].map(mapResponseDoc))
       .filter((response) => response.surveyId === survey.id)
       .sort((first, second) => {
         const firstTime =
@@ -2720,6 +2769,96 @@ export async function updateResponseStatus(responseId, status, updatedBy = {}) {
   }
 
   await updateDoc(doc(db, 'responses', responseId), updates);
+}
+
+export async function deleteSurveyResponse(responseId, deletedBy = {}) {
+  ensureFirestoreReady();
+  const responseRef = doc(db, 'responses', responseId);
+  const auditLogRef = doc(auditLogsCollection);
+  const deletedByMeta = {
+    uid: String(deletedBy?.uid ?? ''),
+    email: String(deletedBy?.email ?? ''),
+    displayName: String(deletedBy?.displayName ?? deletedBy?.name ?? ''),
+  };
+
+  await runTransaction(db, async (transaction) => {
+    const responseSnapshot = await transaction.get(responseRef);
+
+    if (!responseSnapshot.exists()) {
+      const error = new Error('삭제할 응답을 찾을 수 없습니다.');
+      error.code = 'not-found';
+      throw error;
+    }
+
+    const response = mapResponseDoc(responseSnapshot);
+
+    if (response.deleted) {
+      return;
+    }
+
+    const surveyId = String(response.surveyId ?? '').trim();
+    const surveyRef = surveyId ? doc(db, 'surveys', surveyId) : null;
+    const surveySnapshot = surveyRef ? await transaction.get(surveyRef) : null;
+    let nextOptionQuotaCounts = null;
+    let nextResponseCount = null;
+
+    if (surveySnapshot?.exists()) {
+      const survey = mapSurveyDoc(surveySnapshot);
+      nextOptionQuotaCounts = { ...normalizeOptionQuotaCounts(survey.optionQuotaCounts) };
+
+      (response.answers ?? []).forEach((answerItem) => {
+        const matchedQuestion = (survey.questions ?? []).find(
+          (question) => question.id === answerItem.questionId,
+        );
+
+        if (!matchedQuestion || !isOptionQuotaQuestion(matchedQuestion)) {
+          return;
+        }
+
+        const selectedValues = getSelectedQuotaValues(answerItem.answer)
+          .filter((selectedValue) => matchedQuestion.options.includes(selectedValue));
+
+        if (selectedValues.length === 0) {
+          return;
+        }
+
+        nextOptionQuotaCounts = decrementOptionQuotaCounts(
+          nextOptionQuotaCounts,
+          matchedQuestion.id,
+          selectedValues,
+        );
+      });
+
+      nextResponseCount = Math.max(0, Number(survey.responseCount ?? 0) - 1);
+    }
+
+    transaction.update(responseRef, {
+      deleted: true,
+      hiddenFromDefaultList: true,
+      deletedAt: serverTimestamp(),
+      deletedBy: deletedByMeta,
+      updatedAt: getIsoTimestamp(),
+    });
+
+    if (surveyRef && surveySnapshot?.exists()) {
+      transaction.update(surveyRef, {
+        responseCount: nextResponseCount,
+        optionQuotaCounts: nextOptionQuotaCounts,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    transaction.set(auditLogRef, {
+      action: 'response_delete',
+      surveyId,
+      responseId: String(responseId),
+      actor: deletedByMeta,
+      deletedBy: deletedByMeta,
+      deletedAt: serverTimestamp(),
+      metadata: {},
+      createdAt: serverTimestamp(),
+    });
+  });
 }
 
 /**

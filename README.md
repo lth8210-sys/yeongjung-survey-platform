@@ -71,6 +71,22 @@ npm run firebase:use
 npm run firestore:deploy
 ```
 
+## 배포 체크리스트
+
+`firestore.rules`가 변경된 경우 Hosting 배포만으로는 권한 정책이 반영되지 않습니다. 배포 전 빌드를 확인하고 Firestore Rules와 Hosting을 함께 배포하세요.
+
+```bash
+npm run build
+firebase deploy --only firestore
+firebase deploy --only hosting
+```
+
+전체 리소스를 한 번에 배포할 때는 아래 명령을 사용할 수 있습니다.
+
+```bash
+firebase deploy
+```
+
 배포 전에는 Firebase Console의 `Firestore Database > Rules` 화면과 로컬 `firestore.rules` 내용을 비교하고, 배포 후에는 관리자 계정과 일반 계정으로 권한 동작을 각각 테스트하는 것을 권장합니다.
 
 ## 관리자 화면

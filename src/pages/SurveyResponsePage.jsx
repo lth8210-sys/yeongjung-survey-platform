@@ -428,8 +428,15 @@ function SurveyResponsePage() {
   const visibleSections = visibleFlow.visibleSections ?? [];
   const flowGroupedSections = visibleFlow.groupedSections ?? [];
   const questionById = useMemo(
-    () => new Map((survey?.questions ?? []).map((question) => [question.id, question])),
-    [survey?.questions],
+    () => new Map(activeQuestions.map((question) => [question.id, question])),
+    [activeQuestions],
+  );
+  const isRenderableQuestion = useCallback(
+    (question) =>
+      Boolean(question?.id) &&
+      question.meta?.consentTemplate !== 'base' &&
+      !isNonResponseQuestionType(question.type),
+    [],
   );
   const groupedSections = useMemo(() => {
     if (responseMode !== 'paged') {
@@ -473,6 +480,13 @@ function SurveyResponsePage() {
     ? groupedSections.slice(currentSectionSafeIndex + 1)
     : [];
   const remainingQuestionsAfterCurrentSection = remainingSections.flatMap((section) => section.questions ?? []);
+  const nextQuestionSectionIndex = responseMode === 'paged'
+    ? groupedSections.findIndex(
+        (section, index) =>
+          index > currentSectionSafeIndex &&
+          (section.questions ?? []).some((question) => isRenderableQuestion(question)),
+      )
+    : -1;
 
   // activeQuestions 교차검증: groupedSections에 포함되지 않은 active 응답형 질문이 있으면
   // 아직 표시되지 않은 질문이 남은 것이므로 마지막 섹션으로 판단하지 않는다
@@ -493,27 +507,25 @@ function SurveyResponsePage() {
     () =>
       activeQuestions.filter(
         (q) =>
-          !isNonResponseQuestionType(q.type) &&
-          q.meta?.consentTemplate !== 'base' &&
+          isRenderableQuestion(q) &&
           !shownQuestionIds.has(q.id),
       ),
-    [activeQuestions, shownQuestionIds],
+    [activeQuestions, isRenderableQuestion, shownQuestionIds],
   );
   // groupedSections에 없는 active 질문이 있으면 탐지
   const ungroupedActiveResponseQuestions = useMemo(
     () =>
       activeQuestions.filter(
         (q) =>
-          !isNonResponseQuestionType(q.type) &&
-          q.meta?.consentTemplate !== 'base' &&
+          isRenderableQuestion(q) &&
           !groupedQuestionIds.has(q.id),
       ),
-    [activeQuestions, groupedQuestionIds],
+    [activeQuestions, groupedQuestionIds, isRenderableQuestion],
   );
 
   const isLastReachableSection =
     responseMode !== 'paged' ||
-    (remainingSections.length === 0 && remainingActiveResponseQuestions.length === 0);
+    (nextQuestionSectionIndex === -1 && remainingActiveResponseQuestions.length === 0);
   const canSubmitCurrentPage =
     responseMode !== 'paged' || (isLastReachableSection && !visibleFlow.termination);
   const responseQuestions = responseMode === 'paged'
@@ -1240,7 +1252,15 @@ function SurveyResponsePage() {
     }
 
     setMessage('');
-    setCurrentSectionIndex((current) => Math.min(groupedSections.length - 1, current + 1));
+    setCurrentSectionIndex((current) => {
+      const nextIndex = groupedSections.findIndex(
+        (section, index) =>
+          index > current &&
+          (section.questions ?? []).some((question) => isRenderableQuestion(question)),
+      );
+
+      return nextIndex === -1 ? current : nextIndex;
+    });
     scrollToTop();
   };
 
@@ -1728,7 +1748,7 @@ function SurveyResponsePage() {
                   disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination) || !canSubmitCurrentPage}
                   type="submit"
                 >
-                  {submitting ? '제출 중...' : applicationForm ? '신청 제출하기' : '응답 제출하기'}
+                  {submitting ? '제출 중...' : applicationForm ? '제출 및 저장' : '제출하기'}
                 </button>
               )}
             </div>
@@ -1738,7 +1758,7 @@ function SurveyResponsePage() {
               disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination)}
               type="submit"
             >
-              {submitting ? '제출 중...' : applicationForm ? '신청 제출하기' : '응답 제출하기'}
+              {submitting ? '제출 중...' : applicationForm ? '제출 및 저장' : '제출하기'}
             </button>
           )}
         </form>

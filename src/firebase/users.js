@@ -179,6 +179,14 @@ export function canManageUsers(role) {
   return hasRoleAtLeast(role, USER_ROLES.ADMIN);
 }
 
+export function canDeleteResponses(role) {
+  return hasRoleAtLeast(role, USER_ROLES.ADMIN);
+}
+
+export function canManageSurveyResponses(role) {
+  return hasRoleAtLeast(role, USER_ROLES.ADMIN);
+}
+
 export function canDownloadResponses(role) {
   return hasRoleAtLeast(role, USER_ROLES.CREATOR);
 }

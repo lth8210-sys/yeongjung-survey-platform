@@ -7,3 +7,4 @@ dist/
 .firebaserc
 .DS_Store
 .vscode/
+firebase-debug.log
