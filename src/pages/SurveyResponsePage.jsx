@@ -16,12 +16,17 @@ import {
   isApplicationFormType,
   isNonResponseQuestionType,
   isScaleQuestionType,
+  normalizeQuestionType,
   OTHER_OPTION_VALUE,
   QUESTION_TYPES,
   submitSurveyResponse,
 } from '../firebase/surveys';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
-import { buildVisibleQuestionFlow, getResponseMode } from '../utils/responseFlow';
+import {
+  buildVisibleQuestionFlow,
+  getResponseMode,
+  normalizeQuestionsAndSections,
+} from '../utils/responseFlow';
 import { debounce } from '../utils/debounce';
 import { cleanupOldDrafts } from '../utils/cleanupDrafts';
 
@@ -54,6 +59,10 @@ const responseChoiceTextStyle = {
   textAlign: 'left',
   lineHeight: 1.5,
 };
+
+function getNormalizedQuestionType(question = {}) {
+  return normalizeQuestionType(question?.type);
+}
 
 function SurveyTableBlocks({ tableBlocks = [] }) {
   const visibleBlocks = Array.isArray(tableBlocks)
@@ -131,6 +140,7 @@ function SurveyResponsePage() {
   const [draftChoiceVisible, setDraftChoiceVisible] = useState(false);
   const [draftInitialized, setDraftInitialized] = useState(false);
   const [lastQuestionId, setLastQuestionId] = useState('');
+  const [renderedQuestionIds, setRenderedQuestionIds] = useState(() => new Set());
   const [autosaveState, setAutosaveState] = useState({
     status: 'idle',
     savedAt: null,
@@ -367,14 +377,15 @@ function SurveyResponsePage() {
 
   const resolveAnswer = (question, index) => {
     const questionKey = getQuestionKey(question, index);
+    const normalizedType = getNormalizedQuestionType(question);
     const rawAnswer = answers[questionKey];
     const otherValue = otherInputs[questionKey]?.trim() ?? '';
 
-    if (question.type === QUESTION_TYPES.CONSENT_CHECKBOX) {
+    if (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX) {
       return Boolean(rawAnswer);
     }
 
-    if (question.type === QUESTION_TYPES.MULTIPLE_CHOICE) {
+    if (normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE) {
       const selectedValues = Array.isArray(rawAnswer) ? rawAnswer : [];
       const valuesWithoutOther = selectedValues.filter((value) => value !== OTHER_OPTION_VALUE);
 
@@ -386,8 +397,8 @@ function SurveyResponsePage() {
     }
 
     if (
-      (question.type === QUESTION_TYPES.SINGLE_CHOICE ||
-        question.type === QUESTION_TYPES.DROPDOWN) &&
+      (normalizedType === QUESTION_TYPES.SINGLE_CHOICE ||
+        normalizedType === QUESTION_TYPES.DROPDOWN) &&
       rawAnswer === OTHER_OPTION_VALUE
     ) {
       return otherValue;
@@ -407,22 +418,44 @@ function SurveyResponsePage() {
   }, [answers, otherInputs, survey]);
 
   const responseMode = useMemo(() => getResponseMode(survey), [survey]);
+  const normalizedSurveyStructure = useMemo(
+    () => normalizeQuestionsAndSections(survey),
+    [survey],
+  );
   const visibleFlow = useMemo(
     () => buildVisibleQuestionFlow({ survey, answers: resolvedAnswersByQuestionId }),
     [resolvedAnswersByQuestionId, survey],
   );
   const activeQuestions = visibleFlow.visibleQuestions ?? [];
-  const visibleQuestions = activeQuestions.filter(
+  const isRenderableQuestion = useCallback(
     (question) =>
-      question.type !== QUESTION_TYPES.CONSENT_CHECKBOX &&
+      Boolean(question?.id) &&
+      question.meta?.consentTemplate !== 'base' &&
+      !isNonResponseQuestionType(getNormalizedQuestionType(question)),
+    [],
+  );
+  const allRenderableQuestions = useMemo(
+    () => (normalizedSurveyStructure.questions ?? []).filter((question) => isRenderableQuestion(question)),
+    [isRenderableQuestion, normalizedSurveyStructure.questions],
+  );
+  const displayQuestions = useMemo(() => {
+    const activeQuestionIds = new Set(activeQuestions.map((question) => question.id));
+    return [
+      ...activeQuestions,
+      ...allRenderableQuestions.filter((question) => !activeQuestionIds.has(question.id)),
+    ];
+  }, [activeQuestions, allRenderableQuestions]);
+  const visibleQuestions = displayQuestions.filter(
+    (question) =>
+      getNormalizedQuestionType(question) !== QUESTION_TYPES.CONSENT_CHECKBOX &&
       question.meta?.consentTemplate !== 'base',
   );
-  const consentQuestions = activeQuestions.filter(
+  const consentQuestions = displayQuestions.filter(
     (question) =>
-      question.type === QUESTION_TYPES.CONSENT_CHECKBOX &&
+      getNormalizedQuestionType(question) === QUESTION_TYPES.CONSENT_CHECKBOX &&
       question.meta?.consentTemplate !== 'base',
   );
-  const consentInfoBlocks = activeQuestions.filter(
+  const consentInfoBlocks = displayQuestions.filter(
     (question) => question.meta?.consentTemplate === 'base',
   );
   const visibleSections = visibleFlow.visibleSections ?? [];
@@ -431,22 +464,39 @@ function SurveyResponsePage() {
     () => new Map(activeQuestions.map((question) => [question.id, question])),
     [activeQuestions],
   );
-  const isRenderableQuestion = useCallback(
-    (question) =>
-      Boolean(question?.id) &&
-      question.meta?.consentTemplate !== 'base' &&
-      !isNonResponseQuestionType(question.type),
-    [],
-  );
   const groupedSections = useMemo(() => {
+    const appendUngroupedRenderableQuestions = (sectionsToCheck) => {
+      const includedQuestionIds = new Set(
+        sectionsToCheck.flatMap((section) => (section.questions ?? []).map((question) => question.id)),
+      );
+      const missingQuestions = allRenderableQuestions.filter(
+        (question) => !includedQuestionIds.has(question.id),
+      );
+
+      if (missingQuestions.length === 0) {
+        return sectionsToCheck;
+      }
+
+      return [
+        ...sectionsToCheck,
+        {
+          id: 'unclassified-renderable-questions',
+          title: '미분류 질문',
+          description: '페이지 정보가 맞지 않아 자동으로 모은 질문입니다.',
+          questions: missingQuestions,
+          pageEndAction: 'next',
+        },
+      ];
+    };
+
     if (responseMode !== 'paged') {
-      return flowGroupedSections;
+      return appendUngroupedRenderableQuestions(flowGroupedSections);
     }
 
     const sectionQuestionMap = visibleFlow.sectionToQuestionIdsMap;
 
     if (!sectionQuestionMap || visibleSections.length === 0) {
-      return flowGroupedSections;
+      return appendUngroupedRenderableQuestions(flowGroupedSections);
     }
 
     const sectionsByWholeOrder = visibleSections.map((section) => {
@@ -460,8 +510,11 @@ function SurveyResponsePage() {
       };
     }).filter((section) => section.questions.length > 0);
 
-    return sectionsByWholeOrder.length > 0 ? sectionsByWholeOrder : flowGroupedSections;
+    return appendUngroupedRenderableQuestions(
+      sectionsByWholeOrder.length > 0 ? sectionsByWholeOrder : flowGroupedSections,
+    );
   }, [
+    allRenderableQuestions,
     flowGroupedSections,
     questionById,
     responseMode,
@@ -530,7 +583,7 @@ function SurveyResponsePage() {
     responseMode !== 'paged' || (isLastReachableSection && !visibleFlow.termination);
   const responseQuestions = responseMode === 'paged'
     ? groupedSections.flatMap((section) => section.questions ?? [])
-    : activeQuestions;
+    : displayQuestions;
   const responseQuestionKeys = useMemo(
     () =>
       new Set(
@@ -546,21 +599,119 @@ function SurveyResponsePage() {
   const currentSectionQuestions = currentSection?.questions ?? [];
   const currentVisibleQuestions = currentSectionQuestions.filter(
     (question) =>
-      question.type !== QUESTION_TYPES.CONSENT_CHECKBOX &&
+      getNormalizedQuestionType(question) !== QUESTION_TYPES.CONSENT_CHECKBOX &&
       question.meta?.consentTemplate !== 'base',
   );
   const currentConsentQuestions = currentSectionQuestions.filter(
     (question) =>
-      question.type === QUESTION_TYPES.CONSENT_CHECKBOX &&
+      getNormalizedQuestionType(question) === QUESTION_TYPES.CONSENT_CHECKBOX &&
       question.meta?.consentTemplate !== 'base',
   );
   const currentConsentInfoBlocks = currentSectionQuestions.filter(
     (question) => question.meta?.consentTemplate === 'base',
   );
+  const currentlyRenderedQuestions = responseMode === 'paged'
+    ? currentSectionQuestions.filter((question) => isRenderableQuestion(question))
+    : displayQuestions.filter((question) => isRenderableQuestion(question));
+  const unvisitedRenderableQuestions = allRenderableQuestions.filter(
+    (question) => !renderedQuestionIds.has(question.id),
+  );
   const progressPercent =
     responseMode === 'paged' && groupedSections.length > 0
       ? ((currentSectionSafeIndex + 1) / groupedSections.length) * 100
       : 0;
+
+  useEffect(() => {
+    if (currentlyRenderedQuestions.length === 0) {
+      return;
+    }
+
+    setRenderedQuestionIds((current) => {
+      const nextIds = new Set(current);
+      currentlyRenderedQuestions.forEach((question) => {
+        nextIds.add(question.id);
+      });
+      return nextIds.size === current.size ? current : nextIds;
+    });
+  }, [currentlyRenderedQuestions]);
+
+  useEffect(() => {
+    if (!survey?.id || submitted) {
+      return;
+    }
+
+    const rawQuestions = (survey.questions ?? []).map((question, index) => ({
+      index,
+      id: question.id,
+      title: question.title,
+      type: question.type,
+      normalizedType: getNormalizedQuestionType(question),
+      required: Boolean(question.required),
+      sectionId: question.sectionId,
+      pageId: question.pageId,
+      pageKey: question.pageKey,
+      sectionKey: question.sectionKey,
+      order: question.order ?? question.sortOrder ?? question.index ?? index,
+    }));
+    const rawSections = (survey.sections ?? []).map((section, index) => ({
+      index,
+      id: section.id,
+      title: section.title,
+      pageId: section.pageId,
+      pageKey: section.pageKey,
+      sectionKey: section.sectionKey ?? section.key,
+      order: section.order ?? section.sortOrder ?? index,
+    }));
+    const normalizedQuestions = (normalizedSurveyStructure.questions ?? []).map((question, index) => ({
+      index,
+      id: question.id,
+      title: question.title,
+      type: question.type,
+      required: Boolean(question.required),
+      sectionId: question.sectionId,
+      pageId: question.pageId,
+      pageKey: question.pageKey,
+      sectionKey: question.sectionKey,
+      order: question.order ?? question.sortOrder ?? question.index ?? index,
+    }));
+
+    console.groupCollapsed(`[SurveyResponseDebug] ${survey.title || survey.id}`);
+    console.log('survey', { id: survey.id, title: survey.title });
+    console.table(rawQuestions);
+    console.table(rawSections);
+    console.table(normalizedQuestions);
+    console.log('groupedSections', groupedSections.map((section, index) => ({
+      index,
+      id: section.id,
+      title: section.title,
+      questionIds: (section.questions ?? []).map((question) => question.id),
+      questionTypes: (section.questions ?? []).map((question) => question.type),
+    })));
+    console.log('flow', {
+      visibleQuestionIds: visibleFlow.visibleQuestionIds,
+      currentSectionIndex,
+      currentSectionSafeIndex,
+      isLastSection: isLastReachableSection,
+      nextSectionIndex: nextQuestionSectionIndex,
+      allRenderableQuestionIds: allRenderableQuestions.map((question) => question.id),
+      renderedQuestionIds: [...renderedQuestionIds],
+      unvisitedQuestionIds: unvisitedRenderableQuestions.map((question) => question.id),
+    });
+    console.groupEnd();
+  }, [
+    allRenderableQuestions,
+    currentSectionIndex,
+    currentSectionSafeIndex,
+    groupedSections,
+    isLastReachableSection,
+    nextQuestionSectionIndex,
+    normalizedSurveyStructure.questions,
+    renderedQuestionIds,
+    submitted,
+    survey,
+    unvisitedRenderableQuestions,
+    visibleFlow.visibleQuestionIds,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !survey?.id) {
@@ -829,6 +980,10 @@ function SurveyResponsePage() {
     );
   }, [groupedSections.length, responseMode]);
 
+  useEffect(() => {
+    setRenderedQuestionIds(new Set());
+  }, [survey?.id]);
+
   const renderTextBlocks = (value) =>
     String(value ?? '')
       .split('\n')
@@ -855,7 +1010,9 @@ function SurveyResponsePage() {
     const nextErrors = {};
 
     questionsToValidate.forEach((question) => {
-      if (isNonResponseQuestionType(question.type) || question.meta?.consentTemplate === 'base') {
+      const normalizedType = getNormalizedQuestionType(question);
+
+      if (isNonResponseQuestionType(normalizedType) || question.meta?.consentTemplate === 'base') {
         return;
       }
 
@@ -868,7 +1025,7 @@ function SurveyResponsePage() {
         return;
       }
 
-      if (question.type === QUESTION_TYPES.CONSENT_CHECKBOX && resolvedAnswer !== true) {
+      if (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX && resolvedAnswer !== true) {
         nextErrors[questionKey] = '개인정보 수집 및 이용에 동의해야 제출할 수 있습니다.';
         return;
       }
@@ -879,7 +1036,7 @@ function SurveyResponsePage() {
       }
 
       if (
-        question.type === QUESTION_TYPES.EMAIL &&
+        normalizedType === QUESTION_TYPES.EMAIL &&
         String(resolvedAnswer ?? '').trim() &&
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(resolvedAnswer))
       ) {
@@ -887,7 +1044,7 @@ function SurveyResponsePage() {
       }
 
       if (
-        question.type === QUESTION_TYPES.PHONE &&
+        normalizedType === QUESTION_TYPES.PHONE &&
         String(resolvedAnswer ?? '').trim() &&
         !/^[0-9+\-\s()]{8,20}$/.test(String(resolvedAnswer))
       ) {
@@ -918,15 +1075,16 @@ function SurveyResponsePage() {
 
   const renderQuestionInput = (question, index) => {
     const questionKey = getQuestionKey(question, index);
+    const normalizedType = getNormalizedQuestionType(question);
     const value = answers[questionKey];
     const optionItems = getQuestionOptionItems(question, survey?.optionQuotaCounts);
     const legacyConsentQuestion = Boolean(question.meta?.consentApproval);
 
-    if (question.type === QUESTION_TYPES.DESCRIPTION_BLOCK) {
+    if (normalizedType === QUESTION_TYPES.DESCRIPTION_BLOCK) {
       return <div className="inline-note">{question.description || '안내 내용을 입력해주세요.'}</div>;
     }
 
-    if (question.type === QUESTION_TYPES.SECTION_TITLE) {
+    if (normalizedType === QUESTION_TYPES.SECTION_TITLE) {
       return (
         <div className="section-block">
           <strong>{question.title}</strong>
@@ -952,7 +1110,7 @@ function SurveyResponsePage() {
       );
     }
 
-    switch (question.type) {
+    switch (normalizedType) {
       case QUESTION_TYPES.LONG_TEXT:
         return (
           <textarea
@@ -1264,6 +1422,24 @@ function SurveyResponsePage() {
     scrollToTop();
   };
 
+  const moveToQuestionSection = (questionId) => {
+    if (responseMode !== 'paged') {
+      return false;
+    }
+
+    const targetSectionIndex = groupedSections.findIndex((section) =>
+      (section.questions ?? []).some((question) => question.id === questionId),
+    );
+
+    if (targetSectionIndex >= 0) {
+      setCurrentSectionIndex(targetSectionIndex);
+      scrollToTop();
+      return true;
+    }
+
+    return false;
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -1302,6 +1478,40 @@ function SurveyResponsePage() {
       return;
     }
 
+    const unvisitedQuestions = allRenderableQuestions.filter(
+      (question) => !renderedQuestionIds.has(question.id),
+    );
+
+    if (unvisitedQuestions.length > 0) {
+      console.warn('[BLOCK_SUBMIT_UNVISITED_QUESTIONS]', {
+        surveyId: survey.id,
+        currentSectionIndex,
+        unvisitedQuestions: unvisitedQuestions.map((question) => ({
+          id: question.id,
+          title: question.title,
+          type: question.type,
+          normalizedType: getNormalizedQuestionType(question),
+          required: Boolean(question.required),
+          sectionId: question.sectionId,
+          pageId: question.pageId,
+          pageKey: question.pageKey,
+          sectionKey: question.sectionKey,
+        })),
+        groupedSections: groupedSections.map((section, index) => ({
+          index,
+          id: section.id,
+          title: section.title,
+          questionIds: (section.questions ?? []).map((question) => question.id),
+        })),
+      });
+
+      moveToQuestionSection(unvisitedQuestions[0].id);
+      setMessage('아직 표시되지 않은 문항이 있습니다. 다음 문항을 확인해주세요.');
+      setSubmitting(false);
+      submitLockedRef.current = false;
+      return;
+    }
+
     if (!canSubmitCurrentPage) {
       if (import.meta.env.DEV) {
         console.warn('[handleSubmit] canSubmitCurrentPage=false → 제출 차단', {
@@ -1333,12 +1543,13 @@ function SurveyResponsePage() {
     const requiredQuestions = submitQuestions.filter((question) => question.required);
     const payloadAnswers = submitQuestions.map((question) => {
       const questionIndex = getQuestionIndex(question);
+      const normalizedType = getNormalizedQuestionType(question);
 
       return {
         questionId: question.id || getQuestionKey(question, questionIndex),
         questionTitle: question.title,
         questionDescription: question.description ?? '',
-        questionType: question.type,
+        questionType: normalizedType,
         answer: resolveAnswer(question, questionIndex),
       };
     });
@@ -1462,6 +1673,7 @@ function SurveyResponsePage() {
   const renderQuestionField = (question) => {
     const index = survey.questions.findIndex((item) => item.id === question.id);
     const questionKey = getQuestionKey(question, index);
+    const normalizedType = getNormalizedQuestionType(question);
     const displayInfo = questionDisplayMap[question.id] ?? null;
     const titleWithNumber = (
       <span className="response-question-title">
@@ -1473,7 +1685,7 @@ function SurveyResponsePage() {
       </span>
     );
 
-    if (question.type === QUESTION_TYPES.CONSENT_CHECKBOX || question.meta?.consentApproval) {
+    if (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX || question.meta?.consentApproval) {
       return (
         <div className="field consent-field" key={`${survey.id}-${questionKey}`}>
           {titleWithNumber}
@@ -1484,7 +1696,7 @@ function SurveyResponsePage() {
       );
     }
 
-    if (isNonResponseQuestionType(question.type)) {
+    if (isNonResponseQuestionType(normalizedType)) {
       return (
         <div className="field" key={`${survey.id}-${questionKey}`}>
           {renderQuestionInput(question, index)}
@@ -1498,7 +1710,7 @@ function SurveyResponsePage() {
         {question.description && (
           <small>{question.description}</small>
         )}
-        {isScaleQuestionType(question.type) && (
+        {isScaleQuestionType(normalizedType) && (
           <small>
             {getScaleQuestionConfig(question)?.min}점부터 {getScaleQuestionConfig(question)?.max}점까지
             선택해주세요.
@@ -1722,6 +1934,12 @@ function SurveyResponsePage() {
           )}
 
           {message && <div className="form-message">{message}</div>}
+
+          <div className="inline-note response-debug-panel">
+            전체 질문 {survey.questions?.length ?? 0}개 · 표시 대상 {allRenderableQuestions.length}개 ·
+            현재 페이지 {currentlyRenderedQuestions.length}개 · 남은 질문 {unvisitedRenderableQuestions.length}개 ·
+            마지막 페이지 {isLastReachableSection ? '예' : '아니오'}
+          </div>
 
           {responseMode === 'paged' ? (
             <div className="response-navigation-row">

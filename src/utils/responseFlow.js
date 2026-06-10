@@ -4,6 +4,7 @@ import {
   CONDITION_OPERATORS,
   isAnswerEmpty,
   isNonResponseQuestionType,
+  normalizeQuestionType,
 } from '../firebase/surveys';
 
 const DEFAULT_SECTION_ID = 'default-section';
@@ -118,6 +119,7 @@ export function normalizeQuestionsAndSections(survey = {}) {
   const questions = rawQuestions.map((question, index) => ({
     ...question,
     id: normalizeQuestionId(question, index),
+    type: normalizeQuestionType(question?.type),
   }));
   const pageBreaks = Array.isArray(safeSurvey.pageBreaks) ? safeSurvey.pageBreaks : [];
   const rawSections = Array.isArray(safeSurvey.sections) ? safeSurvey.sections : [];
@@ -153,6 +155,9 @@ export function normalizeQuestionsAndSections(survey = {}) {
   const sections = hasSections
     ? normalizedRawSections.map((section, index) => ({
         id: normalizeSectionId(section, index),
+        key: section.key ?? '',
+        pageId: section.pageId ?? '',
+        pageKey: section.pageKey ?? '',
         title: section.title || `섹션 ${index + 1}`,
         description: section.description ?? '',
         questionIds: Array.isArray(section.questionIds) ? section.questionIds : [],
@@ -176,13 +181,31 @@ export function normalizeQuestionsAndSections(survey = {}) {
 
   const fallbackSectionId = sections[0]?.id ?? DEFAULT_SECTION_ID;
   const sectionIds = new Set(sections.map((section) => section.id));
+  const sectionAliasToId = sections.reduce((result, section) => {
+    [section.id, section.key, section.pageId, section.pageKey].forEach((alias) => {
+      if (alias) {
+        result.set(alias, section.id);
+      }
+    });
+
+    return result;
+  }, new Map());
   const sectionOrder = sections.map((section) => section.id);
 
   // 1차: valid sectionId면 유지, invalid이면 null 표시
-  const questionsWithNullFallback = questions.map((question) => ({
-    ...question,
-    sectionId: sectionIds.has(question.sectionId) ? question.sectionId : null,
-  }));
+  const questionsWithNullFallback = questions.map((question) => {
+    const resolvedSectionId =
+      sectionAliasToId.get(question.sectionId) ??
+      sectionAliasToId.get(question.pageId) ??
+      sectionAliasToId.get(question.sectionKey) ??
+      sectionAliasToId.get(question.pageKey) ??
+      null;
+
+    return {
+      ...question,
+      sectionId: sectionIds.has(resolvedSectionId) ? resolvedSectionId : null,
+    };
+  });
 
   // 2차: null인 질문 → 순서 기반 fallback (앞 질문의 section 이후 빈 section에 배정)
   const assignedSectionIds = new Set(

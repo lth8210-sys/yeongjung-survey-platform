@@ -127,22 +127,46 @@ export const QUESTION_TYPES = {
 
 const QUESTION_TYPE_ALIASES = {
   short_text: QUESTION_TYPES.SHORT_TEXT,
+  short: QUESTION_TYPES.SHORT_TEXT,
+  text: QUESTION_TYPES.SHORT_TEXT,
+  input: QUESTION_TYPES.SHORT_TEXT,
+  subjective_short: QUESTION_TYPES.SHORT_TEXT,
   long_text: QUESTION_TYPES.LONG_TEXT,
+  long: QUESTION_TYPES.LONG_TEXT,
+  textarea: QUESTION_TYPES.LONG_TEXT,
+  paragraph: QUESTION_TYPES.LONG_TEXT,
+  subjective: QUESTION_TYPES.LONG_TEXT,
+  subjective_long: QUESTION_TYPES.LONG_TEXT,
   email: QUESTION_TYPES.EMAIL,
   phone: QUESTION_TYPES.PHONE,
   date: QUESTION_TYPES.DATE,
   time: QUESTION_TYPES.TIME,
   number: QUESTION_TYPES.NUMBER,
   linear_scale: QUESTION_TYPES.LINEAR_SCALE,
+  scale: QUESTION_TYPES.LINEAR_SCALE,
   rating_scale: QUESTION_TYPES.RATING_SCALE,
+  rating: QUESTION_TYPES.RATING_SCALE,
   nps_scale: QUESTION_TYPES.NPS_SCALE,
+  nps: QUESTION_TYPES.NPS_SCALE,
   single_choice: QUESTION_TYPES.SINGLE_CHOICE,
+  radio: QUESTION_TYPES.SINGLE_CHOICE,
+  choice: QUESTION_TYPES.SINGLE_CHOICE,
   multiple_choice: QUESTION_TYPES.MULTIPLE_CHOICE,
+  checkbox: QUESTION_TYPES.MULTIPLE_CHOICE,
+  checkboxes: QUESTION_TYPES.MULTIPLE_CHOICE,
   dropdown: QUESTION_TYPES.DROPDOWN,
+  select: QUESTION_TYPES.DROPDOWN,
   application_slot_choice: QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
+  application_slot: QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
+  slot: QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
   consent_checkbox: QUESTION_TYPES.CONSENT_CHECKBOX,
+  consent: QUESTION_TYPES.CONSENT_CHECKBOX,
+  privacy_consent: QUESTION_TYPES.CONSENT_CHECKBOX,
   description_block: QUESTION_TYPES.DESCRIPTION_BLOCK,
+  description: QUESTION_TYPES.DESCRIPTION_BLOCK,
+  안내문: QUESTION_TYPES.DESCRIPTION_BLOCK,
   section_title: QUESTION_TYPES.SECTION_TITLE,
+  section: QUESTION_TYPES.SECTION_TITLE,
 };
 
 export const SELECTABLE_QUESTION_TYPES = new Set([
@@ -1119,6 +1143,9 @@ export function normalizeQuestion(question = {}) {
     validation:
       question.validation && typeof question.validation === 'object' ? question.validation : {},
     sectionId: question.sectionId?.trim?.() ?? '',
+    sectionKey: question.sectionKey?.trim?.() ?? '',
+    pageId: question.pageId?.trim?.() ?? '',
+    pageKey: question.pageKey?.trim?.() ?? '',
     settings: isScaleQuestionType(type)
       ? normalizeScaleSettings(question, type)
       : question.settings && typeof question.settings === 'object'
@@ -1186,6 +1213,9 @@ export function normalizeSurveySection(section = {}, index = 0) {
       typeof section.id === 'string' && section.id.trim()
         ? section.id.trim()
         : fallbackSection.id,
+    key: section.key?.trim?.() ?? '',
+    pageId: section.pageId?.trim?.() ?? '',
+    pageKey: section.pageKey?.trim?.() ?? '',
     title:
       typeof section.title === 'string'
         ? section.title.trim()
@@ -1239,12 +1269,30 @@ export function alignQuestionsToSections(questions = [], sections = []) {
   const normalizedQuestions = normalizeQuestions(questions);
   const normalizedSections = normalizeSurveySections(sections, normalizedQuestions);
   const validSectionIds = new Set(normalizedSections.map((section) => section.id));
+  const sectionAliasToId = normalizedSections.reduce((result, section) => {
+    [section.id, section.key, section.pageId, section.pageKey].forEach((alias) => {
+      if (alias) {
+        result.set(alias, section.id);
+      }
+    });
+
+    return result;
+  }, new Map());
   const defaultSectionId = normalizedSections[0]?.id ?? '';
 
-  return normalizedQuestions.map((question) => ({
-    ...question,
-    sectionId: validSectionIds.has(question.sectionId) ? question.sectionId : defaultSectionId,
-  }));
+  return normalizedQuestions.map((question) => {
+    const resolvedSectionId =
+      sectionAliasToId.get(question.sectionId) ??
+      sectionAliasToId.get(question.pageId) ??
+      sectionAliasToId.get(question.sectionKey) ??
+      sectionAliasToId.get(question.pageKey) ??
+      '';
+
+    return {
+      ...question,
+      sectionId: validSectionIds.has(resolvedSectionId) ? resolvedSectionId : defaultSectionId,
+    };
+  });
 }
 
 // ─── 개인정보 탐지 ─────────────────────────────────────────────────────────
