@@ -89,6 +89,17 @@ firebase deploy
 
 배포 전에는 Firebase Console의 `Firestore Database > Rules` 화면과 로컬 `firestore.rules` 내용을 비교하고, 배포 후에는 관리자 계정과 일반 계정으로 권한 동작을 각각 테스트하는 것을 권장합니다.
 
+## 운영 문서
+
+운영 상태, 구조, 응답 흐름, 배포 절차, 기술부채, AI 협업 인수인계는 `ai/` 폴더에서 관리합니다.
+
+- [현재 상태](./ai/CURRENT_STATUS.md)
+- [아키텍처](./ai/ARCHITECTURE.md)
+- [응답 흐름](./ai/RESPONSE_FLOW.md)
+- [운영 및 배포](./ai/OPERATIONS.md)
+- [기술부채](./ai/TECH_DEBT.md)
+- [AI 인수인계](./ai/AI_HANDOFF.md)
+
 ## 관리자 화면
 
 - `/admin`: 운영 요약 대시보드
