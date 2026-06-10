@@ -8,31 +8,35 @@ import { useAuth } from '../contexts/AuthContext';
 import { FORM_TEMPLATES } from '../data/formTemplates';
 import {
   alignQuestionsToSections,
-  BRANCH_ACTIONS,
-  createSectionId,
-  createQuestionId,
   createSurvey,
   fetchResponseCountBySurveyId,
   fetchSurveyById,
-  FORM_TYPES,
-  FORM_TYPE_CONFIGS,
   getFirestoreErrorMessage,
   isApplicationFormType,
-  isSelectableQuestionType,
-  normalizeQuestions,
   normalizeSurveyConfiguration,
   normalizeSurveySections,
   normalizeSurveyStatus,
   normalizeMaxResponses,
-  QUESTION_TYPES,
   sanitizeSurveyQuestions,
   sanitizeSurveySections,
   supportsBranchingFormType,
-  SURVEY_STATUSES,
   updateSurvey,
   validatePrivacyConsent,
   waitForSurveyById,
 } from '../firebase/surveys';
+import {
+  BRANCH_ACTIONS,
+  FORM_TYPE_CONFIGS,
+  FORM_TYPES,
+  QUESTION_TYPES,
+  SURVEY_STATUSES,
+} from '../firebase/surveyConstants';
+import {
+  createQuestionId,
+  createSectionId,
+  isSelectableQuestionType,
+  normalizeQuestions,
+} from '../firebase/surveyNormalize';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
 
 const createEmptyQuestion = () => ({

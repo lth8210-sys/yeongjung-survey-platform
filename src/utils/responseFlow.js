@@ -2,10 +2,12 @@ import {
   BRANCH_ACTIONS,
   CONDITION_COMBINATORS,
   CONDITION_OPERATORS,
+} from '../firebase/surveyConstants';
+import {
   isAnswerEmpty,
   isNonResponseQuestionType,
   normalizeQuestionType,
-} from '../firebase/surveys';
+} from '../firebase/surveyNormalize';
 
 const DEFAULT_SECTION_ID = 'default-section';
 

@@ -19,9 +19,72 @@ import {
 } from 'firebase/firestore';
 import { db, getFirebaseStatusMessage, isFirebaseConfigured } from './config';
 import {
+  BRANCH_ACTIONS,
+  CONDITION_COMBINATORS,
+  CONDITION_OPERATORS,
+  FORM_TYPE_CONFIGS,
+  FORM_TYPES,
+  OTHER_OPTION_VALUE,
+  QUESTION_TYPES,
+  RESPONSE_PROCESSING_STATUSES,
+  RESPONSE_STATUSES,
+  SURVEY_STATUSES,
+} from './surveyConstants';
+import {
+  createConditionId,
+  createSectionId,
+  getScaleQuestionConfig,
+  isAnswerEmpty,
+  isNonResponseQuestionType,
+  isScaleQuestionType,
+  isSelectableQuestionType,
+  normalizeBranchAction,
+  normalizeBranching,
+  normalizeConditionCombinator,
+  normalizeConditionOperator,
+  normalizeQuestion,
+  normalizeQuestions,
+  normalizeQuestionType,
+  sanitizeQuestionOptions,
+  supportsPlaceholder,
+} from './surveyNormalize';
+import {
   canManageAllSurveys,
   USER_ROLES,
 } from './users';
+
+export {
+  BRANCH_ACTIONS,
+  CONDITION_COMBINATORS,
+  CONDITION_OPERATORS,
+  FORM_TYPE_CONFIGS,
+  FORM_TYPES,
+  OTHER_OPTION_VALUE,
+  QUESTION_TYPES,
+  RESPONSE_PROCESSING_STATUSES,
+  RESPONSE_STATUSES,
+  SURVEY_STATUSES,
+} from './surveyConstants';
+export {
+  createBranchRuleId,
+  createConditionId,
+  createQuestionId,
+  createSectionId,
+  getScaleQuestionConfig,
+  isAnswerEmpty,
+  isNonResponseQuestionType,
+  isScaleQuestionType,
+  isSelectableQuestionType,
+  normalizeBranchAction,
+  normalizeBranching,
+  normalizeConditionCombinator,
+  normalizeConditionOperator,
+  normalizeQuestion,
+  normalizeQuestions,
+  normalizeQuestionType,
+  sanitizeQuestionOptions,
+  supportsPlaceholder,
+} from './surveyNormalize';
 
 function ensureFirestoreReady() {
   if (!isFirebaseConfigured || !db) {
@@ -34,196 +97,7 @@ const responsesCollection = db ? collection(db, 'responses') : null;
 const draftResponsesCollection = db ? collection(db, 'draftResponses') : null;
 const auditLogsCollection = db ? collection(db, 'audit_logs') : null;
 
-export const SURVEY_STATUSES = {
-  DRAFT: 'draft',
-  PUBLISHED: 'published',
-  CLOSED: 'closed',
-  DELETED: 'deleted',
-};
-
 const LEGACY_PUBLISHED_STATUSES = ['active'];
-
-export const FORM_TYPES = {
-  TARGETED_SURVEY: 'targeted_survey',
-  GENERAL_SURVEY: 'general_survey',
-  TARGETED_PARTICIPATION_APPLICATION: 'targeted_participation_application',
-  GENERAL_APPLICATION: 'general_application',
-};
-
-export const FORM_TYPE_CONFIGS = {
-  [FORM_TYPES.TARGETED_SURVEY]: {
-    label: '특정 설문형',
-    description: '특정 대상이나 상황에 맞춘 조사입니다. 분기 확장이 필요한 유형입니다.',
-    defaults: {
-      branchingEnabled: true,
-      quotaEnabled: false,
-      duplicateCheckEnabled: false,
-      slotDuplicateCheckEnabled: false,
-      oneSlotPerPersonEnabled: false,
-      applicantListView: false,
-      processingStatusEnabled: false,
-    },
-  },
-  [FORM_TYPES.GENERAL_SURVEY]: {
-    label: '일반 설문형',
-    description: '만족도 조사, 의견수렴 등 분기 없는 보편형 설문입니다.',
-    defaults: {
-      branchingEnabled: false,
-      quotaEnabled: false,
-      duplicateCheckEnabled: false,
-      slotDuplicateCheckEnabled: false,
-      oneSlotPerPersonEnabled: false,
-      applicantListView: false,
-      processingStatusEnabled: false,
-    },
-  },
-  [FORM_TYPES.TARGETED_PARTICIPATION_APPLICATION]: {
-    label: '특정 참여신청형',
-    description: '대상에 따라 흐름이 달라질 수 있는 신청형입니다. 정원과 중복신청 방지가 중요합니다.',
-    defaults: {
-      branchingEnabled: true,
-      quotaEnabled: true,
-      duplicateCheckEnabled: true,
-      slotDuplicateCheckEnabled: true,
-      oneSlotPerPersonEnabled: true,
-      applicantListView: true,
-      processingStatusEnabled: true,
-    },
-  },
-  [FORM_TYPES.GENERAL_APPLICATION]: {
-    label: '일반 신청형',
-    description: '일반적인 접수/신청서 형태입니다. 명단과 처리상태 관리가 중요합니다.',
-    defaults: {
-      branchingEnabled: false,
-      quotaEnabled: false,
-      duplicateCheckEnabled: true,
-      slotDuplicateCheckEnabled: true,
-      oneSlotPerPersonEnabled: true,
-      applicantListView: true,
-      processingStatusEnabled: true,
-    },
-  },
-};
-
-export const QUESTION_TYPES = {
-  SHORT_TEXT: 'shortText',
-  LONG_TEXT: 'longText',
-  EMAIL: 'email',
-  PHONE: 'phone',
-  DATE: 'date',
-  TIME: 'time',
-  NUMBER: 'number',
-  LINEAR_SCALE: 'linearScale',
-  RATING_SCALE: 'ratingScale',
-  NPS_SCALE: 'npsScale',
-  SINGLE_CHOICE: 'singleChoice',
-  MULTIPLE_CHOICE: 'multipleChoice',
-  DROPDOWN: 'dropdown',
-  APPLICATION_SLOT_CHOICE: 'applicationSlotChoice',
-  CONSENT_CHECKBOX: 'consentCheckbox',
-  DESCRIPTION_BLOCK: 'descriptionBlock',
-  SECTION_TITLE: 'sectionTitle',
-};
-
-const QUESTION_TYPE_ALIASES = {
-  short_text: QUESTION_TYPES.SHORT_TEXT,
-  short: QUESTION_TYPES.SHORT_TEXT,
-  text: QUESTION_TYPES.SHORT_TEXT,
-  input: QUESTION_TYPES.SHORT_TEXT,
-  subjective_short: QUESTION_TYPES.SHORT_TEXT,
-  long_text: QUESTION_TYPES.LONG_TEXT,
-  long: QUESTION_TYPES.LONG_TEXT,
-  textarea: QUESTION_TYPES.LONG_TEXT,
-  paragraph: QUESTION_TYPES.LONG_TEXT,
-  subjective: QUESTION_TYPES.LONG_TEXT,
-  subjective_long: QUESTION_TYPES.LONG_TEXT,
-  email: QUESTION_TYPES.EMAIL,
-  phone: QUESTION_TYPES.PHONE,
-  date: QUESTION_TYPES.DATE,
-  time: QUESTION_TYPES.TIME,
-  number: QUESTION_TYPES.NUMBER,
-  linear_scale: QUESTION_TYPES.LINEAR_SCALE,
-  scale: QUESTION_TYPES.LINEAR_SCALE,
-  rating_scale: QUESTION_TYPES.RATING_SCALE,
-  rating: QUESTION_TYPES.RATING_SCALE,
-  nps_scale: QUESTION_TYPES.NPS_SCALE,
-  nps: QUESTION_TYPES.NPS_SCALE,
-  single_choice: QUESTION_TYPES.SINGLE_CHOICE,
-  radio: QUESTION_TYPES.SINGLE_CHOICE,
-  choice: QUESTION_TYPES.SINGLE_CHOICE,
-  multiple_choice: QUESTION_TYPES.MULTIPLE_CHOICE,
-  checkbox: QUESTION_TYPES.MULTIPLE_CHOICE,
-  checkboxes: QUESTION_TYPES.MULTIPLE_CHOICE,
-  dropdown: QUESTION_TYPES.DROPDOWN,
-  select: QUESTION_TYPES.DROPDOWN,
-  application_slot_choice: QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
-  application_slot: QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
-  slot: QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
-  consent_checkbox: QUESTION_TYPES.CONSENT_CHECKBOX,
-  consent: QUESTION_TYPES.CONSENT_CHECKBOX,
-  privacy_consent: QUESTION_TYPES.CONSENT_CHECKBOX,
-  description_block: QUESTION_TYPES.DESCRIPTION_BLOCK,
-  description: QUESTION_TYPES.DESCRIPTION_BLOCK,
-  안내문: QUESTION_TYPES.DESCRIPTION_BLOCK,
-  section_title: QUESTION_TYPES.SECTION_TITLE,
-  section: QUESTION_TYPES.SECTION_TITLE,
-};
-
-export const SELECTABLE_QUESTION_TYPES = new Set([
-  QUESTION_TYPES.SINGLE_CHOICE,
-  QUESTION_TYPES.MULTIPLE_CHOICE,
-  QUESTION_TYPES.DROPDOWN,
-  QUESTION_TYPES.APPLICATION_SLOT_CHOICE,
-]);
-
-export const NON_RESPONSE_QUESTION_TYPES = new Set([
-  QUESTION_TYPES.DESCRIPTION_BLOCK,
-  QUESTION_TYPES.SECTION_TITLE,
-]);
-
-export const SCALE_QUESTION_TYPES = new Set([
-  QUESTION_TYPES.LINEAR_SCALE,
-  QUESTION_TYPES.RATING_SCALE,
-  QUESTION_TYPES.NPS_SCALE,
-]);
-
-export const OTHER_OPTION_VALUE = '__other__';
-export const BRANCH_ACTIONS = {
-  NEXT: 'next',
-  GO_TO: 'go_to',
-  END: 'end',
-};
-export const CONDITION_OPERATORS = {
-  EQUALS: 'equals',
-  NOT_EQUALS: 'not_equals',
-  INCLUDES: 'includes',
-  NOT_INCLUDES: 'not_includes',
-  IS_EMPTY: 'is_empty',
-  IS_NOT_EMPTY: 'is_not_empty',
-};
-export const CONDITION_COMBINATORS = {
-  AND: 'AND',
-  OR: 'OR',
-};
-
-export const RESPONSE_PROCESSING_STATUSES = {
-  RECEIVED: 'received',
-  REVIEWING: 'reviewing',
-  APPROVED: 'approved',
-  COMPLETED: 'completed',
-  REJECTED: 'rejected',
-  CANCELED: 'canceled',
-};
-
-export const RESPONSE_STATUSES = {
-  SUBMITTED: 'submitted',
-  IN_REVIEW: 'in_review',
-  APPROVED: 'approved',
-  COMPLETED: 'completed',
-  REJECTED: 'rejected',
-  CANCELLED: 'cancelled',
-  FOLLOW_UP: 'follow_up',
-};
 
 const TARGETED_FORM_TYPES = new Set([
   FORM_TYPES.TARGETED_SURVEY,
@@ -665,266 +539,6 @@ export function getPublicSurveyState(survey = {}, now = Date.now()) {
   };
 }
 
-export function normalizeQuestionType(type) {
-  if (Object.values(QUESTION_TYPES).includes(type)) {
-    return type;
-  }
-
-  if (typeof type === 'string' && QUESTION_TYPE_ALIASES[type]) {
-    return QUESTION_TYPE_ALIASES[type];
-  }
-
-  return QUESTION_TYPES.SHORT_TEXT;
-}
-
-export function isSelectableQuestionType(type) {
-  return SELECTABLE_QUESTION_TYPES.has(normalizeQuestionType(type));
-}
-
-export function isNonResponseQuestionType(type) {
-  return NON_RESPONSE_QUESTION_TYPES.has(normalizeQuestionType(type));
-}
-
-export function supportsPlaceholder(type) {
-  const normalizedType = normalizeQuestionType(type);
-  return [
-    QUESTION_TYPES.SHORT_TEXT,
-    QUESTION_TYPES.LONG_TEXT,
-    QUESTION_TYPES.EMAIL,
-    QUESTION_TYPES.PHONE,
-    QUESTION_TYPES.DATE,
-    QUESTION_TYPES.TIME,
-    QUESTION_TYPES.NUMBER,
-  ].includes(normalizedType);
-}
-
-export function isScaleQuestionType(type) {
-  return SCALE_QUESTION_TYPES.has(normalizeQuestionType(type));
-}
-
-export function createQuestionId() {
-  return createLocalId('question');
-}
-
-export function createBranchRuleId() {
-  return createLocalId('branch');
-}
-
-export function createSectionId() {
-  return createLocalId('section');
-}
-
-export function createConditionId() {
-  return createLocalId('condition');
-}
-
-export function normalizeBranchAction(action) {
-  if (Object.values(BRANCH_ACTIONS).includes(action)) {
-    return action;
-  }
-
-  return BRANCH_ACTIONS.NEXT;
-}
-
-export function normalizeConditionOperator(operator) {
-  if (Object.values(CONDITION_OPERATORS).includes(operator)) {
-    return operator;
-  }
-
-  return CONDITION_OPERATORS.EQUALS;
-}
-
-export function normalizeConditionCombinator(combinator) {
-  if (Object.values(CONDITION_COMBINATORS).includes(combinator)) {
-    return combinator;
-  }
-
-  return CONDITION_COMBINATORS.AND;
-}
-
-function normalizeQuestionId(id, index) {
-  if (typeof id === 'string' && id.trim()) {
-    return id.trim();
-  }
-
-  return `legacy-question-${index + 1}`;
-}
-
-export function normalizeBranching(branching = {}, question = {}, index = 0) {
-  const questionId = normalizeQuestionId(question.id, index);
-  const selectableType = isSelectableQuestionType(question.type);
-  const normalizedOptions = sanitizeQuestionOptions(question.options);
-  const availableOptionValues = new Set(normalizedOptions);
-
-  if (question.allowOther) {
-    availableOptionValues.add(OTHER_OPTION_VALUE);
-  }
-
-  if (!selectableType) {
-    return {
-      enabled: false,
-      rules: [],
-      fallbackAction: BRANCH_ACTIONS.NEXT,
-      fallbackTargetQuestionId: '',
-    };
-  }
-
-  const normalizedRules = Array.isArray(branching.rules)
-    ? branching.rules.reduce((result, rule) => {
-        const whenOption = rule?.whenOption?.trim?.() ?? '';
-
-        if (!availableOptionValues.has(whenOption)) {
-          return result;
-        }
-
-        result.push({
-          id:
-            typeof rule?.id === 'string' && rule.id.trim() ? rule.id.trim() : createBranchRuleId(),
-          whenOption,
-          action: normalizeBranchAction(rule?.action),
-          targetType:
-            rule?.targetType === 'page' || rule?.targetType === 'question'
-              ? rule.targetType
-              : normalizeBranchAction(rule?.action) === BRANCH_ACTIONS.GO_TO
-                ? 'question'
-                : '',
-          targetQuestionId:
-            normalizeBranchAction(rule?.action) === BRANCH_ACTIONS.GO_TO &&
-            typeof rule?.targetQuestionId === 'string'
-              ? rule.targetQuestionId.trim()
-              : '',
-        });
-
-        return result;
-      }, [])
-    : [];
-
-  return {
-    enabled: Boolean(branching.enabled) && normalizedRules.length > 0,
-    rules: normalizedRules,
-    fallbackAction: normalizeBranchAction(branching.fallbackAction),
-    fallbackTargetQuestionId:
-      normalizeBranchAction(branching.fallbackAction) === BRANCH_ACTIONS.GO_TO &&
-      typeof branching.fallbackTargetQuestionId === 'string'
-        ? branching.fallbackTargetQuestionId.trim()
-        : '',
-  };
-}
-
-export function sanitizeQuestionOptions(options) {
-  if (!Array.isArray(options)) {
-    return [];
-  }
-
-  return options
-    .map((option) => {
-      if (typeof option === 'string') {
-        return option.trim();
-      }
-
-      if (option && typeof option === 'object') {
-        return option.value?.trim?.() ?? option.label?.trim?.() ?? option.title?.trim?.() ?? '';
-      }
-
-      return '';
-    })
-    .filter(Boolean);
-}
-
-function normalizeQuestionTextField(primaryValue, secondaryValue) {
-  return primaryValue?.trim?.() ?? secondaryValue?.trim?.() ?? '';
-}
-
-function normalizeScaleBoundary(value, fallbackValue) {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) {
-    return fallbackValue;
-  }
-
-  return Math.floor(numericValue);
-}
-
-function normalizeScaleLabel(value) {
-  return typeof value === 'string' && value.trim() ? value.trim() : '';
-}
-
-function getScalePresetDefaults(type) {
-  const normalizedType = normalizeQuestionType(type);
-
-  if (normalizedType === QUESTION_TYPES.NPS_SCALE) {
-    return {
-      preset: 'nps10',
-      min: 0,
-      max: 10,
-      minLabel: '전혀 추천하지 않음',
-      maxLabel: '매우 추천함',
-    };
-  }
-
-  if (normalizedType === QUESTION_TYPES.RATING_SCALE) {
-    return {
-      preset: 'agreement7',
-      min: 1,
-      max: 7,
-      minLabel: '전혀 그렇지 않다',
-      maxLabel: '매우 그렇다',
-    };
-  }
-
-  return {
-    preset: 'satisfaction5',
-    min: 1,
-    max: 5,
-    minLabel: '전혀 만족하지 않음',
-    maxLabel: '매우 만족',
-  };
-}
-
-function normalizeScaleSettings(question = {}, type) {
-  const defaults = getScalePresetDefaults(type);
-  const rawSettings =
-    question.settings && typeof question.settings === 'object' && !Array.isArray(question.settings)
-      ? question.settings
-      : {};
-
-  const nextSettings = {
-    preset:
-      typeof rawSettings.preset === 'string' && rawSettings.preset.trim()
-        ? rawSettings.preset.trim()
-        : defaults.preset,
-    min: normalizeScaleBoundary(rawSettings.min, defaults.min),
-    max: normalizeScaleBoundary(rawSettings.max, defaults.max),
-    minLabel: normalizeScaleLabel(rawSettings.minLabel) || defaults.minLabel,
-    maxLabel: normalizeScaleLabel(rawSettings.maxLabel) || defaults.maxLabel,
-  };
-
-  if (nextSettings.max <= nextSettings.min) {
-    nextSettings.max = nextSettings.min + 1;
-  }
-
-  return nextSettings;
-}
-
-export function getScaleQuestionConfig(question = {}) {
-  const normalizedQuestion = normalizeQuestion(question);
-
-  if (!isScaleQuestionType(normalizedQuestion.type)) {
-    return null;
-  }
-
-  const { min, max, minLabel, maxLabel, preset } = normalizedQuestion.settings ?? {};
-
-  return {
-    preset,
-    min,
-    max,
-    minLabel,
-    maxLabel,
-    values: Array.from({ length: max - min + 1 }, (_, index) => min + index),
-  };
-}
-
 export function formatScaleAnswer(answer, question = {}) {
   const scaleConfig = getScaleQuestionConfig(question);
   const normalizedAnswer = String(answer ?? '').trim();
@@ -1010,48 +624,6 @@ export function normalizeOptionQuotaCounts(optionQuotaCounts = {}) {
   }, {});
 }
 
-function normalizeQuestionOptionSettings(question = {}, normalizedOptions = []) {
-  const rawSettings =
-    question.optionSettings && typeof question.optionSettings === 'object' && !Array.isArray(question.optionSettings)
-      ? question.optionSettings
-      : {};
-  const questionType = normalizeQuestionType(question.type);
-
-  return normalizedOptions.reduce((result, optionLabel, optionIndex) => {
-    const legacyOptionObject = Array.isArray(question.options)
-      ? question.options.find(
-          (option) =>
-            option &&
-            typeof option === 'object' &&
-            (option.value?.trim?.() ?? option.label?.trim?.() ?? option.title?.trim?.() ?? '') === optionLabel,
-        )
-      : null;
-    const rawSetting = rawSettings[optionLabel] ?? legacyOptionObject ?? {};
-    const capacity = normalizeOptionCapacity(rawSetting.capacity);
-
-    const nextSetting = {};
-
-    if (capacity) {
-      nextSetting.capacity = capacity;
-    }
-
-    if (questionType === QUESTION_TYPES.APPLICATION_SLOT_CHOICE) {
-      nextSetting.title = normalizeSlotText(rawSetting.title) || optionLabel;
-      nextSetting.date = normalizeSlotText(rawSetting.date);
-      nextSetting.time = normalizeSlotText(rawSetting.time);
-      nextSetting.place = normalizeSlotText(rawSetting.place);
-      nextSetting.ageGroup = normalizeSlotText(rawSetting.ageGroup);
-      nextSetting.sortOrder = normalizeSlotSortOrder(rawSetting.sortOrder, optionIndex + 1);
-    }
-
-    if (Object.keys(nextSetting).length > 0) {
-      result[optionLabel] = nextSetting;
-    }
-
-    return result;
-  }, {});
-}
-
 export function getQuestionOptionItems(question = {}, optionQuotaCounts = {}) {
   const normalizedQuestion = normalizeQuestion(question);
   const normalizedCounts = normalizeOptionQuotaCounts(optionQuotaCounts);
@@ -1101,77 +673,6 @@ export function isOptionQuotaQuestion(question = {}) {
   }
 
   return Object.keys(normalizedQuestion.optionSettings ?? {}).length > 0;
-}
-
-export function normalizeQuestion(question = {}) {
-  const type = normalizeQuestionType(question.type);
-  const normalizedOptions = isSelectableQuestionType(type)
-    ? sanitizeQuestionOptions(question.options)
-    : [];
-  const id = normalizeQuestionId(question.id, question.index ?? 0);
-  const allowOther = isSelectableQuestionType(type) ? Boolean(question.allowOther) : false;
-  const title = normalizeQuestionTextField(question.title, question.label);
-  const description = normalizeQuestionTextField(question.description, question.helpText);
-  const placeholder = supportsPlaceholder(type) ? question.placeholder?.trim?.() ?? '' : '';
-  const optionSettings =
-    type === QUESTION_TYPES.SINGLE_CHOICE ||
-    type === QUESTION_TYPES.DROPDOWN ||
-    type === QUESTION_TYPES.APPLICATION_SLOT_CHOICE
-      ? normalizeQuestionOptionSettings(question, normalizedOptions)
-      : {};
-  const sortedOptions =
-    type === QUESTION_TYPES.APPLICATION_SLOT_CHOICE
-      ? [...normalizedOptions].sort((first, second) => {
-          const firstOrder = normalizeSlotSortOrder(optionSettings?.[first]?.sortOrder, 1);
-          const secondOrder = normalizeSlotSortOrder(optionSettings?.[second]?.sortOrder, 1);
-          return firstOrder - secondOrder;
-        })
-      : normalizedOptions;
-
-  return {
-    id,
-    title,
-    label: title,
-    description,
-    helpText: description,
-    type,
-    options: sortedOptions,
-    optionSettings,
-    required: isNonResponseQuestionType(type) ? false : Boolean(question.required),
-    allowOther,
-    placeholder,
-    validation:
-      question.validation && typeof question.validation === 'object' ? question.validation : {},
-    sectionId: question.sectionId?.trim?.() ?? '',
-    sectionKey: question.sectionKey?.trim?.() ?? '',
-    pageId: question.pageId?.trim?.() ?? '',
-    pageKey: question.pageKey?.trim?.() ?? '',
-    settings: isScaleQuestionType(type)
-      ? normalizeScaleSettings(question, type)
-      : question.settings && typeof question.settings === 'object'
-        ? question.settings
-        : {},
-    meta: question.meta && typeof question.meta === 'object' ? question.meta : {},
-    branching: normalizeBranching(
-      question.branching,
-      {
-        ...question,
-        id,
-        type,
-        options: sortedOptions,
-        allowOther,
-      },
-      question.index ?? 0,
-    ),
-  };
-}
-
-export function normalizeQuestions(questions = []) {
-  if (!Array.isArray(questions)) {
-    return [];
-  }
-
-  return questions.map((question, index) => normalizeQuestion({ ...question, index }));
 }
 
 export function normalizeBranchCondition(condition = {}) {
@@ -3740,26 +3241,6 @@ export function computeBranchingProgress({
     visibleQuestions: orderedVisibleQuestions,
     termination,
   };
-}
-
-export function isAnswerEmpty(question, answer) {
-  if (isNonResponseQuestionType(question?.type)) {
-    return false;
-  }
-
-  if (!question?.required) {
-    return false;
-  }
-
-  if (question.type === QUESTION_TYPES.CONSENT_CHECKBOX) {
-    return answer !== true;
-  }
-
-  if (question.type === QUESTION_TYPES.MULTIPLE_CHOICE) {
-    return !Array.isArray(answer) || answer.length === 0;
-  }
-
-  return !String(answer ?? '').trim();
 }
 
 export function getFirestoreErrorMessage(error, fallbackMessage) {

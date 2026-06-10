@@ -12,15 +12,16 @@ import {
   getScaleQuestionConfig,
   getQuotaSummary,
   getReceptionPeriodText,
-  isAnswerEmpty,
   isApplicationFormType,
+  submitSurveyResponse,
+} from '../firebase/surveys';
+import { OTHER_OPTION_VALUE, QUESTION_TYPES } from '../firebase/surveyConstants';
+import {
+  isAnswerEmpty,
   isNonResponseQuestionType,
   isScaleQuestionType,
   normalizeQuestionType,
-  OTHER_OPTION_VALUE,
-  QUESTION_TYPES,
-  submitSurveyResponse,
-} from '../firebase/surveys';
+} from '../firebase/surveyNormalize';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
 import {
   buildVisibleQuestionFlow,
@@ -610,9 +611,14 @@ function SurveyResponsePage() {
   const currentConsentInfoBlocks = currentSectionQuestions.filter(
     (question) => question.meta?.consentTemplate === 'base',
   );
-  const currentlyRenderedQuestions = responseMode === 'paged'
-    ? currentSectionQuestions.filter((question) => isRenderableQuestion(question))
-    : displayQuestions.filter((question) => isRenderableQuestion(question));
+  const currentVisitedQuestionIds = useMemo(
+    () => (responseMode === 'paged'
+      ? currentSectionQuestions.filter((question) => isRenderableQuestion(question))
+      : displayQuestions.filter((question) => isRenderableQuestion(question))
+    ).map((question) => question.id),
+    [currentSectionQuestions, displayQuestions, isRenderableQuestion, responseMode],
+  );
+  const currentVisitedQuestionIdsKey = currentVisitedQuestionIds.join('|');
   const unvisitedRenderableQuestions = allRenderableQuestions.filter(
     (question) => !renderedQuestionIds.has(question.id),
   );
@@ -622,21 +628,19 @@ function SurveyResponsePage() {
       : 0;
 
   useEffect(() => {
-    if (currentlyRenderedQuestions.length === 0) {
+    if (currentVisitedQuestionIds.length === 0) {
       return;
     }
 
     setRenderedQuestionIds((current) => {
       const nextIds = new Set(current);
-      currentlyRenderedQuestions.forEach((question) => {
-        nextIds.add(question.id);
-      });
+      currentVisitedQuestionIds.forEach((questionId) => nextIds.add(questionId));
       return nextIds.size === current.size ? current : nextIds;
     });
-  }, [currentlyRenderedQuestions]);
+  }, [currentSectionSafeIndex, currentVisitedQuestionIds, currentVisitedQuestionIdsKey]);
 
   useEffect(() => {
-    if (!survey?.id || submitted) {
+    if (!import.meta.env.DEV || !survey?.id || submitted) {
       return;
     }
 
@@ -1483,27 +1487,29 @@ function SurveyResponsePage() {
     );
 
     if (unvisitedQuestions.length > 0) {
-      console.warn('[BLOCK_SUBMIT_UNVISITED_QUESTIONS]', {
-        surveyId: survey.id,
-        currentSectionIndex,
-        unvisitedQuestions: unvisitedQuestions.map((question) => ({
-          id: question.id,
-          title: question.title,
-          type: question.type,
-          normalizedType: getNormalizedQuestionType(question),
-          required: Boolean(question.required),
-          sectionId: question.sectionId,
-          pageId: question.pageId,
-          pageKey: question.pageKey,
-          sectionKey: question.sectionKey,
-        })),
-        groupedSections: groupedSections.map((section, index) => ({
-          index,
-          id: section.id,
-          title: section.title,
-          questionIds: (section.questions ?? []).map((question) => question.id),
-        })),
-      });
+      if (import.meta.env.DEV) {
+        console.warn('[BLOCK_SUBMIT_UNVISITED_QUESTIONS]', {
+          surveyId: survey.id,
+          currentSectionIndex,
+          unvisitedQuestions: unvisitedQuestions.map((question) => ({
+            id: question.id,
+            title: question.title,
+            type: question.type,
+            normalizedType: getNormalizedQuestionType(question),
+            required: Boolean(question.required),
+            sectionId: question.sectionId,
+            pageId: question.pageId,
+            pageKey: question.pageKey,
+            sectionKey: question.sectionKey,
+          })),
+          groupedSections: groupedSections.map((section, index) => ({
+            index,
+            id: section.id,
+            title: section.title,
+            questionIds: (section.questions ?? []).map((question) => question.id),
+          })),
+        });
+      }
 
       moveToQuestionSection(unvisitedQuestions[0].id);
       setMessage('아직 표시되지 않은 문항이 있습니다. 다음 문항을 확인해주세요.');
@@ -1935,11 +1941,13 @@ function SurveyResponsePage() {
 
           {message && <div className="form-message">{message}</div>}
 
-          <div className="inline-note response-debug-panel">
-            전체 질문 {survey.questions?.length ?? 0}개 · 표시 대상 {allRenderableQuestions.length}개 ·
-            현재 페이지 {currentlyRenderedQuestions.length}개 · 남은 질문 {unvisitedRenderableQuestions.length}개 ·
-            마지막 페이지 {isLastReachableSection ? '예' : '아니오'}
-          </div>
+          {import.meta.env.DEV && (
+            <div className="inline-note response-debug-panel">
+              전체 질문 {survey.questions?.length ?? 0}개 · 표시 대상 {allRenderableQuestions.length}개 ·
+              현재 페이지 {currentVisitedQuestionIds.length}개 · 남은 질문 {unvisitedRenderableQuestions.length}개 ·
+              마지막 페이지 {isLastReachableSection ? '예' : '아니오'}
+            </div>
+          )}
 
           {responseMode === 'paged' ? (
             <div className="response-navigation-row">
