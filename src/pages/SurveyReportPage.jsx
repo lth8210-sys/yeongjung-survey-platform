@@ -12,16 +12,74 @@ import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
 
 const PRINT_STYLES = `
   @media print {
-    .report-controls { display: none !important; }
+    .report-controls,
+    .report-edit-mode-banner,
+    .report-save-hint {
+      display: none !important;
+    }
+
     body { margin: 0; background: white; }
     .report-wrapper { padding: 0; max-width: none; box-shadow: none; }
-    .report-section { page-break-inside: avoid; margin-bottom: 24px; }
-    .report-cover { page-break-after: always; }
-    h2 { page-break-after: avoid; }
-    h3 { page-break-after: avoid; }
-    .report-top-low-grid { page-break-inside: avoid; }
+    .report-body { line-height: 1.62; }
+    .report-cover {
+      min-height: calc(297mm - 4.6cm);
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      break-after: page;
+      page-break-after: always;
+    }
+    .report-toc {
+      break-after: page;
+      page-break-after: always;
+      margin: 0;
+      padding-top: 0.4cm;
+    }
+    .report-section {
+      break-inside: auto;
+      page-break-inside: auto;
+      margin-bottom: 24px;
+    }
+    .report-section-title,
+    .report-subsection h3,
+    .report-count-table h4,
+    h2,
+    h3,
+    h4 {
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+    table { break-inside: auto; page-break-inside: auto; }
+    thead { display: table-header-group; }
+    tr,
+    .report-top-low-grid > div,
+    .report-count-table,
+    .report-edit-block,
+    .report-summary-box,
+    .report-toc-row,
+    .report-freetext-list li {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .report-freetext-group {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+    .report-print-footer {
+      display: block;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: -1.15cm;
+      color: #6b7280;
+      font-size: 10px;
+      text-align: center;
+    }
+    .report-footer {
+      display: none;
+    }
   }
-  @page { size: A4; margin: 2cm 2.5cm; }
+  @page { size: A4; margin: 2cm 2.2cm 2.35cm; }
 `;
 
 function getDateRange(responses) {
@@ -124,20 +182,20 @@ function getReportAuditMetadata(reportMeta, survey) {
 }
 
 function generateSummary(analytics, responseCount) {
-  const parts = [`총 ${responseCount}명이 응답하였습니다.`];
+  const parts = [`본 조사에는 총 ${responseCount}명이 응답하였다.`];
 
   if (analytics.totalAverage !== null) {
-    parts.push(`전체 평균 만족도는 ${formatAverage(analytics.totalAverage)}점입니다.`);
+    parts.push(`전체 평균 만족도는 ${formatAverage(analytics.totalAverage)}점으로 나타났다.`);
     const top = analytics.topRows[0];
     const low = analytics.lowRows[0];
     if (top) {
       parts.push(
-        `만족도가 가장 높은 문항은 '${top.question.title}'(${formatAverage(top.average)}점)입니다.`,
+        `상대적으로 높게 나타난 문항은 '${top.question.title}'(${formatAverage(top.average)}점)이다.`,
       );
     }
     if (low && (!top || low.question.id !== top.question.id)) {
       parts.push(
-        `개선이 필요한 문항은 '${low.question.title}'(${formatAverage(low.average)}점)입니다.`,
+        `상대적으로 낮게 나타난 문항은 '${low.question.title}'(${formatAverage(low.average)}점)이며, 향후 운영 개선 시 우선 검토할 필요가 있다.`,
       );
     }
   }
@@ -145,22 +203,22 @@ function generateSummary(analytics, responseCount) {
   const { programName, area, usagePeriod } = analytics.groupCounts;
   if (programName.length > 0) {
     const t = programName[0];
-    parts.push(`참여 프로그램은 '${t.label}'(${t.count}건, ${t.percent}%)이 가장 많았습니다.`);
+    parts.push(`참여 프로그램은 '${t.label}'(${t.count}건, ${t.percent}%)이 가장 높은 비중을 보였다.`);
   }
   if (area.length > 0) {
     const t = area[0];
-    parts.push(`거주 지역은 '${t.label}'(${t.count}건, ${t.percent}%)이 가장 많았습니다.`);
+    parts.push(`거주 지역은 '${t.label}'(${t.count}건, ${t.percent}%) 응답 비중이 가장 높았다.`);
   }
   if (usagePeriod.length > 0) {
     const t = usagePeriod[0];
-    parts.push(`참여기간은 '${t.label}'(${t.count}건, ${t.percent}%)이 가장 많았습니다.`);
+    parts.push(`참여기간은 '${t.label}'(${t.count}건, ${t.percent}%) 응답이 가장 많았다.`);
   }
   if (analytics.freeTextCategories?.length > 0) {
     const topCategories = analytics.freeTextCategories
       .slice(0, 3)
       .map((category) => category.label)
       .join(', ');
-    parts.push(`자유의견에서는 ${topCategories} 등이 주요하게 나타났습니다.`);
+    parts.push(`자유의견에서는 ${topCategories} 등이 주요 유형으로 확인되었다.`);
   }
 
   return parts.join(' ');
@@ -177,35 +235,35 @@ function buildDefaultReportSections({ survey, analytics, responseCount, summary 
   return {
     overviewText:
       survey?.description ||
-      `${survey?.title ?? '해당 설문'}은 총 ${responseCount}건의 응답을 바탕으로 이용자의 경험과 만족도를 확인하기 위해 정리되었습니다.`,
+      `${survey?.title ?? '해당 설문'}은 총 ${responseCount}건의 응답을 바탕으로 이용자의 경험과 만족도를 확인하기 위해 실시되었다.`,
     respondentProfileText:
-      [program ? `가장 많은 프로그램 응답은 '${program.label}'(${program.count}건)입니다.` : '',
-        area ? `주요 거주 지역은 '${area.label}'(${area.count}건)입니다.` : '',
-        usagePeriod ? `가장 많은 참여기간은 '${usagePeriod.label}'(${usagePeriod.count}건)입니다.` : '']
+      [program ? `프로그램 응답은 '${program.label}'(${program.count}건)이 가장 높은 비중을 보였다.` : '',
+        area ? `거주 지역은 '${area.label}'(${area.count}건) 응답이 가장 많았다.` : '',
+        usagePeriod ? `참여기간은 '${usagePeriod.label}'(${usagePeriod.count}건) 응답이 가장 많았다.` : '']
         .filter(Boolean)
-        .join(' ') || '응답자 특성 항목은 응답 분포를 기준으로 해석할 수 있습니다.',
+        .join(' ') || '응답자 특성 항목은 응답 분포를 기준으로 해석할 수 있다.',
     satisfactionAnalysisText:
       analytics?.totalAverage !== null && analytics?.totalAverage !== undefined
-        ? `전체 평균 만족도는 ${formatAverage(analytics.totalAverage)}점입니다.${
-            top ? ` 가장 높은 문항은 '${top.question.title}'(${formatAverage(top.average)}점)입니다.` : ''
+        ? `전체 평균 만족도는 ${formatAverage(analytics.totalAverage)}점으로 나타났다.${
+            top ? ` 상대적으로 높게 나타난 문항은 '${top.question.title}'(${formatAverage(top.average)}점)이다.` : ''
           }${
             low && (!top || low.question.id !== top.question.id)
-              ? ` 상대적으로 개선이 필요한 문항은 '${low.question.title}'(${formatAverage(low.average)}점)입니다.`
+              ? ` 상대적으로 낮게 나타난 문항은 '${low.question.title}'(${formatAverage(low.average)}점)이며, 향후 운영 개선 시 우선 검토할 필요가 있다.`
               : ''
           }`
-        : '만족도 문항 응답을 기준으로 주요 강점과 개선 지점을 해석합니다.',
+        : '만족도 문항 응답을 기준으로 주요 강점과 개선 지점을 해석한다.',
     openEndedSummaryText:
       textCount > 0
-        ? `자유의견은 총 ${textCount}건이 수집되었습니다.${
+        ? `자유의견은 총 ${textCount}건이 수집되었다.${
             analytics.freeTextCategories?.length > 0
-              ? ` 주요 유형은 ${analytics.freeTextCategories.slice(0, 3).map((category) => category.label).join(', ')} 등입니다.`
+              ? ` 주요 유형은 ${analytics.freeTextCategories.slice(0, 3).map((category) => category.label).join(', ')} 등으로 나타났다.`
               : ''
-          } 원문은 수정하지 않고, 보고서에는 주요 의견 흐름을 요약해 반영합니다.`
-        : '수집된 자유의견이 없거나 분석 가능한 주관식 응답이 제한적입니다.',
+          } 원문은 수정하지 않고, 보고서에는 주요 의견 흐름을 요약해 반영하였다.`
+        : '수집된 자유의견이 없거나 분석 가능한 주관식 응답이 제한적이다.',
     improvementPlanText:
       low
-        ? `'${low.question.title}' 항목을 중심으로 운영 개선 필요사항을 검토하고, 만족도가 높게 나타난 요소는 지속적으로 유지합니다.`
-        : '조사 결과를 바탕으로 서비스 운영 과정의 강점은 유지하고, 반복적으로 제기되는 불편사항은 개선 과제로 관리합니다.',
+        ? `'${low.question.title}' 항목을 중심으로 운영 개선 필요사항을 검토하고, 만족도가 높게 나타난 요소는 지속적으로 유지할 필요가 있다.`
+        : '조사 결과를 바탕으로 서비스 운영 과정의 강점은 유지하고, 반복적으로 제기되는 불편사항은 개선 과제로 관리할 필요가 있다.',
     finalSummaryText: summary || '분석할 응답 데이터가 없습니다.',
   };
 }
@@ -640,9 +698,19 @@ export default function SurveyReportPage() {
     hasFreeText
       ? 2 + [hasCharacteristics, hasSatisfaction].filter(Boolean).length
       : null;
-  const improvementSectionNumber =
+  const finalSectionNumber =
     2 + [hasCharacteristics, hasSatisfaction, hasFreeText].filter(Boolean).length;
-  const summarySectionNumber = improvementSectionNumber + 1;
+  const tocItems = [
+    { number: '1', title: '조사 개요' },
+    hasCharacteristics && { number: String(characteristicsSectionNumber), title: '응답자 특성' },
+    hasSatisfaction && { number: String(satisfactionSectionNumber), title: '만족도 분석' },
+    hasFreeText && {
+      number: String(freeTextSectionNumber),
+      title: '자유의견',
+      children: [{ number: `${freeTextSectionNumber}-1`, title: '자유의견 주요 유형' }],
+    },
+    { number: String(finalSectionNumber), title: '종합 요약 및 개선방향' },
+  ].filter(Boolean);
 
   return (
     <>
@@ -705,11 +773,24 @@ export default function SurveyReportPage() {
         )}
 
         <div className="report-body">
+          <div className="report-print-footer">
+            본 보고서는 영중폼에서 생성되었으며, 원본 응답 데이터는 관리자 화면에서 확인할 수 있습니다. ·
+            인쇄일: {generatedAt}
+          </div>
+
           {/* 표지 */}
           <div className="report-cover">
             <div className="report-cover-inner">
-              <p className="report-org-name">{reportMeta.department}</p>
+              <div className="report-cover-brand">
+                <div className="report-cover-mark">YJ</div>
+                <div>
+                  <p className="report-cover-org">영중종합사회복지관</p>
+                  <p className="report-cover-system">Yeongjung Form Report</p>
+                </div>
+              </div>
+              <p className="report-cover-kicker">결과보고서</p>
               <h1 className="report-main-title">{reportMeta.title}</h1>
+              <div className="report-cover-rule" aria-hidden="true" />
               <dl className="report-cover-meta">
                 <div>
                   <dt>조사기간</dt>
@@ -720,12 +801,42 @@ export default function SurveyReportPage() {
                   <dd>{reportMeta.target}</dd>
                 </div>
                 <div>
+                  <dt>작성부서</dt>
+                  <dd>{reportMeta.department}</dd>
+                </div>
+                <div>
                   <dt>작성일</dt>
                   <dd>{reportMeta.writtenDate}</dd>
                 </div>
               </dl>
+              <p className="report-cover-footer">Yeongjung Social Welfare Center</p>
             </div>
           </div>
+
+          <section className="report-toc" aria-label="목차">
+            <p className="report-toc-kicker">Table of Contents</p>
+            <h2 className="report-toc-title">목차</h2>
+            <ol className="report-toc-list">
+              {tocItems.map((item) => (
+                <li className="report-toc-item" key={item.number}>
+                  <div className="report-toc-row">
+                    <span className="report-toc-number">{item.number}</span>
+                    <span className="report-toc-label">{item.title}</span>
+                  </div>
+                  {item.children && (
+                    <ol className="report-toc-sublist">
+                      {item.children.map((child) => (
+                        <li className="report-toc-row report-toc-subrow" key={child.number}>
+                          <span className="report-toc-number">{child.number}</span>
+                          <span className="report-toc-label">{child.title}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </section>
 
           {/* 1. 조사 개요 */}
           <section className="report-section">
@@ -940,23 +1051,10 @@ export default function SurveyReportPage() {
             </section>
           )}
 
-          {/* 향후 개선방향 */}
+          {/* 종합 요약 및 개선방향 */}
           {analytics && (
             <section className="report-section">
-              <h2 className="report-section-title">{improvementSectionNumber}. 향후 개선방향</h2>
-              <ReportEditableText
-                editing={editing}
-                label="향후 개선방향"
-                onChange={(value) => updateReportSection('improvementPlanText', value)}
-                value={activeReportSections.improvementPlanText ?? ''}
-              />
-            </section>
-          )}
-
-          {/* 종합 요약 */}
-          {analytics && (
-            <section className="report-section">
-              <h2 className="report-section-title">{summarySectionNumber}. 종합 요약</h2>
+              <h2 className="report-section-title">{finalSectionNumber}. 종합 요약 및 개선방향</h2>
               <div className="report-summary-box">
                 {editing ? (
                   <textarea
@@ -968,13 +1066,19 @@ export default function SurveyReportPage() {
                   <p>{activeReportSections.finalSummaryText || '분석할 응답 데이터가 없습니다.'}</p>
                 )}
               </div>
+              <ReportEditableText
+                editing={editing}
+                label="향후 개선방향"
+                onChange={(value) => updateReportSection('improvementPlanText', value)}
+                value={activeReportSections.improvementPlanText ?? ''}
+              />
             </section>
           )}
 
           <div className="report-footer">
             <p>
-              본 보고서는 영중복지관 영중폼(설문관리 시스템)에서 자동 생성되었습니다. ·
-              생성일: {generatedAt}
+              본 보고서는 영중폼에서 생성되었으며, 원본 응답 데이터는 관리자 화면에서 확인할 수 있습니다. ·
+              인쇄일: {generatedAt}
             </p>
           </div>
         </div>
