@@ -97,6 +97,7 @@ const responsesCollection = db ? collection(db, 'responses') : null;
 const draftResponsesCollection = db ? collection(db, 'draftResponses') : null;
 const auditLogsCollection = db ? collection(db, 'audit_logs') : null;
 const surveyReportsCollection = db ? collection(db, 'survey_reports') : null;
+const warnedAuditLogFailures = new Set();
 
 const LEGACY_PUBLISHED_STATUSES = ['active'];
 
@@ -2024,28 +2025,46 @@ export async function createAuditLog({
 }) {
   try {
     ensureFirestoreReady();
+    const normalizedAction = String(action ?? '');
+    const normalizedSurveyTitle = String(surveyTitle ?? '');
+    const normalizedMetadata =
+      typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata)
+        ? Object.fromEntries(
+            Object.entries(metadata)
+              .filter(([, value]) => value !== undefined)
+              .map(([key, value]) => [
+                key,
+                Array.isArray(value)
+                  ? value.map((item) => String(item ?? ''))
+                  : value === null || ['string', 'number', 'boolean'].includes(typeof value)
+                    ? value
+                    : String(value ?? ''),
+              ]),
+          )
+        : {};
+
+    if (normalizedSurveyTitle && !normalizedMetadata.surveyTitle) {
+      normalizedMetadata.surveyTitle = normalizedSurveyTitle;
+    }
 
     await addDoc(auditLogsCollection, {
-      action: String(action ?? ''),
+      action: normalizedAction,
       surveyId: String(surveyId ?? ''),
-      surveyTitle: String(surveyTitle ?? ''),
-      userId: String(actor?.uid ?? ''),
-      userEmail: String(actor?.email ?? ''),
-      userName: String(actor?.displayName ?? actor?.name ?? ''),
       responseId: responseId ? String(responseId) : null,
       actor: {
         uid: String(actor?.uid ?? ''),
         email: String(actor?.email ?? ''),
         displayName: String(actor?.displayName ?? actor?.name ?? ''),
       },
-      metadata:
-        typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata)
-          ? metadata
-          : {},
+      metadata: normalizedMetadata,
       createdAt: serverTimestamp(),
     });
   } catch (auditError) {
-    console.warn('[AuditLog] 감사로그 저장 실패:', auditError?.message ?? auditError);
+    const warningKey = `${String(action ?? '')}:${auditError?.code ?? auditError?.message ?? 'unknown'}`;
+    if (!warnedAuditLogFailures.has(warningKey)) {
+      warnedAuditLogFailures.add(warningKey);
+      console.warn('[AuditLog] 감사로그 저장 실패:', auditError?.code ?? '', auditError?.message ?? auditError);
+    }
   }
 }
 

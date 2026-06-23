@@ -407,6 +407,24 @@ export default function SurveyReportPage() {
     });
   };
 
+  const handleEditCancel = () => {
+    if (dirty) {
+      const shouldCancel = window.confirm('저장하지 않은 변경사항을 버리고 수정을 취소하시겠습니까?');
+
+      if (!shouldCancel) {
+        return;
+      }
+    }
+
+    setReportSections({
+      ...(defaultReportSections ?? {}),
+      ...(savedReport?.sections ?? {}),
+    });
+    setEditing(false);
+    setDirty(false);
+    setStatusMessage('');
+  };
+
   const persistReport = async () => {
     if (!survey || !reportSections) {
       return false;
@@ -583,43 +601,58 @@ export default function SurveyReportPage() {
       <style>{PRINT_STYLES}</style>
       <div className="report-wrapper">
         <div className="report-controls">
-          <button className="secondary-button" onClick={handleBackToAdmin} type="button">
-            관리자 화면으로 돌아가기
-          </button>
-          <button
-            className="secondary-button"
-            disabled={editing}
-            onClick={handleEditStart}
-            type="button"
-          >
-            편집
-          </button>
-          <button
-            className="primary-button"
-            disabled={!dirty || saving}
-            onClick={persistReport}
-            type="button"
-          >
-            {saving ? '저장 중...' : '저장'}
-          </button>
-          <button
-            className="secondary-button"
-            disabled={saving}
-            onClick={handleSaveAndPrint}
-            type="button"
-          >
-            저장 후 인쇄/PDF
-          </button>
-          <button className="secondary-button" onClick={handlePrintClick} type="button">
-            인쇄 / PDF 저장
-          </button>
+          {editing ? (
+            <>
+              <button className="secondary-button" disabled={saving} onClick={handleEditCancel} type="button">
+                수정 취소
+              </button>
+              <button
+                className="primary-button"
+                disabled={!dirty || saving}
+                onClick={persistReport}
+                type="button"
+              >
+                {saving ? '저장 중...' : '저장'}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={!dirty || saving}
+                onClick={handleSaveAndPrint}
+                type="button"
+              >
+                저장 후 인쇄/PDF
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="secondary-button" onClick={handleBackToAdmin} type="button">
+                관리자 화면으로 돌아가기
+              </button>
+              <button className="primary-button" onClick={handleEditStart} type="button">
+                보고서 수정
+              </button>
+              <button className="secondary-button" onClick={handlePrintClick} type="button">
+                인쇄/PDF 저장
+              </button>
+            </>
+          )}
           <span className="report-controls-hint">
-            {statusMessage || (dirty ? '저장하지 않은 변경사항이 있습니다.' : '인쇄 설정에서 배경 그래픽을 체크하면 더 보기 좋게 출력됩니다.')}
+            {statusMessage ||
+              (editing && !dirty
+                ? '수정된 내용이 있을 때 저장할 수 있습니다.'
+                : dirty
+                  ? '저장하지 않은 변경사항이 있습니다.'
+                  : '인쇄 설정에서 배경 그래픽을 체크하면 더 보기 좋게 출력됩니다.')}
           </span>
         </div>
+        {editing && !dirty && (
+          <div className="report-save-hint">
+            수정된 내용이 있을 때 저장할 수 있습니다.
+          </div>
+        )}
         {editing && (
           <div className="report-edit-mode-banner">
-            표, 평균점수, 응답수, 자유의견 원문은 원본 분석값으로 유지됩니다. 파란색 편집 박스의 보고문만 수정할 수 있습니다.
+            파란색 편집 영역의 보고문만 수정할 수 있습니다. 표, 평균점수, 응답수, 자유의견 원문은 원본 분석값으로 유지됩니다.
           </div>
         )}
 

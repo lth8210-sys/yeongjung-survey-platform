@@ -391,7 +391,7 @@ service cloud.firestore {
     }
 
     match /audit_logs/{logId} {
-      allow create: if isAtLeastAdmin() &&
+      allow create: if (isAtLeastAdmin() || isCreator()) &&
         request.resource.data.keys().hasOnly([
           "action",
           "surveyId",

@@ -2666,6 +2666,12 @@ button:disabled {
   line-height: 1.6;
 }
 
+.report-save-hint {
+  margin: -8px 0 14px;
+  color: #64748b;
+  font-size: 12px;
+}
+
 /* 표 공통 */
 .report-table {
   width: 100%;
@@ -2842,7 +2848,8 @@ button:disabled {
 @media print {
   .modal-backdrop,
   .report-settings-backdrop,
-  .report-edit-mode-banner {
+  .report-edit-mode-banner,
+  .report-save-hint {
     display: none !important;
   }
 
