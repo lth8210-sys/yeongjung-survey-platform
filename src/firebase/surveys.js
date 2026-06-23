@@ -2280,6 +2280,22 @@ export async function fetchResponseCountForSurvey(survey) {
   return Math.max(0, Number(survey?.responseCount) || 0);
 }
 
+export async function fetchAllResponsesForSurveyExport(survey) {
+  ensureFirestoreReady();
+
+  if (!survey?.id) {
+    return [];
+  }
+
+  const direct = await fetchResponsesBySurveyId(survey.id);
+
+  if (direct.length > 0) {
+    return direct;
+  }
+
+  return fetchResponsesBySurveyTitle(survey.title ?? '');
+}
+
 export async function hydrateSurveyResponseCounts(surveys = []) {
   const normalizedSurveys = Array.isArray(surveys) ? surveys : [];
   return normalizedSurveys.map((survey) => ({

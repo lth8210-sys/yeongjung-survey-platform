@@ -13,6 +13,7 @@ import {
   duplicateSurvey,
   extractApplicationResponseSummary,
   extractSlotSelections,
+  fetchAllResponsesForSurveyExport,
   fetchResponseCountForSurvey,
   fetchResponsesBySurveyId,
   fetchResponsesForSurvey,
@@ -332,6 +333,7 @@ function SurveyResponsesAdminPage() {
   const [hasMoreResponses, setHasMoreResponses] = useState(false);
   const [loadingMoreResponses, setLoadingMoreResponses] = useState(false);
   const [responsePageSource, setResponsePageSource] = useState('surveyId');
+  const [allResponses, setAllResponses] = useState([]);
   const auditActor = {
     uid: user?.uid ?? '',
     email: user?.email ?? '',
@@ -435,6 +437,17 @@ function SurveyResponsesAdminPage() {
       setResponseLastDoc(responsePage.lastDoc);
       setHasMoreResponses(responsePage.hasMore);
       setResponsePageSource(responsePage.source ?? 'surveyId');
+
+      if (!append) {
+        const exportSurvey = surveyResult ?? {
+          id: surveyId,
+          title: responseResult[0]?.surveyTitle ?? '',
+        };
+        fetchAllResponsesForSurveyExport(exportSurvey)
+          .then((all) => setAllResponses(all))
+          .catch(() => {});
+      }
+
       setResponses((current) => {
         if (!append) {
           return responseResult;
@@ -637,6 +650,7 @@ function SurveyResponsesAdminPage() {
       setActionLoading(true);
       await deleteSurveyResponse(responseId, auditActor);
       setResponses((current) => current.filter((response) => response.id !== responseId));
+      setAllResponses((current) => current.filter((response) => response.id !== responseId));
       setEditingStates((current) => {
         const { [responseId]: _removed, ...nextState } = current;
         return nextState;
@@ -732,18 +746,16 @@ function SurveyResponsesAdminPage() {
       return;
     }
 
+    const exportSource = allResponses.length > 0 ? allResponses : responses;
     const orderedQuestions =
       survey.questions.length > 0
         ? survey.questions.filter((question) => !isNonResponseQuestionType(question.type))
-        : responseItems.reduce((result, response) => {
-            response.answerItems.forEach((item) => {
-              if (!result.some((existing) => existing.id === item.questionId)) {
-                result.push({
-                  id: item.questionId,
-                  title: item.questionTitle,
-                });
-              }
-            });
+        : exportSource.flatMap((response) =>
+            getOrderedResponseAnswerItems(survey.questions, response.answers),
+          ).reduce((result, item) => {
+            if (!result.some((existing) => existing.id === item.questionId)) {
+              result.push({ id: item.questionId, title: item.questionTitle });
+            }
             return result;
           }, []);
 
@@ -755,7 +767,7 @@ function SurveyResponsesAdminPage() {
       ...orderedQuestions.map((question) => question.title || question.label || question.id),
     ];
 
-    const dataRows = responses.map((response) => {
+    const dataRows = exportSource.map((response) => {
       const answerItems = getOrderedResponseAnswerItems(survey.questions, response.answers);
       const answerMap = new Map(
         answerItems.map((item) => [item.questionId, formatSurveyAnswer(item.answer, item)]),
@@ -779,7 +791,7 @@ function SurveyResponsesAdminPage() {
         actor: auditActor,
         metadata: {
           downloadType: 'raw',
-          loadedCount: responses.length,
+          totalCount: exportSource.length,
         },
       });
     });
@@ -790,13 +802,14 @@ function SurveyResponsesAdminPage() {
       return;
     }
 
+    const exportSource = allResponses.length > 0 ? allResponses : responses;
     const rows = [
       ['제출일', '이름', '연락처', '주요 항목', '처리 상태', '비고'],
-      ...responses.map((response) => {
+      ...exportSource.map((response) => {
         const summary = extractApplicationResponseSummary(survey.questions, response);
         return [
-        formatFirestoreDate(response.submittedAt),
-        summary.name,
+          formatFirestoreDate(response.submittedAt),
+          summary.name,
           summary.phone,
           summary.primaryValue,
           getResponseStatusMeta(response.status).label,
@@ -814,7 +827,7 @@ function SurveyResponsesAdminPage() {
         actor: auditActor,
         metadata: {
           downloadType: 'applicant',
-          loadedCount: responses.length,
+          totalCount: exportSource.length,
         },
       });
     });
@@ -941,9 +954,13 @@ function SurveyResponsesAdminPage() {
       adminNote: response.adminNote ?? '',
     }));
   }, [filteredResponses, selectedSlotFilter]);
+  const analyticsSource = useMemo(
+    () => (allResponses.length > 0 ? allResponses : responses),
+    [allResponses, responses],
+  );
   const surveyAnalytics = useMemo(
-    () => buildSurveyAnalytics(survey, responses),
-    [responses, survey],
+    () => buildSurveyAnalytics(survey, analyticsSource),
+    [analyticsSource, survey],
   );
   const questionDisplayMap = useMemo(
     () => buildQuestionDisplayMap(survey?.questions ?? [], survey?.sections ?? []),
@@ -1263,7 +1280,7 @@ function SurveyResponsesAdminPage() {
           <div className="analytics-summary-grid">
             <div className="application-summary-card">
               <small>전체 응답 수</small>
-              <strong>{responses.length}건</strong>
+              <strong>{analyticsSource.length}건</strong>
             </div>
             <div className="application-summary-card">
               <small>전체 평균 만족도</small>
