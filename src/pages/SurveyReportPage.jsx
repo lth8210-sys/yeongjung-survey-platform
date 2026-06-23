@@ -34,6 +34,64 @@ function getDateRange(responses) {
   return min.toDateString() === max.toDateString() ? fmt(min) : `${fmt(min)} ~ ${fmt(max)}`;
 }
 
+function formatReportDate(value) {
+  if (!value) {
+    return '';
+  }
+
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date =
+    year && month && day
+      ? new Date(year, month - 1, day)
+      : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+function getReportSettingsFromQuery() {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return {
+    title: params.get('title')?.trim() ?? '',
+    startDate: params.get('startDate')?.trim() ?? '',
+    endDate: params.get('endDate')?.trim() ?? '',
+    target: params.get('target')?.trim() ?? '',
+    department: params.get('department')?.trim() ?? '',
+    writtenDate: params.get('writtenDate')?.trim() ?? '',
+    author: params.get('author')?.trim() ?? '',
+  };
+}
+
+function buildReportMeta({ survey, dateRange, generatedAt }) {
+  const querySettings = getReportSettingsFromQuery();
+  const queryDateRange =
+    querySettings.startDate && querySettings.endDate
+      ? querySettings.startDate === querySettings.endDate
+        ? formatReportDate(querySettings.startDate)
+        : `${formatReportDate(querySettings.startDate)} ~ ${formatReportDate(querySettings.endDate)}`
+      : '';
+
+  return {
+    title: querySettings.title || (survey?.title ? `${survey.title} 결과보고서` : '결과보고서'),
+    period: queryDateRange || dateRange,
+    target: querySettings.target || '해당 설문 응답자',
+    department: querySettings.department || '영중종합사회복지관',
+    writtenDate: formatReportDate(querySettings.writtenDate) || generatedAt,
+    author: querySettings.author || '',
+  };
+}
+
 function generateSummary(analytics, responseCount) {
   const parts = [`총 ${responseCount}명이 응답하였습니다.`];
 
@@ -149,6 +207,11 @@ export default function SurveyReportPage() {
     [],
   );
 
+  const reportMeta = useMemo(
+    () => buildReportMeta({ survey, dateRange, generatedAt }),
+    [dateRange, generatedAt, survey],
+  );
+
   if (loading) {
     return (
       <div className="report-loading-screen">
@@ -201,10 +264,22 @@ export default function SurveyReportPage() {
           {/* 표지 */}
           <div className="report-cover">
             <div className="report-cover-inner">
-              <p className="report-org-name">영중종합사회복지관</p>
-              <h1 className="report-main-title">{survey.title}</h1>
-              <p className="report-subtitle">결과보고서</p>
-              <p className="report-generated-at">생성일: {generatedAt}</p>
+              <p className="report-org-name">{reportMeta.department}</p>
+              <h1 className="report-main-title">{reportMeta.title}</h1>
+              <dl className="report-cover-meta">
+                <div>
+                  <dt>조사기간</dt>
+                  <dd>{reportMeta.period}</dd>
+                </div>
+                <div>
+                  <dt>조사대상</dt>
+                  <dd>{reportMeta.target}</dd>
+                </div>
+                <div>
+                  <dt>작성일</dt>
+                  <dd>{reportMeta.writtenDate}</dd>
+                </div>
+              </dl>
             </div>
           </div>
 
@@ -214,12 +289,34 @@ export default function SurveyReportPage() {
             <table className="report-table report-overview-table">
               <tbody>
                 <tr>
-                  <th>조사명</th>
-                  <td>{survey.title}</td>
+                  <th>보고서 제목</th>
+                  <td>{reportMeta.title}</td>
                 </tr>
                 <tr>
                   <th>조사기간</th>
-                  <td>{dateRange}</td>
+                  <td>{reportMeta.period}</td>
+                </tr>
+                <tr>
+                  <th>조사대상</th>
+                  <td>{reportMeta.target}</td>
+                </tr>
+                <tr>
+                  <th>작성부서</th>
+                  <td>{reportMeta.department}</td>
+                </tr>
+                <tr>
+                  <th>작성일</th>
+                  <td>{reportMeta.writtenDate}</td>
+                </tr>
+                {reportMeta.author && (
+                  <tr>
+                    <th>작성자</th>
+                    <td>{reportMeta.author}</td>
+                  </tr>
+                )}
+                <tr>
+                  <th>원 설문명</th>
+                  <td>{survey.title}</td>
                 </tr>
                 <tr>
                   <th>총 응답 수</th>

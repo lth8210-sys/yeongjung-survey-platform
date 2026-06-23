@@ -78,6 +78,163 @@ const FILTER_RESPONSE_STATUSES = [
   RESPONSE_STATUSES.CANCELLED,
   RESPONSE_STATUSES.FOLLOW_UP,
 ];
+
+function toValidDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = typeof value?.toDate === 'function' ? value.toDate() : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateInputValue(date) {
+  if (!date) {
+    return '';
+  }
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function getResponseDateBounds(responses) {
+  const dates = responses
+    .map((response) => toValidDate(response.submittedAt))
+    .filter(Boolean);
+
+  if (!dates.length) {
+    return { startDate: '', endDate: '' };
+  }
+
+  return {
+    startDate: formatDateInputValue(new Date(Math.min(...dates.map((date) => date.getTime())))),
+    endDate: formatDateInputValue(new Date(Math.max(...dates.map((date) => date.getTime())))),
+  };
+}
+
+function buildReportSettingsDefaults({ survey, responses, user }) {
+  const { startDate, endDate } = getResponseDateBounds(responses);
+
+  return {
+    title: survey?.title ? `${survey.title} 결과보고서` : '결과보고서',
+    startDate,
+    endDate,
+    target: '해당 설문 응답자',
+    department: '영중종합사회복지관',
+    writtenDate: formatDateInputValue(new Date()),
+    author: user?.displayName ?? '',
+  };
+}
+
+function ReportSettingsModal({ isOpen, values, onChange, onClose, onSubmit }) {
+  if (!isOpen) {
+    return null;
+  }
+
+  const updateField = (field) => (event) => {
+    onChange({
+      ...values,
+      [field]: event.target.value,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop report-settings-backdrop" onClick={onClose} role="presentation">
+      <form
+        className="modal-panel report-settings-modal"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="report-settings-title"
+      >
+        <div className="report-settings-header">
+          <div>
+            <h2 id="report-settings-title">결과보고서 생성 설정</h2>
+            <p>보고서 표지와 조사 개요에 표시될 기본 정보를 확인해주세요.</p>
+          </div>
+          <button className="icon-button" onClick={onClose} type="button" aria-label="닫기">
+            ×
+          </button>
+        </div>
+
+        <div className="report-settings-grid">
+          <label className="field-row report-settings-full">
+            <span>보고서 제목</span>
+            <input
+              onChange={updateField('title')}
+              placeholder="보고서 제목"
+              type="text"
+              value={values.title}
+            />
+          </label>
+
+          <div className="report-settings-date-row">
+            <label className="field-row">
+              <span>조사 시작일</span>
+              <input onChange={updateField('startDate')} type="date" value={values.startDate} />
+            </label>
+            <label className="field-row">
+              <span>조사 종료일</span>
+              <input onChange={updateField('endDate')} type="date" value={values.endDate} />
+            </label>
+          </div>
+
+          <label className="field-row report-settings-full">
+            <span>조사대상</span>
+            <input
+              onChange={updateField('target')}
+              placeholder="조사대상"
+              type="text"
+              value={values.target}
+            />
+          </label>
+
+          <label className="field-row">
+            <span>작성부서</span>
+            <input
+              onChange={updateField('department')}
+              placeholder="작성부서"
+              type="text"
+              value={values.department}
+            />
+          </label>
+
+          <label className="field-row">
+            <span>작성일</span>
+            <input onChange={updateField('writtenDate')} type="date" value={values.writtenDate} />
+          </label>
+
+          <label className="field-row report-settings-full">
+            <span>작성자</span>
+            <input
+              onChange={updateField('author')}
+              placeholder="작성자"
+              type="text"
+              value={values.author}
+            />
+          </label>
+        </div>
+
+        <div className="report-settings-actions">
+          <button className="secondary-button" onClick={onClose} type="button">
+            취소
+          </button>
+          <button className="primary-button" type="submit">
+            보고서 열기
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function buildResidentAssetSummaryRows(responses) {
   return responses.map((response) => {
     const answerByKey = new Map();
@@ -170,6 +327,10 @@ function SurveyResponsesAdminPage() {
   const [allResponses, setAllResponses] = useState([]);
   const [analyticsStatus, setAnalyticsStatus] = useState('loading');
   const [freeTextExpanded, setFreeTextExpanded] = useState(false);
+  const [reportSettingsOpen, setReportSettingsOpen] = useState(false);
+  const [reportSettings, setReportSettings] = useState(() =>
+    buildReportSettingsDefaults({ survey: null, responses: [], user: null }),
+  );
   const auditActor = {
     uid: user?.uid ?? '',
     email: user?.email ?? '',
@@ -739,6 +900,32 @@ function SurveyResponsesAdminPage() {
       });
   };
 
+  const handleReportSettingsOpen = () => {
+    setReportSettings(
+      buildReportSettingsDefaults({
+        survey,
+        responses: analyticsSource,
+        user,
+      }),
+    );
+    setReportSettingsOpen(true);
+  };
+
+  const handleReportOpen = () => {
+    const params = new URLSearchParams();
+    Object.entries(reportSettings).forEach(([key, value]) => {
+      const normalizedValue = String(value ?? '').trim();
+      if (normalizedValue) {
+        params.set(key, normalizedValue);
+      }
+    });
+
+    const queryString = params.toString();
+    const reportUrl = `/admin/surveys/${surveyId}/report${queryString ? `?${queryString}` : ''}`;
+    window.open(reportUrl, '_blank', 'noopener,noreferrer');
+    setReportSettingsOpen(false);
+  };
+
   const isApplicationForm = isApplicationFormType(survey?.formType);
 
   const responseItems = useMemo(() => {
@@ -1160,14 +1347,14 @@ function SurveyResponsesAdminPage() {
               </small>
             </div>
             <div className="card-actions">
-              <a
+              <button
                 className="secondary-button"
-                href={`/admin/surveys/${surveyId}/report`}
-                rel="noreferrer"
-                target="_blank"
+                disabled={analyticsStatus === 'loading'}
+                onClick={handleReportSettingsOpen}
+                type="button"
               >
-                결과보고서 생성
-              </a>
+                {analyticsStatus === 'loading' ? '집계 중...' : '결과보고서 생성'}
+              </button>
               <button
                 className="secondary-button"
                 disabled={analyticsStatus === 'loading'}
@@ -1705,6 +1892,13 @@ function SurveyResponsesAdminPage() {
         onClose={() => setQrOpen(false)}
         title={`${survey?.title ?? '설문'} QR`}
         url={publicUrl}
+      />
+      <ReportSettingsModal
+        isOpen={reportSettingsOpen}
+        onChange={setReportSettings}
+        onClose={() => setReportSettingsOpen(false)}
+        onSubmit={handleReportOpen}
+        values={reportSettings}
       />
       <ConfirmModal
         isOpen={pendingDownload !== null}
