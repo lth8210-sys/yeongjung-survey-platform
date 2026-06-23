@@ -1013,6 +1013,10 @@ function SurveyResponsesAdminPage() {
         : [],
     [filteredResponses, survey?.templateId],
   );
+  const responseNumberMap = useMemo(() => {
+    const totalCount = getQuotaSummary(survey).responseCount ?? responses.length;
+    return new Map(responses.map((r, i) => [r.id, totalCount - i]));
+  }, [responses, survey]);
 
   if (loading) {
     return <div className="empty-state">응답 목록을 불러오는 중입니다.</div>;
@@ -1038,8 +1042,9 @@ function SurveyResponsesAdminPage() {
           <span className="eyebrow">응답 결과</span>
           <h1>{survey?.title}</h1>
           <p>
-            현재 {responses.length}건의 응답을 불러왔습니다. 설문 운영 현황과 제출 데이터를
-            관리자 화면에서 바로 확인할 수 있습니다.
+            {searchTerm || statusFilter
+              ? `전체 ${quotaSummary.responseCount}건 중 ${responses.length}건 불러옴 · 검색 결과 ${filteredResponses.length}건 표시 중`
+              : `전체 ${quotaSummary.responseCount}건 중 ${responses.length}건 표시 중`}
           </p>
         </div>
         <div className="card-actions">
@@ -1660,7 +1665,7 @@ function SurveyResponsesAdminPage() {
               <article className="panel" key={response.id}>
                 <div className="response-admin-header">
                   <div>
-                    <strong>응답 #{filteredResponses.length - index}</strong>
+                    <strong>응답 #{responseNumberMap.get(response.id) ?? (quotaSummary.responseCount - index)}</strong>
                     <p>{formatFirestoreDate(response.submittedAt)}</p>
                   </div>
                   <div className="response-admin-meta response-status-controls">
@@ -1747,7 +1752,7 @@ function SurveyResponsesAdminPage() {
         </div>
       )}
 
-      {hasMoreResponses && (
+      {hasMoreResponses ? (
         <div className="pagination-bar">
           <button
             className="secondary-button"
@@ -1757,7 +1762,11 @@ function SurveyResponsesAdminPage() {
           >
             {loadingMoreResponses ? '불러오는 중...' : '더 보기'}
           </button>
-          <span>현재 {responses.length}건 표시 중</span>
+          <span>전체 {quotaSummary.responseCount}건 중 {responses.length}건 표시 중</span>
+        </div>
+      ) : responses.length > 0 && (
+        <div className="pagination-bar">
+          <span>전체 {quotaSummary.responseCount}건을 모두 표시 중입니다.</span>
         </div>
       )}
 
