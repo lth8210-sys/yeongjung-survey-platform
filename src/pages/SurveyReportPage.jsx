@@ -201,8 +201,11 @@ function buildDefaultReportSections({ survey, analytics, responseCount, summary 
 
 function ReportEditableText({ editing, label, value, onChange }) {
   return (
-    <div className="report-edit-block">
-      <h3>{label}</h3>
+    <div className={`report-edit-block${editing ? ' report-edit-block-active' : ''}`}>
+      <div className="report-edit-block-header">
+        <h3>{label}</h3>
+        {editing && <span>편집 가능</span>}
+      </div>
       {editing ? (
         <textarea
           className="report-edit-textarea"
@@ -361,6 +364,20 @@ export default function SurveyReportPage() {
     });
   }, [defaultReportSections, dirty, savedReport?.sections]);
 
+  useEffect(() => {
+    if (!dirty) {
+      return undefined;
+    }
+
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirty]);
+
   const reportSectionKeys = useMemo(
     () => Object.keys(reportSections ?? {}),
     [reportSections],
@@ -377,6 +394,7 @@ export default function SurveyReportPage() {
 
   const handleEditStart = () => {
     setEditing(true);
+    setStatusMessage('편집 모드입니다. 강조된 보고문 영역만 수정할 수 있습니다.');
     createAuditLog({
       action: 'report_edit_started',
       surveyId,
@@ -492,6 +510,16 @@ export default function SurveyReportPage() {
   };
 
   const handleBackToAdmin = () => {
+    if (dirty) {
+      const shouldLeave = window.confirm(
+        '저장하지 않은 변경사항이 있습니다. 저장하지 않고 관리자 화면으로 이동하시겠습니까?',
+      );
+
+      if (!shouldLeave) {
+        return;
+      }
+    }
+
     createAuditLog({
       action: 'report_back_clicked',
       surveyId,
@@ -555,6 +583,9 @@ export default function SurveyReportPage() {
       <style>{PRINT_STYLES}</style>
       <div className="report-wrapper">
         <div className="report-controls">
+          <button className="secondary-button" onClick={handleBackToAdmin} type="button">
+            관리자 화면으로 돌아가기
+          </button>
           <button
             className="secondary-button"
             disabled={editing}
@@ -582,13 +613,15 @@ export default function SurveyReportPage() {
           <button className="secondary-button" onClick={handlePrintClick} type="button">
             인쇄 / PDF 저장
           </button>
-          <button className="secondary-button" onClick={handleBackToAdmin} type="button">
-            관리자 화면으로 돌아가기
-          </button>
           <span className="report-controls-hint">
             {statusMessage || (dirty ? '저장하지 않은 변경사항이 있습니다.' : '인쇄 설정에서 배경 그래픽을 체크하면 더 보기 좋게 출력됩니다.')}
           </span>
         </div>
+        {editing && (
+          <div className="report-edit-mode-banner">
+            표, 평균점수, 응답수, 자유의견 원문은 원본 분석값으로 유지됩니다. 파란색 편집 박스의 보고문만 수정할 수 있습니다.
+          </div>
+        )}
 
         <div className="report-body">
           {/* 표지 */}

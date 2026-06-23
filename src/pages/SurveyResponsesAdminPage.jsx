@@ -528,6 +528,22 @@ function SurveyResponsesAdminPage() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  useEffect(() => {
+    if (!reportSettingsOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleReportSettingsClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [reportSettingsOpen]);
+
   const handleDuplicate = async () => {
     try {
       setActionLoading(true);
@@ -960,13 +976,12 @@ function SurveyResponsesAdminPage() {
   };
 
   const handleReportSettingsClose = () => {
-    setReportSettingsOpen(false);
-
     if (reportSettingsHistoryPushedRef.current) {
-      reportSettingsHistoryPushedRef.current = false;
       window.history.back();
       return;
     }
+
+    setReportSettingsOpen(false);
   };
 
   const handleReportOpen = () => {
@@ -981,11 +996,7 @@ function SurveyResponsesAdminPage() {
     const queryString = params.toString();
     const reportUrl = `/admin/surveys/${surveyId}/report${queryString ? `?${queryString}` : ''}`;
     window.open(reportUrl, '_blank', 'noopener,noreferrer');
-    setReportSettingsOpen(false);
-    if (reportSettingsHistoryPushedRef.current) {
-      reportSettingsHistoryPushedRef.current = false;
-      window.history.back();
-    }
+    handleReportSettingsClose();
   };
 
   const isApplicationForm = isApplicationFormType(survey?.formType);

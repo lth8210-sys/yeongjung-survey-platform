@@ -2485,6 +2485,11 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.report-controls .primary-button,
+.report-controls .secondary-button {
+  min-height: 38px;
+}
+
 .report-controls-hint {
   font-size: 12px;
   color: #9ca3af;
@@ -2592,11 +2597,39 @@ button:disabled {
   background: #fbfcfe;
 }
 
+.report-edit-block-active {
+  border-color: #4f8cff;
+  background: #f5f9ff;
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.12);
+}
+
+.report-edit-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .report-edit-block h3 {
   margin: 0 0 8px;
   font-size: 13px;
   font-weight: 700;
   color: #374151;
+}
+
+.report-edit-block-header h3 {
+  margin: 0;
+}
+
+.report-edit-block-header span {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #e8f0ff;
+  color: #2456b3;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .report-edit-block p {
@@ -2608,7 +2641,7 @@ button:disabled {
   width: 100%;
   min-height: 110px;
   resize: vertical;
-  border: 1px solid #cbd5e1;
+  border: 2px solid #4f8cff;
   border-radius: 6px;
   padding: 10px 12px;
   font: inherit;
@@ -2620,6 +2653,17 @@ button:disabled {
 .report-edit-textarea:focus {
   border-color: #4f8cff;
   outline: 3px solid rgba(79, 140, 255, 0.16);
+}
+
+.report-edit-mode-banner {
+  margin: -8px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 /* 표 공통 */
@@ -2797,7 +2841,16 @@ button:disabled {
 
 @media print {
   .modal-backdrop,
-  .report-settings-backdrop {
+  .report-settings-backdrop,
+  .report-edit-mode-banner {
     display: none !important;
+  }
+
+  .report-edit-textarea {
+    border: 0;
+    padding: 0;
+    min-height: auto;
+    resize: none;
+    overflow: visible;
   }
 }
