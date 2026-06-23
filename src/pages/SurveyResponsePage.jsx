@@ -206,6 +206,10 @@ function SurveyResponsePage() {
       return '응답 저장 권한이 없습니다. Firestore 규칙과 설문 상태를 확인해주세요.';
     }
 
+    if (error?.code === 'unavailable' || error?.code === 'network-request-failed') {
+      return '네트워크 연결을 확인하고 다시 시도해주세요. 입력하신 내용은 유지됩니다.';
+    }
+
     return error.message || '응답 저장에 실패했습니다. 잠시 후 다시 시도해주세요.';
   };
 
@@ -987,6 +991,16 @@ function SurveyResponsePage() {
   useEffect(() => {
     setRenderedQuestionIds(new Set());
   }, [survey?.id]);
+
+  useEffect(() => {
+    if (!submitting) return;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [submitting]);
 
   const renderTextBlocks = (value) =>
     String(value ?? '')

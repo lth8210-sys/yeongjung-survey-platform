@@ -136,6 +136,26 @@ function buildResidentAssetSummaryRows(responses) {
   });
 }
 
+// 프로그램명 정규화 테이블 — 분석/통계에서만 적용, 원본 응답·CSV 변경 없음
+const PROGRAM_NAME_ALIAS_MAP = new Map(
+  [
+    ['요가교실', '요가'],
+    ['발레교실', '발레'],
+    ['스마트폰 교실', '스마트폰교실'],
+    ['k pop', '케이팝'],
+    ['k-pop', '케이팝'],
+    ['kpop댄스', '케이팝'],
+    ['kpop', '케이팝'],
+    ['케이팝댄스', '케이팝'],
+    ['k pop댄스', '케이팝'],
+  ].map(([key, value]) => [key.toLowerCase(), value]),
+);
+
+function normalizeProgramName(rawName) {
+  const trimmed = String(rawName ?? '').trim();
+  return PROGRAM_NAME_ALIAS_MAP.get(trimmed.toLowerCase()) ?? trimmed;
+}
+
 function buildSurveyAnalytics(survey, responses) {
   const questions = survey?.questions?.filter((question) => !isNonResponseQuestionType(question.type)) ?? [];
   const questionMap = new Map(questions.map((question) => [question.id, question]));
@@ -210,7 +230,9 @@ function buildSurveyAnalytics(survey, responses) {
     allScores.length > 0 ? allScores.reduce((total, value) => total + value, 0) / allScores.length : null;
   const getQuestionByTitle = (pattern) =>
     questions.find((question) => String(question.title ?? '').includes(pattern));
-  const buildGroupedAverages = (question) => {
+
+  // normalizer: 정규화 함수(선택). 원본 groupKey를 displayKey로 변환하는 데만 사용.
+  const buildGroupedAverages = (question, normalizer = null) => {
     if (!question) {
       return [];
     }
@@ -220,12 +242,13 @@ function buildSurveyAnalytics(survey, responses) {
     responses.forEach((response) => {
       const answers = response.answers ?? [];
       const groupAnswer = answers.find((item) => item.questionId === question.id)?.answer;
-      const groupKey = String(groupAnswer ?? '').trim();
+      const rawKey = String(groupAnswer ?? '').trim();
 
-      if (!groupKey) {
+      if (!rawKey) {
         return;
       }
 
+      const displayKey = normalizer ? normalizer(rawKey) : rawKey;
       const responseScores = answers
         .map((item) => getNumericScore(item.answer, questionMap.get(item.questionId)))
         .filter((score) => score !== null);
@@ -234,10 +257,10 @@ function buildSurveyAnalytics(survey, responses) {
         return;
       }
 
-      const current = groups.get(groupKey) ?? { label: groupKey, total: 0, count: 0 };
+      const current = groups.get(displayKey) ?? { label: displayKey, total: 0, count: 0 };
       current.total += responseScores.reduce((total, score) => total + score, 0) / responseScores.length;
       current.count += 1;
-      groups.set(groupKey, current);
+      groups.set(displayKey, current);
     });
 
     return Array.from(groups.values()).map((group) => ({
@@ -246,6 +269,39 @@ function buildSurveyAnalytics(survey, responses) {
       count: group.count,
     }));
   };
+
+  // 응답 수 기반 현황 집계. normalizer 적용 시 정규화된 키로 합산.
+  const buildGroupedCounts = (question, normalizer = null) => {
+    if (!question) {
+      return [];
+    }
+
+    const groups = new Map();
+    const total = responses.length;
+
+    responses.forEach((response) => {
+      const groupAnswer = (response.answers ?? []).find(
+        (item) => item.questionId === question.id,
+      )?.answer;
+      const rawKey = String(groupAnswer ?? '').trim();
+
+      if (!rawKey) {
+        return;
+      }
+
+      const displayKey = normalizer ? normalizer(rawKey) : rawKey;
+      groups.set(displayKey, (groups.get(displayKey) ?? 0) + 1);
+    });
+
+    return Array.from(groups.entries())
+      .map(([label, count]) => ({
+        label,
+        count,
+        percent: total > 0 ? Math.round((count / total) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+  };
+
   const keyAverages = scoredRows.reduce((result, row) => {
     if (row.question.meta?.analyticsKey && row.average !== null) {
       result[row.question.meta.analyticsKey] = row.average;
@@ -267,6 +323,10 @@ function buildSurveyAnalytics(survey, responses) {
       ? socialNetworkValues.reduce((total, value) => total + value, 0) / socialNetworkValues.length
       : null;
 
+  const programNameQuestion = getQuestionByTitle('수강한 프로그램명');
+  const areaQuestion = getQuestionByTitle('살고있는 곳');
+  const usagePeriodQuestion = getQuestionByTitle('이용기간');
+
   return {
     scoredRows,
     totalAverage,
@@ -275,10 +335,15 @@ function buildSurveyAnalytics(survey, responses) {
     textResponses,
     keyAverages,
     groupAverages: {
-      usagePeriod: buildGroupedAverages(getQuestionByTitle('이용기간')),
-      area: buildGroupedAverages(getQuestionByTitle('살고있는 곳')),
+      usagePeriod: buildGroupedAverages(usagePeriodQuestion),
+      area: buildGroupedAverages(areaQuestion),
       gender: buildGroupedAverages(getQuestionByTitle('성별')),
-      programName: buildGroupedAverages(getQuestionByTitle('수강한 프로그램명')),
+      programName: buildGroupedAverages(programNameQuestion, normalizeProgramName),
+    },
+    groupCounts: {
+      area: buildGroupedCounts(areaQuestion),
+      usagePeriod: buildGroupedCounts(usagePeriodQuestion),
+      programName: buildGroupedCounts(programNameQuestion, normalizeProgramName),
     },
     socialNetworkAverage,
   };
@@ -1432,6 +1497,94 @@ function SurveyResponsesAdminPage() {
                     </div>
                   </div>
                 </>
+              )}
+            </div>
+          )}
+
+          {(surveyAnalytics.groupCounts.area.length > 0 ||
+            surveyAnalytics.groupCounts.usagePeriod.length > 0 ||
+            surveyAnalytics.groupCounts.programName.length > 0) && (
+            <div>
+              <h3>응답 현황 집계</h3>
+              <p className="meta-description">
+                정규화된 프로그램명 기준으로 집계합니다. 원본 응답 데이터와 CSV는 변경되지 않습니다.
+              </p>
+              <div className="analytics-rank-grid">
+                {surveyAnalytics.groupCounts.programName.length > 0 && (
+                  <div>
+                    <h4>프로그램별 응답 현황</h4>
+                    <div className="response-table-wrapper">
+                      <table className="response-table">
+                        <thead>
+                          <tr>
+                            <th>프로그램명</th>
+                            <th>응답 수</th>
+                            <th>비율</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {surveyAnalytics.groupCounts.programName.map((row) => (
+                            <tr key={`pgcount-${row.label}`}>
+                              <td>{row.label}</td>
+                              <td>{row.count}건</td>
+                              <td>{row.percent}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                {surveyAnalytics.groupCounts.area.length > 0 && (
+                  <div>
+                    <h4>지역별 응답 현황</h4>
+                    <div className="response-table-wrapper">
+                      <table className="response-table">
+                        <thead>
+                          <tr>
+                            <th>지역</th>
+                            <th>응답 수</th>
+                            <th>비율</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {surveyAnalytics.groupCounts.area.map((row) => (
+                            <tr key={`areacount-${row.label}`}>
+                              <td>{row.label}</td>
+                              <td>{row.count}건</td>
+                              <td>{row.percent}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {surveyAnalytics.groupCounts.usagePeriod.length > 0 && (
+                <div>
+                  <h4>참여기간별 응답 현황</h4>
+                  <div className="response-table-wrapper">
+                    <table className="response-table">
+                      <thead>
+                        <tr>
+                          <th>참여기간</th>
+                          <th>응답 수</th>
+                          <th>비율</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {surveyAnalytics.groupCounts.usagePeriod.map((row) => (
+                          <tr key={`usagecount-${row.label}`}>
+                            <td>{row.label}</td>
+                            <td>{row.count}건</td>
+                            <td>{row.percent}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </div>
           )}
