@@ -10,12 +10,19 @@ export const PROGRAM_NAME_ALIAS_MAP = new Map(
     ['요가교실', '요가'],
     ['발레교실', '발레'],
     ['스마트폰 교실', '스마트폰교실'],
+    ['트니트니a', '트니트니'],
+    ['트니트니b', '트니트니'],
+    ['트니트니c', '트니트니'],
+    ['연필그로딩', '연필드로잉'],
+    ['연필그로밍', '연필드로잉'],
+    ['연필스케치', '연필드로잉'],
     ['k pop', '케이팝'],
     ['k-pop', '케이팝'],
     ['kpop댄스', '케이팝'],
     ['kpop', '케이팝'],
     ['케이팝댄스', '케이팝'],
     ['k pop댄스', '케이팝'],
+    ['케이팝 오전', '케이팝'],
   ].map(([key, value]) => [key.toLowerCase(), value]),
 );
 
@@ -30,14 +37,24 @@ export function formatAverage(value) {
 
 export const FREE_TEXT_CATEGORY_RULES = [
   {
-    key: 'education_content_satisfaction',
-    label: '교육 내용 만족',
-    keywords: ['내용', '교육', '수업', '프로그램', '강의', '배움', '유익', '좋았', '만족', '재밌', '재미'],
+    key: 'facility_environment_improvement',
+    label: '시설/환경 개선',
+    keywords: ['시설', '환경', '공간', '장소', '교실', '장비', '도구', '깨끗', '소음', '온도', '책상', '의자', '주차', '냉난방'],
   },
   {
-    key: 'instructor_satisfaction',
-    label: '강사/진행 만족',
-    keywords: ['강사', '선생님', '진행', '설명', '친절', '강의력', '지도', '알려'],
+    key: 'schedule_improvement',
+    label: '운영시간/일정 개선',
+    keywords: ['시간', '일정', '요일', '기간', '횟수', '회기', '짧', '길', '오전', '오후', '주말', '평일', '방학'],
+  },
+  {
+    key: 'additional_education_request',
+    label: '추가 교육 요청',
+    keywords: ['추가', '더', '심화', '다음', '계속', '또', '재참여', '개설', '배우고 싶', '교육 요청', '다양화', '다양', '늘려', '늘었', '신설', '확대'],
+  },
+  {
+    key: 'promotion_participation_request',
+    label: '홍보/참여 확대 요청',
+    keywords: ['홍보', '알림', '안내', '모집', '참여', '많은 사람', '공유', '접수', '신청'],
   },
   {
     key: 'practice_intent',
@@ -45,24 +62,14 @@ export const FREE_TEXT_CATEGORY_RULES = [
     keywords: ['실천', '적용', '활용', '써먹', '사용', '연습', '집에서', '생활', '도움'],
   },
   {
-    key: 'additional_education_request',
-    label: '추가 교육 요청',
-    keywords: ['추가', '더', '심화', '다음', '계속', '또', '재참여', '개설', '배우고 싶', '교육 요청'],
+    key: 'instructor_satisfaction',
+    label: '강사/진행 만족',
+    keywords: ['강사', '선생님', '진행', '설명', '친절', '강의력', '지도', '알려'],
   },
   {
-    key: 'promotion_participation_request',
-    label: '홍보/참여 확대 요청',
-    keywords: ['홍보', '알림', '안내', '모집', '참여', '많은 사람', '확대', '공유'],
-  },
-  {
-    key: 'facility_environment_improvement',
-    label: '시설/환경 개선',
-    keywords: ['시설', '환경', '공간', '장소', '교실', '장비', '도구', '깨끗', '소음', '온도', '책상', '의자'],
-  },
-  {
-    key: 'schedule_improvement',
-    label: '운영시간/일정 개선',
-    keywords: ['시간', '일정', '요일', '기간', '횟수', '회기', '짧', '길', '오전', '오후', '주말'],
+    key: 'education_content_satisfaction',
+    label: '교육 내용 만족',
+    keywords: ['내용', '교육', '수업', '프로그램', '강의', '배움', '유익', '좋았', '만족', '재밌', '재미'],
   },
   {
     key: 'etc',
@@ -71,10 +78,47 @@ export const FREE_TEXT_CATEGORY_RULES = [
   },
 ];
 
+const SIMPLE_FREE_TEXT_ANSWERS = new Set([
+  '-',
+  '없음',
+  '없다',
+  '없습니다',
+  '무',
+  'x',
+  'X',
+  '좋다',
+  '좋음',
+  '만족',
+  '만족함',
+  '만족합니다',
+  '네',
+  '아니요',
+]);
+
+function normalizeFreeTextAnswer(answer) {
+  return String(answer ?? '')
+    .trim()
+    .replace(/[.!?。,\s]+$/g, '')
+    .toLowerCase();
+}
+
+function isSimpleFreeTextAnswer(answer) {
+  const normalizedAnswer = normalizeFreeTextAnswer(answer);
+  return (
+    SIMPLE_FREE_TEXT_ANSWERS.has(normalizedAnswer) ||
+    /^[\s\-_.]+$/.test(String(answer ?? '')) ||
+    normalizedAnswer.length <= 1
+  );
+}
+
 function classifyFreeTextAnswer(answer) {
-  const normalizedAnswer = String(answer ?? '').trim().toLowerCase();
+  const normalizedAnswer = normalizeFreeTextAnswer(answer);
 
   if (!normalizedAnswer) {
+    return FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1];
+  }
+
+  if (isSimpleFreeTextAnswer(answer)) {
     return FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1];
   }
 
@@ -105,7 +149,7 @@ export function buildFreeTextCategorySummary(textResponses) {
     const category = classifyFreeTextAnswer(answer);
     const group = groups.get(category.key) ?? groups.get('etc');
     group.count += 1;
-    if (group.examples.length < 3) {
+    if (group.examples.length < 3 && !isSimpleFreeTextAnswer(answer)) {
       group.examples.push(answer);
     }
   });

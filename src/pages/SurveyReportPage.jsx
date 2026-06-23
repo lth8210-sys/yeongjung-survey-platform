@@ -181,6 +181,26 @@ function getReportAuditMetadata(reportMeta, survey) {
   };
 }
 
+function limitRowsWithEtc(rows, limit = 15) {
+  if (!Array.isArray(rows) || rows.length <= limit) {
+    return rows ?? [];
+  }
+
+  const visibleRows = rows.slice(0, limit);
+  const hiddenRows = rows.slice(limit);
+  const etcCount = hiddenRows.reduce((sum, row) => sum + (row.count ?? 0), 0);
+  const etcPercent = hiddenRows.reduce((sum, row) => sum + (row.percent ?? 0), 0);
+
+  return [
+    ...visibleRows,
+    {
+      label: '기타',
+      count: etcCount,
+      percent: Math.round(etcPercent * 10) / 10,
+    },
+  ];
+}
+
 function generateSummary(analytics, responseCount) {
   const parts = [`본 조사에는 총 ${responseCount}명이 응답하였다.`];
 
@@ -339,11 +359,15 @@ function FreeTextCategoryTable({ rows }) {
             <td>{row.label}</td>
             <td>{row.count}건</td>
             <td>
-              <ul className="report-category-examples">
-                {row.examples.map((example, index) => (
-                  <li key={`${row.key}-${index}`}>{example}</li>
-                ))}
-              </ul>
+              {row.examples.length > 0 ? (
+                <ul className="report-category-examples">
+                  {row.examples.map((example, index) => (
+                    <li key={`${row.key}-${index}`}>{example}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="report-empty-example">-</span>
+              )}
             </td>
           </tr>
         ))}
@@ -692,6 +716,14 @@ export default function SurveyReportPage() {
   const hasSatisfaction = analytics && analytics.scoredRows.length > 0;
   const hasFreeText = analytics && analytics.textResponses.length > 0;
   const activeReportSections = reportSections ?? defaultReportSections ?? {};
+  const scoredAnswerCount = analytics?.scoredRows.reduce((sum, row) => sum + row.count, 0) ?? 0;
+  const displayedProgramRows = limitRowsWithEtc(analytics?.groupCounts.programName ?? [], 15);
+  const overviewTextValue = activeReportSections.overviewText ?? '';
+  const surveyDescriptionValue = String(survey.description ?? '').trim();
+  const shouldShowOverviewText =
+    editing ||
+    !surveyDescriptionValue ||
+    (overviewTextValue.trim() && overviewTextValue.trim() !== surveyDescriptionValue);
   const characteristicsSectionNumber = hasCharacteristics ? 2 : null;
   const satisfactionSectionNumber = hasSatisfaction ? (hasCharacteristics ? 3 : 2) : null;
   const freeTextSectionNumber =
@@ -758,7 +790,7 @@ export default function SurveyReportPage() {
                 ? '수정된 내용이 있을 때 저장할 수 있습니다.'
                 : dirty
                   ? '저장하지 않은 변경사항이 있습니다.'
-                  : '인쇄 설정에서 배경 그래픽을 체크하면 더 보기 좋게 출력됩니다.')}
+                  : 'PDF 저장 시 브라우저 인쇄 설정에서 머리글과 바닥글을 해제하면 더 깔끔하게 출력됩니다.')}
           </span>
         </div>
         {editing && !dirty && (
@@ -885,12 +917,14 @@ export default function SurveyReportPage() {
                 )}
               </tbody>
             </table>
-            <ReportEditableText
-              editing={editing}
-              label="조사 개요 설명문"
-              onChange={(value) => updateReportSection('overviewText', value)}
-              value={activeReportSections.overviewText ?? ''}
-            />
+            {shouldShowOverviewText && (
+              <ReportEditableText
+                editing={editing}
+                label="조사 개요 설명문"
+                onChange={(value) => updateReportSection('overviewText', value)}
+                value={overviewTextValue}
+              />
+            )}
           </section>
 
           {/* 2. 응답자 특성 */}
@@ -906,7 +940,7 @@ export default function SurveyReportPage() {
               <div className="report-char-grid">
                 <CountTable
                   labelHeader="프로그램명"
-                  rows={analytics.groupCounts.programName}
+                  rows={displayedProgramRows}
                   title="프로그램별 응답 현황"
                 />
                 <CountTable
@@ -930,7 +964,7 @@ export default function SurveyReportPage() {
               <p className="report-section-lead">
                 전체 평균 만족도:{' '}
                 <strong>{formatAverage(analytics.totalAverage)}점</strong>
-                {' '}(응답 {analytics.scoredRows.reduce((sum, r) => sum + r.count, 0)}건 기준)
+                {' '}(응답자 {responses.length}명 기준, 문항 응답 {scoredAnswerCount}건)
               </p>
               <ReportEditableText
                 editing={editing}

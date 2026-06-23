@@ -2917,6 +2917,10 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+.report-empty-example {
+  color: #9ca3af;
+}
+
 .report-empty-note {
   padding: 14px 16px;
   border: 1px solid #e5e7eb;
