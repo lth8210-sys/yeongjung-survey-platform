@@ -3020,7 +3020,13 @@ button:disabled {
 @media print {
   .modal-backdrop,
   .report-settings-backdrop,
+  .report-controls,
+  .report-controls-hint,
+  .report-footer,
+  .report-generated-at,
+  .report-generated-note,
   .report-print-footer,
+  .report-print-hint,
   .report-edit-mode-banner,
   .report-save-hint {
     display: none !important;

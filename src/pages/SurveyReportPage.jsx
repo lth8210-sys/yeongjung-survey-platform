@@ -13,6 +13,12 @@ import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
 const PRINT_STYLES = `
   @media print {
     .report-controls,
+    .report-controls-hint,
+    .report-footer,
+    .report-generated-at,
+    .report-generated-note,
+    .report-print-footer,
+    .report-print-hint,
     .report-edit-mode-banner,
     .report-save-hint {
       display: none !important;
@@ -66,14 +72,6 @@ const PRINT_STYLES = `
     .report-freetext-group {
       break-inside: auto;
       page-break-inside: auto;
-    }
-    .report-print-footer {
-      display: none;
-    }
-    .report-footer {
-      display: block;
-      break-inside: avoid;
-      page-break-inside: avoid;
     }
     .report-char-grid,
     .report-top-low-grid {
@@ -903,11 +901,6 @@ export default function SurveyReportPage() {
         )}
 
         <div className="report-body">
-          <div className="report-print-footer">
-            본 보고서는 영중폼에서 생성되었으며, 원본 응답 데이터는 관리자 화면에서 확인할 수 있습니다. ·
-            인쇄일: {generatedAt}
-          </div>
-
           {/* 표지 */}
           <div className="report-cover">
             <div className="report-cover-inner">
@@ -1208,13 +1201,6 @@ export default function SurveyReportPage() {
               />
             </section>
           )}
-
-          <div className="report-footer">
-            <p>
-              본 보고서는 영중폼에서 생성되었으며, 원본 응답 데이터는 관리자 화면에서 확인할 수 있습니다. ·
-              인쇄일: {generatedAt}
-            </p>
-          </div>
         </div>
       </div>
     </>

@@ -127,6 +127,18 @@ const EXPLICIT_POSITIVE_KEYWORDS = [
   '훌륭',
 ];
 
+const FACILITY_EXCLUSION_KEYWORDS = [
+  '출입카드',
+  '카드리더기',
+  '리더기',
+  '매트',
+  '왁스',
+  '기자재',
+  '도구',
+  '시설',
+  '장비',
+];
+
 function normalizeFreeTextAnswer(answer) {
   return String(answer ?? '')
     .trim()
@@ -151,7 +163,12 @@ function isRepresentativeFreeTextAnswer(answer) {
   const trimmedAnswer = String(answer ?? '').trim();
   const normalizedAnswer = normalizeFreeTextAnswer(trimmedAnswer);
 
-  if (normalizedAnswer.length < 5) {
+  if (normalizedAnswer.length < 8) {
+    return false;
+  }
+
+  const compactAnswer = normalizedAnswer.replace(/\s+/g, '');
+  if (/^[a-z0-9가-힣]+요?$/.test(compactAnswer) && !/(희망|개설|요청|개선|불편|필요|만족)/.test(compactAnswer)) {
     return false;
   }
 
@@ -159,7 +176,7 @@ function isRepresentativeFreeTextAnswer(answer) {
     trimmedAnswer,
   );
 
-  return hasSentenceCue || normalizedAnswer.length >= 8;
+  return hasSentenceCue || normalizedAnswer.length >= 12;
 }
 
 export function classifyFreeTextAnswer(answer) {
@@ -186,9 +203,15 @@ export function classifyFreeTextAnswer(answer) {
     hasRequestOrImprovement && !hasExplicitPositive
       ? matchedRules.filter((rule) => rule.key !== 'program_satisfaction')
       : matchedRules;
+  const hasFacilityKeyword = FACILITY_EXCLUSION_KEYWORDS.some((keyword) =>
+    normalizedAnswer.includes(keyword.toLowerCase()),
+  );
+  const finalRules = hasFacilityKeyword
+    ? refinedRules.filter((rule) => rule.key !== 'program_expansion_request')
+    : refinedRules;
 
-  return refinedRules.length > 0
-    ? refinedRules
+  return finalRules.length > 0
+    ? finalRules
     : [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
 }
 
@@ -227,11 +250,17 @@ export function buildFreeTextCategorySummary(textResponses) {
   const visibleGroups = Array.from(groups.values())
     .filter((group) => group.count > 0 && group.examples.length > 0);
 
-  return visibleGroups.sort((first, second) => {
+  const sortedGroups = visibleGroups.sort((first, second) => {
     if (first.key === etcCategory.key) return 1;
     if (second.key === etcCategory.key) return -1;
     return second.count - first.count;
   });
+  const nonEtcGroups = sortedGroups.filter((group) => group.key !== etcCategory.key).slice(0, 5);
+  const etcGroup = sortedGroups.find((group) => group.key === etcCategory.key);
+
+  return nonEtcGroups.length < 5 && etcGroup
+    ? [...nonEtcGroups, etcGroup]
+    : nonEtcGroups;
 }
 
 function getNumericScore(answer, question) {
