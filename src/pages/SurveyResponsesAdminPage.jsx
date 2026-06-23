@@ -445,7 +445,7 @@ function SurveyResponsesAdminPage() {
         };
         fetchAllResponsesForSurveyExport(exportSurvey)
           .then((all) => setAllResponses(all))
-          .catch(() => {});
+          .catch((err) => console.warn('[allResponses] 전체 응답 조회 실패 — 분석/CSV는 로드된 목록 기준으로 표시됩니다.', err));
       }
 
       setResponses((current) => {
@@ -838,16 +838,32 @@ function SurveyResponsesAdminPage() {
       return;
     }
 
+    const exportSource = allResponses.length > 0 ? allResponses : responses;
+    const slotExport = exportSource.filter((response) => {
+      const slotSels =
+        Array.isArray(response.respondent?.slotSelections) && response.respondent.slotSelections.length > 0
+          ? response.respondent.slotSelections
+          : extractSlotSelections(survey.questions, response.answers, survey.optionQuotaCounts);
+      return slotSels.some(
+        (sel) =>
+          sel.questionId === selectedSlotFilter.questionId &&
+          sel.slotValue === selectedSlotFilter.slotValue,
+      );
+    });
+
     const rows = [
       ['제출일', '이름', '연락처', '슬롯', '처리 상태', '비고'],
-      ...filteredResponses.map((response) => [
-        formatFirestoreDate(response.submittedAt),
-        response.summary.name,
-        response.summary.phone,
-        selectedSlotFilter.title,
-        getResponseStatusMeta(response.status).label,
-        response.adminNote ?? '',
-      ]),
+      ...slotExport.map((response) => {
+        const summary = extractApplicationResponseSummary(survey.questions, response);
+        return [
+          formatFirestoreDate(response.submittedAt),
+          summary.name,
+          summary.phone,
+          selectedSlotFilter.title,
+          getResponseStatusMeta(response.status).label,
+          response.adminNote ?? '',
+        ];
+      }),
     ];
 
     withPrivacyCheck(() => {
@@ -859,7 +875,7 @@ function SurveyResponsesAdminPage() {
         actor: auditActor,
         metadata: {
           downloadType: 'slot',
-          loadedCount: filteredResponses.length,
+          totalCount: slotExport.length,
         },
       });
     });
