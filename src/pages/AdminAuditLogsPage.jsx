@@ -5,6 +5,13 @@ import { useAuth } from '../contexts/AuthContext';
 const AUDIT_LOG_PAGE_SIZE = 30;
 const ACTION_OPTIONS = [
   { value: '', label: '전체' },
+  { value: 'report_settings_opened', label: '결과보고서 설정 열람' },
+  { value: 'report_opened', label: '결과보고서 열람' },
+  { value: 'report_edit_started', label: '결과보고서 편집 시작' },
+  { value: 'report_saved', label: '결과보고서 저장' },
+  { value: 'report_print_clicked', label: '결과보고서 인쇄/PDF 클릭' },
+  { value: 'report_back_clicked', label: '결과보고서 관리자 화면 복귀' },
+  { value: 'report_unsaved_print_attempt', label: '결과보고서 저장 전 인쇄 시도' },
   { value: 'response_status_updated', label: '상태 변경' },
   { value: 'response_admin_note_updated', label: '메모 수정' },
   { value: 'response_anonymized', label: '익명화' },
@@ -12,6 +19,13 @@ const ACTION_OPTIONS = [
 ];
 const ACTION_LABELS = Object.fromEntries(ACTION_OPTIONS.map((option) => [option.value, option.label]));
 const METADATA_LABELS = {
+  surveyTitle: '설문명',
+  reportTitle: '보고서 제목',
+  reportPeriod: '조사기간',
+  target: '조사대상',
+  department: '작성부서',
+  sectionKeys: '수정 섹션',
+  savedAt: '저장 시각',
   fromStatus: '이전 상태',
   toStatus: '변경 상태',
   downloadType: '다운로드',
@@ -27,6 +41,10 @@ const DOWNLOAD_TYPE_LABELS = {
 function formatMetadataValue(key, value) {
   if (key === 'downloadType') {
     return DOWNLOAD_TYPE_LABELS[value] ?? value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.join(', ');
   }
 
   if (typeof value === 'number' || typeof value === 'boolean') {
@@ -216,7 +234,7 @@ function AdminAuditLogsPage() {
                     <td>{actionLabelMap[log.action] ?? log.action ?? '-'}</td>
                     <td>{log.surveyId || '-'}</td>
                     <td>{log.responseId || '-'}</td>
-                    <td>{log.actor?.email || '-'}</td>
+                    <td>{log.userEmail || log.actor?.email || '-'}</td>
                     <td>{formatMetadataSummary(log.metadata)}</td>
                   </tr>
                 ))}

@@ -96,6 +96,7 @@ const surveysCollection = db ? collection(db, 'surveys') : null;
 const responsesCollection = db ? collection(db, 'responses') : null;
 const draftResponsesCollection = db ? collection(db, 'draftResponses') : null;
 const auditLogsCollection = db ? collection(db, 'audit_logs') : null;
+const surveyReportsCollection = db ? collection(db, 'survey_reports') : null;
 
 const LEGACY_PUBLISHED_STATUSES = ['active'];
 
@@ -2016,6 +2017,7 @@ export async function fetchRecentResponses(limitCount = 20) {
 export async function createAuditLog({
   action,
   surveyId,
+  surveyTitle = '',
   responseId = null,
   actor = {},
   metadata = {},
@@ -2026,11 +2028,15 @@ export async function createAuditLog({
     await addDoc(auditLogsCollection, {
       action: String(action ?? ''),
       surveyId: String(surveyId ?? ''),
+      surveyTitle: String(surveyTitle ?? ''),
+      userId: String(actor?.uid ?? ''),
+      userEmail: String(actor?.email ?? ''),
+      userName: String(actor?.displayName ?? actor?.name ?? ''),
       responseId: responseId ? String(responseId) : null,
       actor: {
         uid: String(actor?.uid ?? ''),
         email: String(actor?.email ?? ''),
-        displayName: String(actor?.displayName ?? ''),
+        displayName: String(actor?.displayName ?? actor?.name ?? ''),
       },
       metadata:
         typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata)
@@ -2080,6 +2086,84 @@ export async function fetchAuditLogs({
     })),
     lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
     hasMore: snapshot.docs.length === normalizedLimit,
+  };
+}
+
+function sanitizeReportSections(sections = {}) {
+  if (!sections || typeof sections !== 'object' || Array.isArray(sections)) {
+    return {};
+  }
+
+  return {
+    overviewText: String(sections.overviewText ?? ''),
+    respondentProfileText: String(sections.respondentProfileText ?? ''),
+    satisfactionAnalysisText: String(sections.satisfactionAnalysisText ?? ''),
+    openEndedSummaryText: String(sections.openEndedSummaryText ?? ''),
+    improvementPlanText: String(sections.improvementPlanText ?? ''),
+    finalSummaryText: String(sections.finalSummaryText ?? ''),
+  };
+}
+
+export async function fetchSurveyReport(surveyId) {
+  ensureFirestoreReady();
+  const normalizedSurveyId = String(surveyId ?? '').trim();
+
+  if (!normalizedSurveyId) {
+    return null;
+  }
+
+  const snapshot = await getDoc(doc(surveyReportsCollection, normalizedSurveyId));
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    ...snapshot.data(),
+  };
+}
+
+export async function saveSurveyReport(surveyId, report, actor = {}) {
+  ensureFirestoreReady();
+  const normalizedSurveyId = String(surveyId ?? '').trim();
+
+  if (!normalizedSurveyId) {
+    throw new Error('저장할 보고서의 설문 ID가 없습니다.');
+  }
+
+  const reportRef = doc(surveyReportsCollection, normalizedSurveyId);
+  const currentSnapshot = await getDoc(reportRef);
+  const actorMeta = {
+    uid: String(actor?.uid ?? ''),
+    email: String(actor?.email ?? ''),
+    displayName: String(actor?.displayName ?? actor?.name ?? ''),
+  };
+  const payload = {
+    surveyId: normalizedSurveyId,
+    title: String(report?.title ?? ''),
+    periodStart: String(report?.periodStart ?? ''),
+    periodEnd: String(report?.periodEnd ?? ''),
+    period: String(report?.period ?? ''),
+    target: String(report?.target ?? ''),
+    department: String(report?.department ?? ''),
+    author: String(report?.author ?? ''),
+    reportDate: String(report?.reportDate ?? ''),
+    sections: sanitizeReportSections(report?.sections),
+    updatedBy: actorMeta,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (!currentSnapshot.exists()) {
+    payload.createdBy = actorMeta;
+    payload.createdAt = serverTimestamp();
+  }
+
+  await setDoc(reportRef, payload, { merge: true });
+
+  return {
+    id: normalizedSurveyId,
+    ...payload,
   };
 }
 

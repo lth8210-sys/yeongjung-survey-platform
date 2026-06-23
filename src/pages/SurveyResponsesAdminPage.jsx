@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ConfirmModal from '../components/ConfirmModal';
 import QrModal from '../components/QrModal';
@@ -126,6 +126,24 @@ function buildReportSettingsDefaults({ survey, responses, user }) {
     department: '영중종합사회복지관',
     writtenDate: formatDateInputValue(new Date()),
     author: user?.displayName ?? '',
+  };
+}
+
+function getReportPeriodLabel({ startDate, endDate }) {
+  if (startDate && endDate) {
+    return startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
+  }
+
+  return startDate || endDate || '';
+}
+
+function getReportAuditMetadata(settings, survey) {
+  return {
+    surveyTitle: survey?.title ?? '',
+    reportTitle: String(settings?.title ?? '').trim(),
+    reportPeriod: getReportPeriodLabel(settings ?? {}),
+    target: String(settings?.target ?? '').trim(),
+    department: String(settings?.department ?? '').trim(),
   };
 }
 
@@ -331,6 +349,7 @@ function SurveyResponsesAdminPage() {
   const [reportSettings, setReportSettings] = useState(() =>
     buildReportSettingsDefaults({ survey: null, responses: [], user: null }),
   );
+  const reportSettingsHistoryPushedRef = useRef(false);
   const auditActor = {
     uid: user?.uid ?? '',
     email: user?.email ?? '',
@@ -494,6 +513,20 @@ function SurveyResponsesAdminPage() {
   useEffect(() => {
     loadPageData();
   }, [canViewSurveyResponses, role, surveyId, user?.email, user?.uid]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (!reportSettingsHistoryPushedRef.current) {
+        return;
+      }
+
+      reportSettingsHistoryPushedRef.current = false;
+      setReportSettingsOpen(false);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const handleDuplicate = async () => {
     try {
@@ -901,14 +934,39 @@ function SurveyResponsesAdminPage() {
   };
 
   const handleReportSettingsOpen = () => {
-    setReportSettings(
-      buildReportSettingsDefaults({
-        survey,
-        responses: analyticsSource,
-        user,
-      }),
-    );
+    const nextSettings = buildReportSettingsDefaults({
+      survey,
+      responses: analyticsSource,
+      user,
+    });
+
+    setReportSettings(nextSettings);
+    createAuditLog({
+      action: 'report_settings_opened',
+      surveyId,
+      surveyTitle: survey?.title ?? '',
+      actor: auditActor,
+      metadata: getReportAuditMetadata(nextSettings, survey),
+    });
+    if (!reportSettingsHistoryPushedRef.current) {
+      window.history.pushState(
+        { reportSettingsModal: true },
+        '',
+        `${window.location.pathname}${window.location.search}${window.location.hash}`,
+      );
+      reportSettingsHistoryPushedRef.current = true;
+    }
     setReportSettingsOpen(true);
+  };
+
+  const handleReportSettingsClose = () => {
+    setReportSettingsOpen(false);
+
+    if (reportSettingsHistoryPushedRef.current) {
+      reportSettingsHistoryPushedRef.current = false;
+      window.history.back();
+      return;
+    }
   };
 
   const handleReportOpen = () => {
@@ -924,6 +982,10 @@ function SurveyResponsesAdminPage() {
     const reportUrl = `/admin/surveys/${surveyId}/report${queryString ? `?${queryString}` : ''}`;
     window.open(reportUrl, '_blank', 'noopener,noreferrer');
     setReportSettingsOpen(false);
+    if (reportSettingsHistoryPushedRef.current) {
+      reportSettingsHistoryPushedRef.current = false;
+      window.history.back();
+    }
   };
 
   const isApplicationForm = isApplicationFormType(survey?.formType);
@@ -1896,7 +1958,7 @@ function SurveyResponsesAdminPage() {
       <ReportSettingsModal
         isOpen={reportSettingsOpen}
         onChange={setReportSettings}
-        onClose={() => setReportSettingsOpen(false)}
+        onClose={handleReportSettingsClose}
         onSubmit={handleReportOpen}
         values={reportSettings}
       />

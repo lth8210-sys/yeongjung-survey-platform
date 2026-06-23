@@ -347,11 +347,58 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /survey_reports/{reportId} {
+      allow read: if isAtLeastAdmin();
+      allow create, update: if isAtLeastAdmin() &&
+        request.resource.data.keys().hasOnly([
+          "surveyId",
+          "title",
+          "periodStart",
+          "periodEnd",
+          "period",
+          "target",
+          "department",
+          "author",
+          "reportDate",
+          "sections",
+          "createdBy",
+          "updatedBy",
+          "createdAt",
+          "updatedAt"
+        ]) &&
+        request.resource.data.surveyId == reportId &&
+        request.resource.data.title is string &&
+        request.resource.data.periodStart is string &&
+        request.resource.data.periodEnd is string &&
+        request.resource.data.period is string &&
+        request.resource.data.target is string &&
+        request.resource.data.department is string &&
+        request.resource.data.author is string &&
+        request.resource.data.reportDate is string &&
+        request.resource.data.sections is map &&
+        request.resource.data.updatedBy is map &&
+        request.resource.data.updatedAt == request.time &&
+        (
+          !request.resource.data.keys().hasAny(["createdBy"]) ||
+          request.resource.data.createdBy is map
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["createdAt"]) ||
+          request.resource.data.createdAt == request.time ||
+          request.resource.data.createdAt == resource.data.createdAt
+        );
+      allow delete: if false;
+    }
+
     match /audit_logs/{logId} {
       allow create: if isAtLeastAdmin() &&
         request.resource.data.keys().hasOnly([
           "action",
           "surveyId",
+          "surveyTitle",
+          "userId",
+          "userEmail",
+          "userName",
           "responseId",
           "actor",
           "deletedBy",
@@ -361,6 +408,22 @@ service cloud.firestore {
         ]) &&
         request.resource.data.action is string &&
         request.resource.data.surveyId is string &&
+        (
+          !request.resource.data.keys().hasAny(["surveyTitle"]) ||
+          request.resource.data.surveyTitle is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["userId"]) ||
+          request.resource.data.userId is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["userEmail"]) ||
+          request.resource.data.userEmail is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["userName"]) ||
+          request.resource.data.userName is string
+        ) &&
         (
           request.resource.data.responseId == null ||
           request.resource.data.responseId is string
