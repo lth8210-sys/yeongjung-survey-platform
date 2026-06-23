@@ -9,6 +9,7 @@ import { FORM_TEMPLATES } from '../data/formTemplates';
 import {
   alignQuestionsToSections,
   createSurvey,
+  detectPrivacyQuestions,
   fetchResponseCountBySurveyId,
   fetchSurveyById,
   getFirestoreErrorMessage,
@@ -1334,7 +1335,13 @@ function SurveyBuilderPage() {
             role,
           },
         });
-        setMessage('저장되었습니다.');
+        if (validQuestions.length >= 500) {
+          setMessage(`저장되었습니다. 문항이 ${validQuestions.length}개입니다. 응답 모드를 '페이지형'으로 설정하는 것을 권장합니다.`);
+        } else if (validQuestions.length >= 300) {
+          setMessage(`저장되었습니다. 문항이 ${validQuestions.length}개입니다. 섹션을 나눠 페이지형으로 운영하면 응답자 부담이 줄어듭니다.`);
+        } else {
+          setMessage('저장되었습니다.');
+        }
         return;
       }
 
@@ -1442,6 +1449,7 @@ function SurveyBuilderPage() {
     return '';
   };
   const saveDisabledReason = getSaveDisabledReason();
+  const piiDetection = useMemo(() => detectPrivacyQuestions(questions), [questions]);
   const getTemplateBadges = (template) => {
     const badges = [];
     if (Array.isArray(template.tags) && template.tags.length > 0) {
@@ -1976,6 +1984,19 @@ function SurveyBuilderPage() {
 
       {message && <div className="form-message">{message}</div>}
       {saveDisabledReason && <div className="inline-note">{saveDisabledReason}</div>}
+      {questions.length >= 300 && (
+        <div className="inline-note">
+          {questions.length >= 500
+            ? `문항이 ${questions.length}개입니다. 응답 모드를 '페이지형'으로 설정하면 응답자 부담을 줄일 수 있습니다.`
+            : `문항이 ${questions.length}개입니다. 섹션을 나눠 페이지형으로 운영하면 응답자 부담이 줄어듭니다.`}
+        </div>
+      )}
+      {piiDetection.hasPiiQuestions && (
+        <div className="inline-note">
+          개인정보 수집 가능 문항 {piiDetection.piiQuestions.length}개 포함
+          {!piiDetection.hasConsentQuestion && ' · 개인정보 동의 문항이 없습니다.'}
+        </div>
+      )}
 
       <div className="builder-footer builder-save-bar">
           <div className="card-actions">

@@ -1818,6 +1818,29 @@ function SurveyResponsePage() {
             <div>
               <strong>작성 중인 임시저장이 있습니다.</strong>
               <p>이전에 입력하던 내용으로 이어서 작성하거나 새로 시작할 수 있습니다.</p>
+              {pendingDraft?.updatedAt && (() => {
+                try {
+                  const d = pendingDraft.updatedAt instanceof Date
+                    ? pendingDraft.updatedAt
+                    : new Date(pendingDraft.updatedAt);
+                  const diffMin = Math.floor((Date.now() - d.getTime()) / 60000);
+                  const timeText = diffMin < 1
+                    ? '방금 전'
+                    : diffMin < 60
+                      ? `${diffMin}분 전`
+                      : `${Math.floor(diffMin / 60)}시간 전`;
+                  const answerCount = typeof pendingDraft.answers === 'object'
+                    ? Object.keys(pendingDraft.answers).length
+                    : 0;
+                  return (
+                    <small className="muted-label">
+                      {timeText} 저장됨{answerCount > 0 ? ` · 답변 ${answerCount}개` : ''}
+                    </small>
+                  );
+                } catch {
+                  return null;
+                }
+              })()}
             </div>
             <div className="card-actions">
               <button className="primary-button" onClick={handleContinueDraft} type="button">
@@ -1900,6 +1923,9 @@ function SurveyResponsePage() {
                   <strong>
                     {currentSectionSafeIndex + 1} / {groupedSections.length} 섹션
                   </strong>
+                  {groupedSections.length - currentSectionSafeIndex - 1 > 0 && (
+                    <span className="muted-label"> · 남은 {groupedSections.length - currentSectionSafeIndex - 1}섹션</span>
+                  )}
                 </div>
                 <div className="response-progress-track" aria-hidden="true">
                   <div

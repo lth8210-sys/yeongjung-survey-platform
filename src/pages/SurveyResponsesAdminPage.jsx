@@ -334,6 +334,8 @@ function SurveyResponsesAdminPage() {
   const [loadingMoreResponses, setLoadingMoreResponses] = useState(false);
   const [responsePageSource, setResponsePageSource] = useState('surveyId');
   const [allResponses, setAllResponses] = useState([]);
+  const [analyticsStatus, setAnalyticsStatus] = useState('loading');
+  const [freeTextExpanded, setFreeTextExpanded] = useState(false);
   const auditActor = {
     uid: user?.uid ?? '',
     email: user?.email ?? '',
@@ -443,9 +445,16 @@ function SurveyResponsesAdminPage() {
           id: surveyId,
           title: responseResult[0]?.surveyTitle ?? '',
         };
+        setAnalyticsStatus('loading');
         fetchAllResponsesForSurveyExport(exportSurvey)
-          .then((all) => setAllResponses(all))
-          .catch((err) => console.warn('[allResponses] 전체 응답 조회 실패 — 분석/CSV는 로드된 목록 기준으로 표시됩니다.', err));
+          .then((all) => {
+            setAllResponses(all);
+            setAnalyticsStatus('ready');
+          })
+          .catch((err) => {
+            console.warn('[allResponses] 전체 응답 조회 실패 — 분석/CSV는 로드된 목록 기준으로 표시됩니다.', err);
+            setAnalyticsStatus('partial');
+          });
       }
 
       setResponses((current) => {
@@ -881,6 +890,21 @@ function SurveyResponsesAdminPage() {
     });
   };
 
+  const handleAnalyticsRefresh = () => {
+    const exportSurvey = survey ?? { id: surveyId, title: '' };
+    if (!exportSurvey.id) return;
+    setAnalyticsStatus('loading');
+    fetchAllResponsesForSurveyExport(exportSurvey)
+      .then((all) => {
+        setAllResponses(all);
+        setAnalyticsStatus('ready');
+      })
+      .catch((err) => {
+        console.warn('[allResponses] 새로고침 실패:', err);
+        setAnalyticsStatus('partial');
+      });
+  };
+
   const isApplicationForm = isApplicationFormType(survey?.formType);
 
   const responseItems = useMemo(() => {
@@ -1290,6 +1314,21 @@ function SurveyResponsesAdminPage() {
               <p className="meta-description">
                 전체 평균 {formatAverage(surveyAnalytics.totalAverage)}점 · 문항별 평균과 응답 분포를 확인합니다.
               </p>
+              <small className="muted-label">
+                {analyticsStatus === 'loading' && '집계 중...'}
+                {analyticsStatus === 'ready' && `전체 ${allResponses.length}건 기준`}
+                {analyticsStatus === 'partial' && `로드된 ${responses.length}건 기준 (전체 조회 실패)`}
+              </small>
+            </div>
+            <div className="card-actions">
+              <button
+                className="secondary-button"
+                disabled={analyticsStatus === 'loading'}
+                onClick={handleAnalyticsRefresh}
+                type="button"
+              >
+                {analyticsStatus === 'loading' ? '집계 중...' : '분석 새로고침'}
+              </button>
             </div>
           </div>
 
@@ -1425,13 +1464,26 @@ function SurveyResponsesAdminPage() {
             <div>
               <h3>자유의견 목록</h3>
               <div className="response-answer-list">
-                {surveyAnalytics.textResponses.slice(0, 20).map((item, index) => (
-                  <div className="response-answer-item" key={`free-${index}`}>
-                    <strong>{item.questionTitle}</strong>
-                    <p>{item.answer}</p>
-                  </div>
-                ))}
+                {surveyAnalytics.textResponses
+                  .slice(0, freeTextExpanded ? undefined : 20)
+                  .map((item, index) => (
+                    <div className="response-answer-item" key={`free-${index}`}>
+                      <strong>{item.questionTitle}</strong>
+                      <p>{item.answer}</p>
+                    </div>
+                  ))}
               </div>
+              {surveyAnalytics.textResponses.length > 20 && (
+                <button
+                  className="secondary-button"
+                  onClick={() => setFreeTextExpanded((prev) => !prev)}
+                  type="button"
+                >
+                  {freeTextExpanded
+                    ? '접기'
+                    : `더 보기 (+${surveyAnalytics.textResponses.length - 20}건)`}
+                </button>
+              )}
             </div>
           )}
         </div>
