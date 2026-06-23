@@ -2356,3 +2356,248 @@ button:disabled {
     min-width: 100%;
   }
 }
+
+/* ── 결과보고서 ─────────────────────────────────────────── */
+
+.report-loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 16px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.report-loading-msg {
+  font-size: 15px;
+}
+
+.report-wrapper {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  font-size: 14px;
+  color: #111;
+  background: white;
+}
+
+.report-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+}
+
+.report-controls-hint {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-left: auto;
+}
+
+.report-body {
+  line-height: 1.7;
+}
+
+/* 표지 */
+.report-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 480px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 40px;
+  background: #f9fafb;
+  text-align: center;
+}
+
+.report-cover-inner {
+  padding: 40px;
+}
+
+.report-org-name {
+  font-size: 14px;
+  color: #6b7280;
+  letter-spacing: 0.05em;
+  margin-bottom: 24px;
+}
+
+.report-main-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: #111;
+  line-height: 1.3;
+}
+
+.report-subtitle {
+  font-size: 18px;
+  color: #374151;
+  margin-bottom: 32px;
+}
+
+.report-generated-at {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* 섹션 공통 */
+.report-section {
+  margin-bottom: 40px;
+}
+
+.report-section-title {
+  font-size: 17px;
+  font-weight: 700;
+  border-bottom: 2px solid #111;
+  padding-bottom: 6px;
+  margin-bottom: 16px;
+}
+
+.report-section-lead {
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+/* 표 공통 */
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.report-table th,
+.report-table td {
+  border: 1px solid #d1d5db;
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-table thead th {
+  background: #f3f4f6;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.report-table tbody th {
+  background: #f9fafb;
+  font-weight: 600;
+  width: 120px;
+  white-space: nowrap;
+}
+
+/* 조사 개요 표 */
+.report-overview-table {
+  max-width: 600px;
+}
+
+/* 응답자 특성 */
+.report-char-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.report-count-table h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #374151;
+}
+
+/* 만족도 분석 */
+.report-top-low-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.report-top-low-grid h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.report-score-table .report-score-avg {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.report-dist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.report-dist-item {
+  font-size: 12px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* 자유의견 */
+.report-freetext-group {
+  margin-bottom: 20px;
+}
+
+.report-freetext-group h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #374151;
+}
+
+.report-freetext-list {
+  padding-left: 20px;
+  margin: 0;
+}
+
+.report-freetext-list li {
+  margin-bottom: 6px;
+  line-height: 1.6;
+}
+
+/* 종합 요약 */
+.report-summary-box {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 20px 24px;
+  line-height: 1.8;
+  font-size: 14px;
+}
+
+/* 푸터 */
+.report-footer {
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .report-char-grid,
+  .report-top-low-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-cover {
+    min-height: 300px;
+  }
+
+  .report-main-title {
+    font-size: 22px;
+  }
+}

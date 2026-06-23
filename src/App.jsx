@@ -10,6 +10,7 @@ import RecentResponsesPage from './pages/RecentResponsesPage';
 import SurveyBuilderPage from './pages/SurveyBuilderPage';
 import SurveyListPage from './pages/SurveyListPage';
 import SurveyPreviewPage from './pages/SurveyPreviewPage';
+import SurveyReportPage from './pages/SurveyReportPage';
 import SurveyResponsesAdminPage from './pages/SurveyResponsesAdminPage';
 import SurveyResponsePage from './pages/SurveyResponsePage';
 import UserManagementPage from './pages/UserManagementPage';
@@ -19,6 +20,14 @@ function App() {
     <Routes>
       <Route path="surveys/:surveyId" element={<SurveyResponsePage />} />
       <Route path="survey/:surveyId" element={<SurveyResponsePage />} />
+      <Route
+        path="admin/surveys/:surveyId/report"
+        element={
+          <AdminRoute>
+            <SurveyReportPage />
+          </AdminRoute>
+        }
+      />
       <Route path="/" element={<AppLayout />}>
         <Route index element={<HomePage />} />
         <Route path="surveys" element={<SurveyListPage />} />
