@@ -201,21 +201,68 @@ function limitRowsWithEtc(rows, limit = 15) {
   ];
 }
 
+function getTopFreeTextCategories(analytics, limit = 3) {
+  return (analytics?.freeTextCategories ?? [])
+    .filter((category) => category.key !== 'etc')
+    .slice(0, limit);
+}
+
+function buildFreeTextFlowSentence(categories) {
+  if (!categories.length) {
+    return '';
+  }
+
+  const labels = categories.map((category) => category.label).join(', ');
+  const detailSentences = [];
+  const categoryKeys = new Set(categories.map((category) => category.key));
+
+  if (categoryKeys.has('new_program_request')) {
+    detailSentences.push('신규 프로그램 개설에 대한 요구가 확인되었다');
+  }
+  if (categoryKeys.has('program_expansion_request')) {
+    detailSentences.push('기존 프로그램의 확대 및 다양화 요구가 나타났다');
+  }
+  if (categoryKeys.has('facility_environment_improvement')) {
+    detailSentences.push('시설 및 환경 개선에 대한 의견이 제시되었다');
+  }
+  if (categoryKeys.has('schedule_improvement')) {
+    detailSentences.push('운영 시간과 일정 조정에 대한 의견이 확인되었다');
+  }
+  if (categoryKeys.has('promotion_participation_request')) {
+    detailSentences.push('홍보와 참여 접근성 개선 필요성이 제기되었다');
+  }
+  if (categoryKeys.has('program_satisfaction') || categoryKeys.has('instructor_satisfaction')) {
+    detailSentences.push('프로그램 운영과 강사에 대한 긍정적 평가도 함께 확인되었다');
+  }
+
+  return `자유의견에서는 ${labels} 등이 주요 유형으로 나타났다.${
+    detailSentences.length ? ` 특히 ${detailSentences.join(', ')}.` : ''
+  }`;
+}
+
 function generateSummary(analytics, responseCount) {
   const parts = [`본 조사에는 총 ${responseCount}명이 응답하였다.`];
 
   if (analytics.totalAverage !== null) {
-    parts.push(`전체 평균 만족도는 ${formatAverage(analytics.totalAverage)}점으로 나타났다.`);
+    const average = formatAverage(analytics.totalAverage);
+    parts.push(`전체 평균 만족도는 ${average}점으로 나타났다.`);
+    if (analytics.totalAverage >= 4) {
+      parts.push('전반적으로 프로그램에 대한 만족 수준은 양호하게 확인되었다.');
+    } else if (analytics.totalAverage >= 3) {
+      parts.push('전반적인 만족도는 보통 이상으로 나타났으며, 세부 영역별 개선 과제를 함께 검토할 필요가 있다.');
+    } else {
+      parts.push('전반적인 만족도는 상대적으로 낮게 나타나 운영 전반에 대한 개선 검토가 필요하다.');
+    }
     const top = analytics.topRows[0];
     const low = analytics.lowRows[0];
     if (top) {
       parts.push(
-        `상대적으로 높게 나타난 문항은 '${top.question.title}'(${formatAverage(top.average)}점)이다.`,
+        `특히 '${top.question.title}' 문항은 ${formatAverage(top.average)}점으로 상대적으로 높게 나타나 해당 영역에 대한 긍정적 평가를 확인할 수 있었다.`,
       );
     }
     if (low && (!top || low.question.id !== top.question.id)) {
       parts.push(
-        `상대적으로 낮게 나타난 문항은 '${low.question.title}'(${formatAverage(low.average)}점)이며, 향후 운영 개선 시 우선 검토할 필요가 있다.`,
+        `반면 '${low.question.title}' 문항은 ${formatAverage(low.average)}점으로 상대적으로 낮게 나타나 향후 운영 개선 시 우선 검토할 필요가 있다.`,
       );
     }
   }
@@ -233,12 +280,10 @@ function generateSummary(analytics, responseCount) {
     const t = usagePeriod[0];
     parts.push(`참여기간은 '${t.label}'(${t.count}건, ${t.percent}%) 응답이 가장 많았다.`);
   }
-  if (analytics.freeTextCategories?.length > 0) {
-    const topCategories = analytics.freeTextCategories
-      .slice(0, 3)
-      .map((category) => category.label)
-      .join(', ');
-    parts.push(`자유의견에서는 ${topCategories} 등이 주요 유형으로 확인되었다.`);
+  const topFreeTextCategories = getTopFreeTextCategories(analytics, 3);
+  const freeTextSentence = buildFreeTextFlowSentence(topFreeTextCategories);
+  if (freeTextSentence) {
+    parts.push(freeTextSentence);
   }
 
   return parts.join(' ');
@@ -251,6 +296,8 @@ function buildDefaultReportSections({ survey, analytics, responseCount, summary 
   const area = analytics?.groupCounts?.area?.[0];
   const usagePeriod = analytics?.groupCounts?.usagePeriod?.[0];
   const textCount = analytics?.textResponses?.length ?? 0;
+  const topFreeTextCategories = getTopFreeTextCategories(analytics, 3);
+  const freeTextFlowSentence = buildFreeTextFlowSentence(topFreeTextCategories);
 
   return {
     overviewText:
@@ -275,15 +322,24 @@ function buildDefaultReportSections({ survey, analytics, responseCount, summary 
     openEndedSummaryText:
       textCount > 0
         ? `자유의견은 총 ${textCount}건이 수집되었다.${
-            analytics.freeTextCategories?.length > 0
-              ? ` 주요 유형은 ${analytics.freeTextCategories.slice(0, 3).map((category) => category.label).join(', ')} 등으로 나타났다.`
-              : ''
+            freeTextFlowSentence ? ` ${freeTextFlowSentence}` : ''
           } 원문은 수정하지 않고, 보고서에는 주요 의견 흐름을 요약해 반영하였다.`
         : '수집된 자유의견이 없거나 분석 가능한 주관식 응답이 제한적이다.',
     improvementPlanText:
-      low
-        ? `'${low.question.title}' 항목을 중심으로 운영 개선 필요사항을 검토하고, 만족도가 높게 나타난 요소는 지속적으로 유지할 필요가 있다.`
-        : '조사 결과를 바탕으로 서비스 운영 과정의 강점은 유지하고, 반복적으로 제기되는 불편사항은 개선 과제로 관리할 필요가 있다.',
+      [
+        low
+          ? `'${low.question.title}' 항목을 중심으로 운영 개선 필요사항을 검토하고, 만족도가 높게 나타난 요소는 지속적으로 유지할 필요가 있다.`
+          : '조사 결과를 바탕으로 서비스 운영 과정의 강점은 유지하고, 반복적으로 제기되는 불편사항은 개선 과제로 관리할 필요가 있다.',
+        topFreeTextCategories.some((category) => category.key === 'facility_environment_improvement')
+          ? '시설 및 환경 개선 의견은 안전하고 안정적인 이용 환경 조성을 위한 검토 과제로 관리한다.'
+          : '',
+        topFreeTextCategories.some((category) => category.key === 'schedule_improvement')
+          ? '운영 시간과 일정 관련 의견은 향후 프로그램 편성 시 이용자 접근성을 높이는 관점에서 검토한다.'
+          : '',
+        topFreeTextCategories.some((category) => category.key === 'new_program_request')
+          ? '신규 프로그램 개설 요구는 대상자 특성과 수요를 함께 확인하여 차기 사업 계획 수립 시 참고한다.'
+          : '',
+      ].filter(Boolean).join(' '),
     finalSummaryText: summary || '분석할 응답 데이터가 없습니다.',
   };
 }

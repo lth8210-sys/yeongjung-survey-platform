@@ -13,10 +13,14 @@ export const PROGRAM_NAME_ALIAS_MAP = new Map(
     ['트니트니a', '트니트니'],
     ['트니트니b', '트니트니'],
     ['트니트니c', '트니트니'],
+    ['트니트니A', '트니트니'],
+    ['트니트니B', '트니트니'],
+    ['트니트니C', '트니트니'],
     ['연필그로딩', '연필드로잉'],
     ['연필그로밍', '연필드로잉'],
     ['연필스케치', '연필드로잉'],
     ['k pop', '케이팝'],
+    ['K POP', '케이팝'],
     ['k-pop', '케이팝'],
     ['kpop댄스', '케이팝'],
     ['kpop', '케이팝'],
@@ -37,39 +41,44 @@ export function formatAverage(value) {
 
 export const FREE_TEXT_CATEGORY_RULES = [
   {
-    key: 'facility_environment_improvement',
-    label: '시설/환경 개선',
-    keywords: ['시설', '환경', '공간', '장소', '교실', '장비', '도구', '깨끗', '소음', '온도', '책상', '의자', '주차', '냉난방'],
-  },
-  {
-    key: 'schedule_improvement',
-    label: '운영시간/일정 개선',
-    keywords: ['시간', '일정', '요일', '기간', '횟수', '회기', '짧', '길', '오전', '오후', '주말', '평일', '방학'],
-  },
-  {
-    key: 'additional_education_request',
-    label: '추가 교육 요청',
-    keywords: ['추가', '더', '심화', '다음', '계속', '또', '재참여', '개설', '배우고 싶', '교육 요청', '다양화', '다양', '늘려', '늘었', '신설', '확대'],
-  },
-  {
-    key: 'promotion_participation_request',
-    label: '홍보/참여 확대 요청',
-    keywords: ['홍보', '알림', '안내', '모집', '참여', '많은 사람', '공유', '접수', '신청'],
-  },
-  {
-    key: 'practice_intent',
-    label: '실천 적용 욕구',
-    keywords: ['실천', '적용', '활용', '써먹', '사용', '연습', '집에서', '생활', '도움'],
+    key: 'program_satisfaction',
+    label: '프로그램 만족',
+    keywords: ['프로그램', '수업', '교육', '강좌', '내용', '활동', '강의', '배움', '유익', '재밌', '재미', '좋았', '만족'],
   },
   {
     key: 'instructor_satisfaction',
-    label: '강사/진행 만족',
-    keywords: ['강사', '선생님', '진행', '설명', '친절', '강의력', '지도', '알려'],
+    label: '강사 만족',
+    keywords: ['강사', '선생님', '지도', '설명', '친절', '강의력', '진행', '알려', '가르쳐'],
   },
   {
-    key: 'education_content_satisfaction',
-    label: '교육 내용 만족',
-    keywords: ['내용', '교육', '수업', '프로그램', '강의', '배움', '유익', '좋았', '만족', '재밌', '재미'],
+    key: 'facility_environment_improvement',
+    label: '시설 및 환경 개선',
+    keywords: ['시설', '환경', '공간', '장소', '교실', '장비', '도구', '기자재', '카드리더기', '리더기', '출입카드', '출입', '고장', '작동', '깨끗', '소음', '온도', '책상', '의자', '주차', '냉난방'],
+  },
+  {
+    key: 'schedule_improvement',
+    label: '운영 및 일정 개선',
+    keywords: ['시간', '일정', '요일', '기간', '횟수', '회기', '짧', '길', '오전', '오후', '주말', '평일', '방학'],
+  },
+  {
+    key: 'new_program_request',
+    label: '신규 프로그램 개설 요청',
+    keywords: ['개설', '신설', '새로운', '신규', '만들어', '생겼', '있었으면', '있으면', 'ai', '인공지능', '외국어', '영어', '중국어', '일본어', '코딩', '컴퓨터', '디지털', '배우고 싶'],
+  },
+  {
+    key: 'program_expansion_request',
+    label: '프로그램 확대 요청',
+    keywords: ['추가', '더', '심화', '다음', '계속', '또', '재참여', '다양화', '다양', '늘려', '늘었', '확대', '많이', '많았으면', '강좌도', '프로그램도'],
+  },
+  {
+    key: 'promotion_participation_request',
+    label: '홍보 및 참여 접근성 개선',
+    keywords: ['홍보', '알림', '안내', '모집', '참여', '많은 사람', '공유', '접수', '신청', '접근', '방법', '온라인', '문자', '카톡', '카카오'],
+  },
+  {
+    key: 'user_suggestion',
+    label: '이용자 제안사항',
+    keywords: ['제안', '건의', '바랍니다', '해주세요', '필요', '개선', '요청', '희망', '원합니다', '불편'],
   },
   {
     key: 'etc',
@@ -88,12 +97,35 @@ const SIMPLE_FREE_TEXT_ANSWERS = new Set([
   'X',
   '좋다',
   '좋음',
+  '좋아요',
   '만족',
   '만족함',
   '만족합니다',
+  '매우 만족',
   '네',
   '아니요',
 ]);
+
+const REQUEST_OR_IMPROVEMENT_CATEGORY_KEYS = new Set([
+  'facility_environment_improvement',
+  'schedule_improvement',
+  'new_program_request',
+  'program_expansion_request',
+  'promotion_participation_request',
+  'user_suggestion',
+]);
+
+const EXPLICIT_POSITIVE_KEYWORDS = [
+  '만족',
+  '좋았',
+  '좋아',
+  '유익',
+  '재밌',
+  '재미',
+  '도움',
+  '감사',
+  '훌륭',
+];
 
 function normalizeFreeTextAnswer(answer) {
   return String(answer ?? '')
@@ -111,22 +143,34 @@ function isSimpleFreeTextAnswer(answer) {
   );
 }
 
-function classifyFreeTextAnswer(answer) {
+export function classifyFreeTextAnswer(answer) {
   const normalizedAnswer = normalizeFreeTextAnswer(answer);
 
   if (!normalizedAnswer) {
-    return FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1];
+    return [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
   }
 
   if (isSimpleFreeTextAnswer(answer)) {
-    return FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1];
+    return [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
   }
 
-  return (
-    FREE_TEXT_CATEGORY_RULES.find((rule) =>
-      rule.key !== 'etc' && rule.keywords.some((keyword) => normalizedAnswer.includes(keyword.toLowerCase())),
-    ) ?? FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]
+  const matchedRules = FREE_TEXT_CATEGORY_RULES.filter((rule) =>
+    rule.key !== 'etc' && rule.keywords.some((keyword) => normalizedAnswer.includes(keyword.toLowerCase())),
   );
+  const hasRequestOrImprovement = matchedRules.some((rule) =>
+    REQUEST_OR_IMPROVEMENT_CATEGORY_KEYS.has(rule.key),
+  );
+  const hasExplicitPositive = EXPLICIT_POSITIVE_KEYWORDS.some((keyword) =>
+    normalizedAnswer.includes(keyword.toLowerCase()),
+  );
+  const refinedRules =
+    hasRequestOrImprovement && !hasExplicitPositive
+      ? matchedRules.filter((rule) => rule.key !== 'program_satisfaction')
+      : matchedRules;
+
+  return refinedRules.length > 0
+    ? refinedRules
+    : [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
 }
 
 export function buildFreeTextCategorySummary(textResponses) {
@@ -146,12 +190,14 @@ export function buildFreeTextCategorySummary(textResponses) {
     const answer = String(item?.answer ?? '').trim();
     if (!answer) return;
 
-    const category = classifyFreeTextAnswer(answer);
-    const group = groups.get(category.key) ?? groups.get('etc');
-    group.count += 1;
-    if (group.examples.length < 3 && !isSimpleFreeTextAnswer(answer)) {
-      group.examples.push(answer);
-    }
+    const categories = classifyFreeTextAnswer(answer);
+    categories.forEach((category) => {
+      const group = groups.get(category.key) ?? groups.get('etc');
+      group.count += 1;
+      if (group.examples.length < 3 && !isSimpleFreeTextAnswer(answer)) {
+        group.examples.push(answer);
+      }
+    });
   });
 
   return Array.from(groups.values())
