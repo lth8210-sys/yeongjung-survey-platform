@@ -395,10 +395,6 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly([
           "action",
           "surveyId",
-          "surveyTitle",
-          "userId",
-          "userEmail",
-          "userName",
           "responseId",
           "actor",
           "deletedBy",
@@ -408,22 +404,6 @@ service cloud.firestore {
         ]) &&
         request.resource.data.action is string &&
         request.resource.data.surveyId is string &&
-        (
-          !request.resource.data.keys().hasAny(["surveyTitle"]) ||
-          request.resource.data.surveyTitle is string
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["userId"]) ||
-          request.resource.data.userId is string
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["userEmail"]) ||
-          request.resource.data.userEmail is string
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["userName"]) ||
-          request.resource.data.userName is string
-        ) &&
         (
           request.resource.data.responseId == null ||
           request.resource.data.responseId is string

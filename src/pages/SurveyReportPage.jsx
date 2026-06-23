@@ -155,6 +155,13 @@ function generateSummary(analytics, responseCount) {
     const t = usagePeriod[0];
     parts.push(`참여기간은 '${t.label}'(${t.count}건, ${t.percent}%)이 가장 많았습니다.`);
   }
+  if (analytics.freeTextCategories?.length > 0) {
+    const topCategories = analytics.freeTextCategories
+      .slice(0, 3)
+      .map((category) => category.label)
+      .join(', ');
+    parts.push(`자유의견에서는 ${topCategories} 등이 주요하게 나타났습니다.`);
+  }
 
   return parts.join(' ');
 }
@@ -189,7 +196,11 @@ function buildDefaultReportSections({ survey, analytics, responseCount, summary 
         : '만족도 문항 응답을 기준으로 주요 강점과 개선 지점을 해석합니다.',
     openEndedSummaryText:
       textCount > 0
-        ? `자유의견은 총 ${textCount}건이 수집되었습니다. 원문은 수정하지 않고, 보고서에는 주요 의견 흐름을 요약해 반영합니다.`
+        ? `자유의견은 총 ${textCount}건이 수집되었습니다.${
+            analytics.freeTextCategories?.length > 0
+              ? ` 주요 유형은 ${analytics.freeTextCategories.slice(0, 3).map((category) => category.label).join(', ')} 등입니다.`
+              : ''
+          } 원문은 수정하지 않고, 보고서에는 주요 의견 흐름을 요약해 반영합니다.`
         : '수집된 자유의견이 없거나 분석 가능한 주관식 응답이 제한적입니다.',
     improvementPlanText:
       low
@@ -243,6 +254,43 @@ function CountTable({ title, rows, labelHeader = '항목' }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function FreeTextCategoryTable({ rows }) {
+  if (!rows.length) {
+    return (
+      <div className="report-empty-note">
+        등록된 자유의견이 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <table className="report-table report-freetext-category-table">
+      <thead>
+        <tr>
+          <th>유형</th>
+          <th>건수</th>
+          <th>대표 의견</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.key}>
+            <td>{row.label}</td>
+            <td>{row.count}건</td>
+            <td>
+              <ul className="report-category-examples">
+                {row.examples.map((example, index) => (
+                  <li key={`${row.key}-${index}`}>{example}</li>
+                ))}
+              </ul>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -867,6 +915,10 @@ export default function SurveyReportPage() {
                 onChange={(value) => updateReportSection('openEndedSummaryText', value)}
                 value={activeReportSections.openEndedSummaryText ?? ''}
               />
+              <div className="report-subsection">
+                <h3>{freeTextSectionNumber}-1. 자유의견 주요 유형</h3>
+                <FreeTextCategoryTable rows={analytics.freeTextCategories ?? []} />
+              </div>
               {(() => {
                 const grouped = new Map();
                 analytics.textResponses.forEach(({ questionTitle, answer }) => {

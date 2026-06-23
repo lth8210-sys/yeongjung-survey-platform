@@ -2589,6 +2589,17 @@ button:disabled {
   font-size: 14px;
 }
 
+.report-subsection {
+  margin: 20px 0 22px;
+}
+
+.report-subsection h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
 .report-edit-block {
   margin: 14px 0 18px;
   padding: 14px 16px;
@@ -2774,6 +2785,29 @@ button:disabled {
 .report-freetext-list li {
   margin-bottom: 6px;
   line-height: 1.6;
+}
+
+.report-freetext-category-table td:nth-child(2) {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.report-category-examples {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.report-category-examples li {
+  margin-bottom: 4px;
+}
+
+.report-empty-note {
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 13px;
 }
 
 /* 종합 요약 */

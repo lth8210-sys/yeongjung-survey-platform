@@ -28,6 +28,93 @@ export function formatAverage(value) {
   return Number.isFinite(value) ? value.toFixed(2) : '-';
 }
 
+export const FREE_TEXT_CATEGORY_RULES = [
+  {
+    key: 'education_content_satisfaction',
+    label: '교육 내용 만족',
+    keywords: ['내용', '교육', '수업', '프로그램', '강의', '배움', '유익', '좋았', '만족', '재밌', '재미'],
+  },
+  {
+    key: 'instructor_satisfaction',
+    label: '강사/진행 만족',
+    keywords: ['강사', '선생님', '진행', '설명', '친절', '강의력', '지도', '알려'],
+  },
+  {
+    key: 'practice_intent',
+    label: '실천 적용 욕구',
+    keywords: ['실천', '적용', '활용', '써먹', '사용', '연습', '집에서', '생활', '도움'],
+  },
+  {
+    key: 'additional_education_request',
+    label: '추가 교육 요청',
+    keywords: ['추가', '더', '심화', '다음', '계속', '또', '재참여', '개설', '배우고 싶', '교육 요청'],
+  },
+  {
+    key: 'promotion_participation_request',
+    label: '홍보/참여 확대 요청',
+    keywords: ['홍보', '알림', '안내', '모집', '참여', '많은 사람', '확대', '공유'],
+  },
+  {
+    key: 'facility_environment_improvement',
+    label: '시설/환경 개선',
+    keywords: ['시설', '환경', '공간', '장소', '교실', '장비', '도구', '깨끗', '소음', '온도', '책상', '의자'],
+  },
+  {
+    key: 'schedule_improvement',
+    label: '운영시간/일정 개선',
+    keywords: ['시간', '일정', '요일', '기간', '횟수', '회기', '짧', '길', '오전', '오후', '주말'],
+  },
+  {
+    key: 'etc',
+    label: '기타',
+    keywords: [],
+  },
+];
+
+function classifyFreeTextAnswer(answer) {
+  const normalizedAnswer = String(answer ?? '').trim().toLowerCase();
+
+  if (!normalizedAnswer) {
+    return FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1];
+  }
+
+  return (
+    FREE_TEXT_CATEGORY_RULES.find((rule) =>
+      rule.key !== 'etc' && rule.keywords.some((keyword) => normalizedAnswer.includes(keyword.toLowerCase())),
+    ) ?? FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]
+  );
+}
+
+export function buildFreeTextCategorySummary(textResponses) {
+  const groups = new Map(
+    FREE_TEXT_CATEGORY_RULES.map((rule) => [
+      rule.key,
+      {
+        key: rule.key,
+        label: rule.label,
+        count: 0,
+        examples: [],
+      },
+    ]),
+  );
+
+  (textResponses ?? []).forEach((item) => {
+    const answer = String(item?.answer ?? '').trim();
+    if (!answer) return;
+
+    const category = classifyFreeTextAnswer(answer);
+    const group = groups.get(category.key) ?? groups.get('etc');
+    group.count += 1;
+    if (group.examples.length < 3) {
+      group.examples.push(answer);
+    }
+  });
+
+  return Array.from(groups.values())
+    .filter((group) => group.count > 0)
+    .sort((first, second) => second.count - first.count);
+}
+
 function getNumericScore(answer, question) {
   if (isScaleQuestionType(question?.type)) {
     const numericValue = Number(answer);
@@ -196,6 +283,7 @@ export function buildSurveyAnalytics(survey, responses) {
     topRows: [...scoredRows].sort((a, b) => b.average - a.average).slice(0, 3),
     lowRows: [...scoredRows].sort((a, b) => a.average - b.average).slice(0, 3),
     textResponses,
+    freeTextCategories: buildFreeTextCategorySummary(textResponses),
     keyAverages,
     groupAverages: {
       usagePeriod: buildGroupedAverages(usagePeriodQuestion),
