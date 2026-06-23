@@ -53,7 +53,7 @@ export const FREE_TEXT_CATEGORY_RULES = [
   {
     key: 'facility_environment_improvement',
     label: '시설 및 환경 개선',
-    keywords: ['시설', '환경', '공간', '장소', '교실', '장비', '도구', '기자재', '카드리더기', '리더기', '출입카드', '출입', '고장', '작동', '깨끗', '소음', '온도', '책상', '의자', '주차', '냉난방'],
+    keywords: ['시설', '환경', '공간', '장소', '장비', '도구', '기자재', '카드리더기', '리더기', '출입카드', '출입', '고장', '작동', '깨끗', '소음', '온도', '책상', '의자', '주차', '냉난방'],
   },
   {
     key: 'schedule_improvement',
@@ -68,7 +68,7 @@ export const FREE_TEXT_CATEGORY_RULES = [
   {
     key: 'program_expansion_request',
     label: '프로그램 확대 요청',
-    keywords: ['추가', '심화', '다음', '계속', '재참여', '다양화', '다양', '늘려', '늘었', '확대', '많이', '많았으면', '강좌도', '프로그램도'],
+    keywords: ['추가', '심화', '다음', '계속', '재참여', '다양화', '다양', '늘려', '늘었', '확대', '많이', '많았으면', '강좌도', '프로그램도', '더 생기', '더 있었', '더 많'],
   },
   {
     key: 'promotion_participation_request',

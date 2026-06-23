@@ -248,36 +248,43 @@ function buildFreeTextFlowSentence(categories) {
   }
 
   const labels = categories.map((category) => category.label).join(', ');
-  const detailSentences = [];
+  const requestSentences = [];
+  const positiveSentences = [];
   const categoryKeys = new Set(categories.map((category) => category.key));
   const specificNeeds = buildSpecificFreeTextNeeds(categories);
 
   if (categoryKeys.has('new_program_request')) {
-    detailSentences.push('신규 프로그램 개설에 대한 요구가 확인되었다');
+    requestSentences.push('신규 프로그램 개설에 대한 요구가 확인되었다');
   }
   if (categoryKeys.has('program_expansion_request')) {
-    detailSentences.push('기존 프로그램의 확대 및 다양화 요구가 나타났다');
+    requestSentences.push('기존 프로그램의 확대 및 다양화 요구가 나타났다');
   }
   if (categoryKeys.has('facility_environment_improvement')) {
-    detailSentences.push('시설 및 환경 개선에 대한 의견이 제시되었다');
+    requestSentences.push('시설 및 환경 개선에 대한 의견이 제시되었다');
   }
   if (categoryKeys.has('schedule_improvement')) {
-    detailSentences.push('운영 시간과 일정 조정에 대한 의견이 확인되었다');
+    requestSentences.push('운영 시간과 일정 조정에 대한 의견이 제시되었다');
   }
   if (categoryKeys.has('promotion_participation_request')) {
-    detailSentences.push('홍보와 참여 접근성 개선 필요성이 제기되었다');
+    requestSentences.push('홍보와 참여 접근성 개선 필요성이 제기되었다');
   }
   if (categoryKeys.has('program_satisfaction') || categoryKeys.has('instructor_satisfaction')) {
-    detailSentences.push('프로그램 운영과 강사에 대한 긍정적 평가도 함께 확인되었다');
+    positiveSentences.push('프로그램 운영과 강사에 대한 긍정적 평가도 함께 확인되었다');
   }
 
-  return `자유의견에서는 ${labels} 등이 주요 유형으로 나타났다.${
-    detailSentences.length ? ` 특히 ${detailSentences.join(', ')}.` : ''
-  }${
-    specificNeeds.length
-      ? ` 세부적으로는 ${specificNeeds.slice(0, 4).join(', ')} 요구가 반복적으로 확인되었다.`
-      : ''
-  }`;
+  const sentences = [`자유의견에서는 ${labels} 등이 주요 유형으로 나타났다.`];
+  requestSentences.forEach((sentence, index) => {
+    sentences.push(`${index === 0 ? '특히 ' : '또한 '}${sentence}.`);
+  });
+  positiveSentences.forEach((sentence) => {
+    sentences.push(`한편 ${sentence}.`);
+  });
+  if (specificNeeds.length) {
+    sentences.push(
+      `세부적으로는 ${specificNeeds.slice(0, 4).join(', ')} 요구가 반복적으로 확인되었다.`,
+    );
+  }
+  return sentences.join(' ');
 }
 
 function generateSummary(analytics, responseCount) {
@@ -483,6 +490,7 @@ export default function SurveyReportPage() {
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState('설문 데이터를 불러오는 중...');
@@ -753,6 +761,51 @@ export default function SurveyReportPage() {
     }
   };
 
+  const handleDocxDownload = async () => {
+    if (!survey || !analytics || !reportSections) {
+      return;
+    }
+
+    try {
+      setDownloadingDocx(true);
+      setStatusMessage('Word 문서를 생성하는 중입니다...');
+      const { downloadSurveyReportDocx } = await import('../utils/reportDocx');
+      await downloadSurveyReportDocx({
+        survey,
+        reportMeta,
+        sections: activeReportSections,
+        analytics,
+        responseCount: responses.length,
+        displayedProgramRows,
+        sectionNumbers: {
+          characteristics: characteristicsSectionNumber,
+          satisfaction: satisfactionSectionNumber,
+          freeText: freeTextSectionNumber,
+          final: finalSectionNumber,
+        },
+        tocItems,
+      });
+      setStatusMessage('Word 문서가 다운로드되었습니다.');
+      createAuditLog({
+        action: 'report_docx_downloaded',
+        surveyId,
+        surveyTitle: survey.title ?? '',
+        actor: auditActor,
+        metadata: {
+          reportId: savedReport?.id ?? surveyId,
+          surveyId,
+          reportTitle: reportMeta.title,
+          surveyTitle: survey.title ?? '',
+        },
+      });
+    } catch (downloadError) {
+      console.error('[Report] docx download failed', downloadError);
+      setStatusMessage('Word 문서 생성에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setDownloadingDocx(false);
+    }
+  };
+
   const handleBackToAdmin = () => {
     if (dirty) {
       const shouldLeave = window.confirm(
@@ -874,6 +927,14 @@ export default function SurveyReportPage() {
               </button>
               <button className="primary-button" onClick={handleEditStart} type="button">
                 보고서 수정
+              </button>
+              <button
+                className="secondary-button"
+                disabled={downloadingDocx}
+                onClick={handleDocxDownload}
+                type="button"
+              >
+                {downloadingDocx ? 'Word 생성 중...' : 'Word 다운로드'}
               </button>
               <button className="secondary-button" onClick={handlePrintClick} type="button">
                 인쇄/PDF 저장
