@@ -68,7 +68,7 @@ export const FREE_TEXT_CATEGORY_RULES = [
   {
     key: 'program_expansion_request',
     label: '프로그램 확대 요청',
-    keywords: ['추가', '더', '심화', '다음', '계속', '또', '재참여', '다양화', '다양', '늘려', '늘었', '확대', '많이', '많았으면', '강좌도', '프로그램도'],
+    keywords: ['추가', '심화', '다음', '계속', '재참여', '다양화', '다양', '늘려', '늘었', '확대', '많이', '많았으면', '강좌도', '프로그램도'],
   },
   {
     key: 'promotion_participation_request',
@@ -143,6 +143,25 @@ function isSimpleFreeTextAnswer(answer) {
   );
 }
 
+function isRepresentativeFreeTextAnswer(answer) {
+  if (isSimpleFreeTextAnswer(answer)) {
+    return false;
+  }
+
+  const trimmedAnswer = String(answer ?? '').trim();
+  const normalizedAnswer = normalizeFreeTextAnswer(trimmedAnswer);
+
+  if (normalizedAnswer.length < 5) {
+    return false;
+  }
+
+  const hasSentenceCue = /[\s~·,]|(하고|에도|에서|으로|으면|희망|개설|요청|개선|불편|필요|좋았|만족|바랍니다|주세요)/.test(
+    trimmedAnswer,
+  );
+
+  return hasSentenceCue || normalizedAnswer.length >= 8;
+}
+
 export function classifyFreeTextAnswer(answer) {
   const normalizedAnswer = normalizeFreeTextAnswer(answer);
 
@@ -173,6 +192,10 @@ export function classifyFreeTextAnswer(answer) {
     : [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
 }
 
+function getEtcCategory() {
+  return FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1];
+}
+
 export function buildFreeTextCategorySummary(textResponses) {
   const groups = new Map(
     FREE_TEXT_CATEGORY_RULES.map((rule) => [
@@ -194,15 +217,21 @@ export function buildFreeTextCategorySummary(textResponses) {
     categories.forEach((category) => {
       const group = groups.get(category.key) ?? groups.get('etc');
       group.count += 1;
-      if (group.examples.length < 3 && !isSimpleFreeTextAnswer(answer)) {
+      if (group.examples.length < 3 && isRepresentativeFreeTextAnswer(answer)) {
         group.examples.push(answer);
       }
     });
   });
 
-  return Array.from(groups.values())
-    .filter((group) => group.count > 0)
-    .sort((first, second) => second.count - first.count);
+  const etcCategory = getEtcCategory();
+  const visibleGroups = Array.from(groups.values())
+    .filter((group) => group.count > 0 && group.examples.length > 0);
+
+  return visibleGroups.sort((first, second) => {
+    if (first.key === etcCategory.key) return 1;
+    if (second.key === etcCategory.key) return -1;
+    return second.count - first.count;
+  });
 }
 
 function getNumericScore(answer, question) {

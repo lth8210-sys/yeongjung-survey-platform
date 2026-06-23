@@ -2862,6 +2862,12 @@ button:disabled {
   margin-bottom: 8px;
 }
 
+.report-table-block h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
 .report-score-table .report-score-avg {
   font-weight: 600;
   white-space: nowrap;
@@ -3014,6 +3020,7 @@ button:disabled {
 @media print {
   .modal-backdrop,
   .report-settings-backdrop,
+  .report-print-footer,
   .report-edit-mode-banner,
   .report-save-hint {
     display: none !important;

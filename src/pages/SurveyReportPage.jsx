@@ -51,9 +51,11 @@ const PRINT_STYLES = `
     }
     table { break-inside: auto; page-break-inside: auto; }
     thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
     tr,
     .report-top-low-grid > div,
     .report-count-table,
+    .report-table-block,
     .report-edit-block,
     .report-summary-box,
     .report-toc-row,
@@ -66,20 +68,23 @@ const PRINT_STYLES = `
       page-break-inside: auto;
     }
     .report-print-footer {
-      display: block;
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: -1.15cm;
-      color: #6b7280;
-      font-size: 10px;
-      text-align: center;
-    }
-    .report-footer {
       display: none;
     }
+    .report-footer {
+      display: block;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .report-char-grid,
+    .report-top-low-grid {
+      display: block;
+    }
+    .report-char-grid .report-count-table,
+    .report-top-low-grid > div {
+      margin-bottom: 16px;
+    }
   }
-  @page { size: A4; margin: 2cm 2.2cm 2.35cm; }
+  @page { size: A4; margin: 2cm 2.2cm 2cm; }
 `;
 
 function getDateRange(responses) {
@@ -207,6 +212,38 @@ function getTopFreeTextCategories(analytics, limit = 3) {
     .slice(0, limit);
 }
 
+function getFreeTextExamplesText(categories) {
+  return categories
+    .flatMap((category) => category.examples ?? [])
+    .join(' ');
+}
+
+function buildSpecificFreeTextNeeds(categories) {
+  const text = getFreeTextExamplesText(categories).toLowerCase();
+  const needs = [];
+
+  if (/아동|어린이|유아|5\s*~\s*7세|가족|부모/.test(text)) {
+    needs.push('아동·가족 대상 프로그램 확대');
+  }
+  if (/주말|토요일|일요일/.test(text)) {
+    needs.push('주말 운영 프로그램 개설');
+  }
+  if (/ai|인공지능/.test(text)) {
+    needs.push('AI 관련 교육 개설');
+  }
+  if (/외국어|영어|중국어|일본어/.test(text)) {
+    needs.push('외국어 관련 교육 개설');
+  }
+  if (/동영상|영상|편집|미디어|유튜브/.test(text)) {
+    needs.push('영상·미디어 교육 개설');
+  }
+  if (/카드리더기|리더기|출입카드|기자재|장비|시설/.test(text)) {
+    needs.push('시설 및 기자재 관리 개선');
+  }
+
+  return needs;
+}
+
 function buildFreeTextFlowSentence(categories) {
   if (!categories.length) {
     return '';
@@ -215,6 +252,7 @@ function buildFreeTextFlowSentence(categories) {
   const labels = categories.map((category) => category.label).join(', ');
   const detailSentences = [];
   const categoryKeys = new Set(categories.map((category) => category.key));
+  const specificNeeds = buildSpecificFreeTextNeeds(categories);
 
   if (categoryKeys.has('new_program_request')) {
     detailSentences.push('신규 프로그램 개설에 대한 요구가 확인되었다');
@@ -237,6 +275,10 @@ function buildFreeTextFlowSentence(categories) {
 
   return `자유의견에서는 ${labels} 등이 주요 유형으로 나타났다.${
     detailSentences.length ? ` 특히 ${detailSentences.join(', ')}.` : ''
+  }${
+    specificNeeds.length
+      ? ` 세부적으로는 ${specificNeeds.slice(0, 4).join(', ')} 요구가 반복적으로 확인되었다.`
+      : ''
   }`;
 }
 
@@ -1074,35 +1116,37 @@ export default function SurveyReportPage() {
                 </div>
               </div>
 
-              <h3>문항별 상세 분석</h3>
-              <table className="report-table report-score-table">
-                <thead>
-                  <tr>
-                    <th>문항</th>
-                    <th>평균</th>
-                    <th>응답 수</th>
-                    <th>점수 분포</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {analytics.scoredRows.map((row) => (
-                    <tr key={row.question.id}>
-                      <td>{row.question.title}</td>
-                      <td className="report-score-avg">{formatAverage(row.average)}점</td>
-                      <td>{row.count}건</td>
-                      <td>
-                        <div className="report-dist">
-                          {row.distribution.map((item) => (
-                            <span className="report-dist-item" key={item.score}>
-                              {item.score}점 {item.count}건
-                            </span>
-                          ))}
-                        </div>
-                      </td>
+              <div className="report-table-block report-table-block-flow">
+                <h3>문항별 상세 분석</h3>
+                <table className="report-table report-score-table">
+                  <thead>
+                    <tr>
+                      <th>문항</th>
+                      <th>평균</th>
+                      <th>응답 수</th>
+                      <th>점수 분포</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {analytics.scoredRows.map((row) => (
+                      <tr key={row.question.id}>
+                        <td>{row.question.title}</td>
+                        <td className="report-score-avg">{formatAverage(row.average)}점</td>
+                        <td>{row.count}건</td>
+                        <td>
+                          <div className="report-dist">
+                            {row.distribution.map((item) => (
+                              <span className="report-dist-item" key={item.score}>
+                                {item.score}점 {item.count}건
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
 
