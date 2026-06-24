@@ -23,6 +23,7 @@ const ACTION_OPTIONS = [
   { value: 'response_admin_note_updated', label: '메모 수정' },
   { value: 'response_anonymized', label: '익명화' },
   { value: 'responses_csv_downloaded', label: 'CSV 다운로드' },
+  { value: 'statistics_excel_downloaded', label: '통계 Excel 다운로드' },
 ];
 const ACTION_LABELS = Object.fromEntries(ACTION_OPTIONS.map((option) => [option.value, option.label]));
 const METADATA_LABELS = {
@@ -40,6 +41,7 @@ const METADATA_LABELS = {
   toStatus: '변경 상태',
   downloadType: '다운로드',
   loadedCount: '로드 건수',
+  responseCount: '응답 수',
   anonymizedQuestionCount: '익명화 문항 수',
 };
 const DOWNLOAD_TYPE_LABELS = {

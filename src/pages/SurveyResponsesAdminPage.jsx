@@ -345,6 +345,8 @@ function SurveyResponsesAdminPage() {
   const [allResponses, setAllResponses] = useState([]);
   const [analyticsStatus, setAnalyticsStatus] = useState('loading');
   const [freeTextExpanded, setFreeTextExpanded] = useState(false);
+  const [statisticsExcelLoading, setStatisticsExcelLoading] = useState(false);
+  const [statisticsExcelMessage, setStatisticsExcelMessage] = useState('');
   const [reportSettingsOpen, setReportSettingsOpen] = useState(false);
   const [reportSettings, setReportSettings] = useState(() =>
     buildReportSettingsDefaults({ survey: null, responses: [], user: null }),
@@ -850,6 +852,45 @@ function SurveyResponsesAdminPage() {
     });
   };
 
+  const handleStatisticsExcelDownload = () => {
+    if (!survey) {
+      return;
+    }
+
+    const exportSource = allResponses.length > 0 ? allResponses : responses;
+    withPrivacyCheck(async () => {
+      try {
+        setStatisticsExcelLoading(true);
+        setStatisticsExcelMessage('통계 Excel 파일을 생성하는 중입니다...');
+        const { downloadStatisticsExcel } = await import('../utils/statisticsExcel');
+        const result = await downloadStatisticsExcel({
+          survey,
+          responses: exportSource,
+        });
+        setStatisticsExcelMessage(
+          `통계 Excel 다운로드가 완료되었습니다. (${Math.max(1, Math.round(result.size / 1024))}KB)`,
+        );
+        createAuditLog({
+          action: 'statistics_excel_downloaded',
+          surveyId,
+          surveyTitle: survey.title ?? '',
+          responseId: null,
+          actor: auditActor,
+          metadata: {
+            surveyId,
+            surveyTitle: survey.title ?? '',
+            responseCount: exportSource.length,
+          },
+        });
+      } catch (excelError) {
+        console.error('[StatisticsExcel] download failed', excelError);
+        setStatisticsExcelMessage('통계 Excel 파일 생성에 실패했습니다.');
+      } finally {
+        setStatisticsExcelLoading(false);
+      }
+    });
+  };
+
   const handleApplicantCsvDownload = () => {
     if (!survey) {
       return;
@@ -1280,9 +1321,19 @@ function SurveyResponsesAdminPage() {
           )}
 
           {canDownloadResponses && (
-            <button className="secondary-button" onClick={handleRawCsvDownload} type="button">
-              CSV 다운로드
-            </button>
+            <>
+              <button className="secondary-button" onClick={handleRawCsvDownload} type="button">
+                CSV 다운로드
+              </button>
+              <button
+                className="secondary-button"
+                disabled={statisticsExcelLoading}
+                onClick={handleStatisticsExcelDownload}
+                type="button"
+              >
+                {statisticsExcelLoading ? 'Excel 생성 중...' : '통계 Excel 다운로드'}
+              </button>
+            </>
           )}
           {isApplicationForm && canDownloadResponses && (
             <button className="secondary-button" onClick={handleApplicantCsvDownload} type="button">
@@ -1295,6 +1346,9 @@ function SurveyResponsesAdminPage() {
             </button>
           )}
         </div>
+        {statisticsExcelMessage && (
+          <p className="response-download-status">{statisticsExcelMessage}</p>
+        )}
       </div>
 
       {optionQuotaQuestions.length > 0 && (

@@ -2073,6 +2073,13 @@ button:disabled {
   min-width: 180px;
 }
 
+.response-download-status {
+  margin: 0;
+  color: #2456b3;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .response-table-wrapper {
   overflow-x: auto;
 }
