@@ -3,7 +3,6 @@ import {
   BorderStyle,
   Document,
   HeadingLevel,
-  PageBreak,
   Packer,
   Paragraph,
   ShadingType,
@@ -26,7 +25,7 @@ const COLOR_NAVY = '173B63';
 const COLOR_TEXT = '111827';
 const COLOR_MUTED = '64748B';
 const COLOR_BORDER = 'CBD5E1';
-const COLOR_HEADER_FILL = 'E8EEF5';
+const COLOR_HEADER_FILL = 'F2F4F7';
 
 function textRun(text, options = {}) {
   return new TextRun({
@@ -61,10 +60,11 @@ function bodyParagraph(text, options = {}) {
   });
 }
 
-function sectionHeading(number, title) {
+function sectionHeading(number, title, options = {}) {
   return bodyParagraph(`${number}. ${title}`, {
     heading: HeadingLevel.HEADING_1,
     keepNext: true,
+    pageBreakBefore: options.pageBreakBefore,
     before: 260,
     after: 140,
     size: 30,
@@ -138,7 +138,7 @@ function dataTable(headers, rows, widths) {
           tableCell(header, {
             header: true,
             width: normalizedWidths[index],
-            alignment: index === 0 ? AlignmentType.LEFT : AlignmentType.CENTER,
+            alignment: AlignmentType.CENTER,
           }),
         ),
       }),
@@ -224,7 +224,6 @@ function buildCover(reportMeta) {
       size: 18,
       color: COLOR_MUTED,
     }),
-    new Paragraph({ children: [new PageBreak()] }),
   ];
 }
 
@@ -232,6 +231,7 @@ function buildToc(tocItems) {
   const children = [
     bodyParagraph('목차', {
       heading: HeadingLevel.HEADING_1,
+      pageBreakBefore: true,
       after: 300,
       size: 34,
       bold: true,
@@ -258,7 +258,6 @@ function buildToc(tocItems) {
     });
   });
 
-  children.push(new Paragraph({ children: [new PageBreak()] }));
   return children;
 }
 
@@ -280,7 +279,7 @@ function buildOverview({
     ...(survey.description ? [['조사 설명', survey.description]] : []),
   ];
   const children = [
-    sectionHeading(1, '조사 개요'),
+    sectionHeading(1, '조사 개요', { pageBreakBefore: true }),
     labelValueTable(rows),
   ];
 
@@ -365,18 +364,25 @@ function buildFreeText({ analytics, sections, sectionNumber }) {
     sectionHeading(sectionNumber, '자유의견'),
   ];
   addInterpretation(children, '자유의견 요약', sections.openEndedSummaryText);
-  children.push(subsectionHeading(`${sectionNumber}-1. 자유의견 주요 유형`));
+  children.push(
+    subsectionHeading(`${sectionNumber}-1. 자유의견 주요 유형`),
+    bodyParagraph(
+      '한 의견은 내용에 따라 최대 2개 유형으로 분류되어 유형별 건수 합계가 전체 자유의견 수와 다를 수 있습니다.',
+      { color: COLOR_MUTED, size: 18 },
+    ),
+  );
 
   if (analytics.freeTextCategories.length > 0) {
     children.push(
       dataTable(
-        ['유형', '건수', '대표 의견'],
+        ['유형', '건수', '분석 결과', '대표 의견'],
         analytics.freeTextCategories.map((category) => [
           category.label,
           `${category.count}건`,
+          category.analysisText,
           category.examples.join('\n'),
         ]),
-        [2300, 1100, CONTENT_WIDTH_DXA - 3400],
+        [1700, 900, 3000, CONTENT_WIDTH_DXA - 5600],
       ),
     );
   } else {

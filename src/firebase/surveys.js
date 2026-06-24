@@ -2123,35 +2123,42 @@ function sanitizeReportSections(sections = {}) {
   };
 }
 
-export async function fetchSurveyReport(surveyId) {
+export async function fetchSurveyReport(surveyId, reportId = '') {
   ensureFirestoreReady();
   const normalizedSurveyId = String(surveyId ?? '').trim();
+  const normalizedReportId = String(reportId ?? '').trim() || normalizedSurveyId;
 
-  if (!normalizedSurveyId) {
+  if (!normalizedSurveyId || !normalizedReportId) {
     return null;
   }
 
-  const snapshot = await getDoc(doc(surveyReportsCollection, normalizedSurveyId));
+  const snapshot = await getDoc(doc(surveyReportsCollection, normalizedReportId));
 
   if (!snapshot.exists()) {
     return null;
   }
 
+  const data = snapshot.data();
+  if (String(data.surveyId ?? '') !== normalizedSurveyId || data.deleted === true) {
+    return null;
+  }
+
   return {
     id: snapshot.id,
-    ...snapshot.data(),
+    ...data,
   };
 }
 
-export async function saveSurveyReport(surveyId, report, actor = {}) {
+export async function saveSurveyReport(surveyId, report, actor = {}, reportId = '') {
   ensureFirestoreReady();
   const normalizedSurveyId = String(surveyId ?? '').trim();
+  const normalizedReportId = String(reportId ?? '').trim() || normalizedSurveyId;
 
-  if (!normalizedSurveyId) {
+  if (!normalizedSurveyId || !normalizedReportId) {
     throw new Error('저장할 보고서의 설문 ID가 없습니다.');
   }
 
-  const reportRef = doc(surveyReportsCollection, normalizedSurveyId);
+  const reportRef = doc(surveyReportsCollection, normalizedReportId);
   const currentSnapshot = await getDoc(reportRef);
   const actorMeta = {
     uid: String(actor?.uid ?? ''),
@@ -2169,6 +2176,8 @@ export async function saveSurveyReport(surveyId, report, actor = {}) {
     author: String(report?.author ?? ''),
     reportDate: String(report?.reportDate ?? ''),
     sections: sanitizeReportSections(report?.sections),
+    status: report?.status === 'final' ? 'final' : 'draft',
+    deleted: false,
     updatedBy: actorMeta,
     updatedAt: serverTimestamp(),
   };
@@ -2181,9 +2190,129 @@ export async function saveSurveyReport(surveyId, report, actor = {}) {
   await setDoc(reportRef, payload, { merge: true });
 
   return {
-    id: normalizedSurveyId,
+    id: normalizedReportId,
     ...payload,
   };
+}
+
+function normalizeSurveyReportDoc(snapshot, survey = null) {
+  const data = snapshot.data();
+  return {
+    id: snapshot.id,
+    ...data,
+    surveyTitle: String(data.surveyTitle ?? survey?.title ?? ''),
+    responseCount: Number.isFinite(data.responseCount)
+      ? data.responseCount
+      : Number(survey?.responseCount ?? 0),
+    status: data.status === 'final' ? 'final' : 'draft',
+    deleted: data.deleted === true,
+  };
+}
+
+function getReportTimestampMillis(value) {
+  if (typeof value?.toDate === 'function') {
+    return value.toDate().getTime();
+  }
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+}
+
+export async function fetchManagedSurveyReports(userAccess = {}) {
+  ensureFirestoreReady();
+  const surveys = await fetchManagedSurveys(userAccess);
+  const surveyMap = new Map(surveys.map((survey) => [survey.id, survey]));
+  let reportDocs = [];
+
+  if (canManageAllSurveys(userAccess.role)) {
+    const snapshot = await getDocs(surveyReportsCollection);
+    reportDocs = snapshot.docs;
+  } else if (userAccess.role === USER_ROLES.CREATOR) {
+    const snapshots = await Promise.all(
+      surveys.map((survey) =>
+        getDocs(query(surveyReportsCollection, where('surveyId', '==', survey.id))),
+      ),
+    );
+    reportDocs = snapshots.flatMap((snapshot) => snapshot.docs);
+  }
+
+  return reportDocs
+    .map((snapshot) =>
+      normalizeSurveyReportDoc(snapshot, surveyMap.get(snapshot.data().surveyId)),
+    )
+    .filter((report) => !report.deleted && surveyMap.has(report.surveyId))
+    .sort((first, second) => {
+      const firstTime = getReportTimestampMillis(first.updatedAt);
+      const secondTime = getReportTimestampMillis(second.updatedAt);
+      return secondTime - firstTime;
+    });
+}
+
+export async function copySurveyReport(reportId, actor = {}) {
+  ensureFirestoreReady();
+  const normalizedReportId = String(reportId ?? '').trim();
+  if (!normalizedReportId) {
+    throw new Error('복제할 보고서 ID가 없습니다.');
+  }
+
+  const sourceSnapshot = await getDoc(doc(surveyReportsCollection, normalizedReportId));
+  if (!sourceSnapshot.exists() || sourceSnapshot.data().deleted === true) {
+    throw new Error('복제할 보고서를 찾을 수 없습니다.');
+  }
+
+  const source = sourceSnapshot.data();
+  const actorMeta = {
+    uid: String(actor?.uid ?? ''),
+    email: String(actor?.email ?? ''),
+    displayName: String(actor?.displayName ?? actor?.name ?? ''),
+  };
+  const payload = {
+    surveyId: String(source.surveyId ?? ''),
+    title: `(복사본) ${String(source.title ?? '결과보고서')}`,
+    periodStart: String(source.periodStart ?? ''),
+    periodEnd: String(source.periodEnd ?? ''),
+    period: String(source.period ?? ''),
+    target: String(source.target ?? ''),
+    department: String(source.department ?? ''),
+    author: String(source.author ?? ''),
+    reportDate: String(source.reportDate ?? ''),
+    sections: sanitizeReportSections(source.sections),
+    status: 'draft',
+    copiedFromReportId: normalizedReportId,
+    deleted: false,
+    createdBy: actorMeta,
+    updatedBy: actorMeta,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  const copiedRef = await addDoc(surveyReportsCollection, payload);
+  return { id: copiedRef.id, ...payload };
+}
+
+export async function softDeleteSurveyReport(reportId, actor = {}) {
+  ensureFirestoreReady();
+  const normalizedReportId = String(reportId ?? '').trim();
+  if (!normalizedReportId) {
+    throw new Error('삭제할 보고서 ID가 없습니다.');
+  }
+
+  const actorMeta = {
+    uid: String(actor?.uid ?? ''),
+    email: String(actor?.email ?? ''),
+    displayName: String(actor?.displayName ?? actor?.name ?? ''),
+  };
+  const reportRef = doc(surveyReportsCollection, normalizedReportId);
+  const snapshot = await getDoc(reportRef);
+  if (!snapshot.exists()) {
+    throw new Error('삭제할 보고서를 찾을 수 없습니다.');
+  }
+  await updateDoc(reportRef, {
+    status: snapshot.data().status === 'final' ? 'final' : 'draft',
+    deleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: actorMeta,
+    updatedAt: serverTimestamp(),
+    updatedBy: actorMeta,
+  });
 }
 
 export async function fetchManagedRecentResponses(userAccess = {}, limitCount = 20, options = {}) {

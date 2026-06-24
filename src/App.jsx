@@ -11,6 +11,7 @@ import SurveyBuilderPage from './pages/SurveyBuilderPage';
 import SurveyListPage from './pages/SurveyListPage';
 import SurveyPreviewPage from './pages/SurveyPreviewPage';
 import SurveyReportPage from './pages/SurveyReportPage';
+import SurveyReportsAdminPage from './pages/SurveyReportsAdminPage';
 import SurveyResponsesAdminPage from './pages/SurveyResponsesAdminPage';
 import SurveyResponsePage from './pages/SurveyResponsePage';
 import UserManagementPage from './pages/UserManagementPage';
@@ -52,6 +53,14 @@ function App() {
           element={
             <AdminRoute>
               <RecentResponsesPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="admin/reports"
+          element={
+            <AdminRoute requireCreate>
+              <SurveyReportsAdminPage />
             </AdminRoute>
           }
         />

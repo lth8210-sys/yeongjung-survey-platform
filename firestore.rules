@@ -184,6 +184,19 @@ service cloud.firestore {
       );
     }
 
+    function canManageReportForSurvey(surveyId) {
+      return isInternalUser() &&
+        surveyId is string &&
+        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        (
+          isAtLeastAdmin() ||
+          (
+            isCreator() &&
+            isSurveyOwner(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
+          )
+        );
+    }
+
     function validManagedSurveyCreate() {
       return isInternalUser() &&
         currentStatus() == 'active' &&
@@ -348,8 +361,8 @@ service cloud.firestore {
     }
 
     match /survey_reports/{reportId} {
-      allow read: if isAtLeastAdmin();
-      allow create, update: if isAtLeastAdmin() &&
+      allow read: if canManageReportForSurvey(resource.data.surveyId);
+      allow create, update: if canManageReportForSurvey(request.resource.data.surveyId) &&
         request.resource.data.keys().hasOnly([
           "surveyId",
           "title",
@@ -361,12 +374,16 @@ service cloud.firestore {
           "author",
           "reportDate",
           "sections",
+          "status",
+          "copiedFromReportId",
+          "deleted",
+          "deletedAt",
+          "deletedBy",
           "createdBy",
           "updatedBy",
           "createdAt",
           "updatedAt"
         ]) &&
-        request.resource.data.surveyId == reportId &&
         request.resource.data.title is string &&
         request.resource.data.periodStart is string &&
         request.resource.data.periodEnd is string &&
@@ -376,8 +393,24 @@ service cloud.firestore {
         request.resource.data.author is string &&
         request.resource.data.reportDate is string &&
         request.resource.data.sections is map &&
+        request.resource.data.status in ["draft", "final"] &&
+        request.resource.data.deleted is bool &&
         request.resource.data.updatedBy is map &&
         request.resource.data.updatedAt == request.time &&
+        (
+          !request.resource.data.keys().hasAny(["copiedFromReportId"]) ||
+          request.resource.data.copiedFromReportId is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["deletedAt"]) ||
+          request.resource.data.deletedAt == null ||
+          request.resource.data.deletedAt == request.time ||
+          request.resource.data.deletedAt == resource.data.deletedAt
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["deletedBy"]) ||
+          request.resource.data.deletedBy is map
+        ) &&
         (
           !request.resource.data.keys().hasAny(["createdBy"]) ||
           request.resource.data.createdBy is map

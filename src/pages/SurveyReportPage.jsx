@@ -8,7 +8,13 @@ import {
   fetchSurveyById,
   saveSurveyReport,
 } from '../firebase/surveys';
-import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
+import {
+  buildSurveyAnalytics,
+  formatAverage,
+  generateFreeTextAnalysisSummary,
+  generateRuleBasedImprovementPlan,
+  generateRuleBasedReportSummary,
+} from '../utils/surveyAnalytics';
 
 const PRINT_STYLES = `
   @media print {
@@ -20,7 +26,8 @@ const PRINT_STYLES = `
     .report-print-footer,
     .report-print-hint,
     .report-edit-mode-banner,
-    .report-save-hint {
+    .report-save-hint,
+    .report-summary-actions {
       display: none !important;
     }
 
@@ -204,147 +211,12 @@ function limitRowsWithEtc(rows, limit = 15) {
   ];
 }
 
-function getTopFreeTextCategories(analytics, limit = 3) {
-  return (analytics?.freeTextCategories ?? [])
-    .filter((category) => category.key !== 'etc')
-    .slice(0, limit);
-}
-
-function getFreeTextExamplesText(categories) {
-  return categories
-    .flatMap((category) => category.examples ?? [])
-    .join(' ');
-}
-
-function buildSpecificFreeTextNeeds(categories) {
-  const text = getFreeTextExamplesText(categories).toLowerCase();
-  const needs = [];
-
-  if (/아동|어린이|유아|5\s*~\s*7세|가족|부모/.test(text)) {
-    needs.push('아동·가족 대상 프로그램 확대');
-  }
-  if (/주말|토요일|일요일/.test(text)) {
-    needs.push('주말 운영 프로그램 개설');
-  }
-  if (/ai|인공지능/.test(text)) {
-    needs.push('AI 관련 교육 개설');
-  }
-  if (/외국어|영어|중국어|일본어/.test(text)) {
-    needs.push('외국어 관련 교육 개설');
-  }
-  if (/동영상|영상|편집|미디어|유튜브/.test(text)) {
-    needs.push('영상·미디어 교육 개설');
-  }
-  if (/카드리더기|리더기|출입카드|기자재|장비|시설/.test(text)) {
-    needs.push('시설 및 기자재 관리 개선');
-  }
-
-  return needs;
-}
-
-function buildFreeTextFlowSentence(categories) {
-  if (!categories.length) {
-    return '';
-  }
-
-  const labels = categories.map((category) => category.label).join(', ');
-  const requestSentences = [];
-  const positiveSentences = [];
-  const categoryKeys = new Set(categories.map((category) => category.key));
-  const specificNeeds = buildSpecificFreeTextNeeds(categories);
-
-  if (categoryKeys.has('new_program_request')) {
-    requestSentences.push('신규 프로그램 개설에 대한 요구가 확인되었다');
-  }
-  if (categoryKeys.has('program_expansion_request')) {
-    requestSentences.push('기존 프로그램의 확대 및 다양화 요구가 나타났다');
-  }
-  if (categoryKeys.has('facility_environment_improvement')) {
-    requestSentences.push('시설 및 환경 개선에 대한 의견이 제시되었다');
-  }
-  if (categoryKeys.has('schedule_improvement')) {
-    requestSentences.push('운영 시간과 일정 조정에 대한 의견이 제시되었다');
-  }
-  if (categoryKeys.has('promotion_participation_request')) {
-    requestSentences.push('홍보와 참여 접근성 개선 필요성이 제기되었다');
-  }
-  if (categoryKeys.has('program_satisfaction') || categoryKeys.has('instructor_satisfaction')) {
-    positiveSentences.push('프로그램 운영과 강사에 대한 긍정적 평가도 함께 확인되었다');
-  }
-
-  const sentences = [`자유의견에서는 ${labels} 등이 주요 유형으로 나타났다.`];
-  requestSentences.forEach((sentence, index) => {
-    sentences.push(`${index === 0 ? '특히 ' : '또한 '}${sentence}.`);
-  });
-  positiveSentences.forEach((sentence) => {
-    sentences.push(`한편 ${sentence}.`);
-  });
-  if (specificNeeds.length) {
-    sentences.push(
-      `세부적으로는 ${specificNeeds.slice(0, 4).join(', ')} 요구가 반복적으로 확인되었다.`,
-    );
-  }
-  return sentences.join(' ');
-}
-
-function generateSummary(analytics, responseCount) {
-  const parts = [`본 조사에는 총 ${responseCount}명이 응답하였다.`];
-
-  if (analytics.totalAverage !== null) {
-    const average = formatAverage(analytics.totalAverage);
-    parts.push(`전체 평균 만족도는 ${average}점으로 나타났다.`);
-    if (analytics.totalAverage >= 4) {
-      parts.push('전반적으로 프로그램에 대한 만족 수준은 양호하게 확인되었다.');
-    } else if (analytics.totalAverage >= 3) {
-      parts.push('전반적인 만족도는 보통 이상으로 나타났으며, 세부 영역별 개선 과제를 함께 검토할 필요가 있다.');
-    } else {
-      parts.push('전반적인 만족도는 상대적으로 낮게 나타나 운영 전반에 대한 개선 검토가 필요하다.');
-    }
-    const top = analytics.topRows[0];
-    const low = analytics.lowRows[0];
-    if (top) {
-      parts.push(
-        `특히 '${top.question.title}' 문항은 ${formatAverage(top.average)}점으로 상대적으로 높게 나타나 해당 영역에 대한 긍정적 평가를 확인할 수 있었다.`,
-      );
-    }
-    if (low && (!top || low.question.id !== top.question.id)) {
-      parts.push(
-        `반면 '${low.question.title}' 문항은 ${formatAverage(low.average)}점으로 상대적으로 낮게 나타나 향후 운영 개선 시 우선 검토할 필요가 있다.`,
-      );
-    }
-  }
-
-  const { programName, area, usagePeriod } = analytics.groupCounts;
-  if (programName.length > 0) {
-    const t = programName[0];
-    parts.push(`참여 프로그램은 '${t.label}'(${t.count}건, ${t.percent}%)이 가장 높은 비중을 보였다.`);
-  }
-  if (area.length > 0) {
-    const t = area[0];
-    parts.push(`거주 지역은 '${t.label}'(${t.count}건, ${t.percent}%) 응답 비중이 가장 높았다.`);
-  }
-  if (usagePeriod.length > 0) {
-    const t = usagePeriod[0];
-    parts.push(`참여기간은 '${t.label}'(${t.count}건, ${t.percent}%) 응답이 가장 많았다.`);
-  }
-  const topFreeTextCategories = getTopFreeTextCategories(analytics, 3);
-  const freeTextSentence = buildFreeTextFlowSentence(topFreeTextCategories);
-  if (freeTextSentence) {
-    parts.push(freeTextSentence);
-  }
-
-  return parts.join(' ');
-}
-
 function buildDefaultReportSections({ survey, analytics, responseCount, summary }) {
   const top = analytics?.topRows?.[0];
   const low = analytics?.lowRows?.[0];
   const program = analytics?.groupCounts?.programName?.[0];
   const area = analytics?.groupCounts?.area?.[0];
   const usagePeriod = analytics?.groupCounts?.usagePeriod?.[0];
-  const textCount = analytics?.textResponses?.length ?? 0;
-  const topFreeTextCategories = getTopFreeTextCategories(analytics, 3);
-  const freeTextFlowSentence = buildFreeTextFlowSentence(topFreeTextCategories);
 
   return {
     overviewText:
@@ -367,26 +239,8 @@ function buildDefaultReportSections({ survey, analytics, responseCount, summary 
           }`
         : '만족도 문항 응답을 기준으로 주요 강점과 개선 지점을 해석한다.',
     openEndedSummaryText:
-      textCount > 0
-        ? `자유의견은 총 ${textCount}건이 수집되었다.${
-            freeTextFlowSentence ? ` ${freeTextFlowSentence}` : ''
-          } 원문은 수정하지 않고, 보고서에는 주요 의견 흐름을 요약해 반영하였다.`
-        : '수집된 자유의견이 없거나 분석 가능한 주관식 응답이 제한적이다.',
-    improvementPlanText:
-      [
-        low
-          ? `'${low.question.title}' 항목을 중심으로 운영 개선 필요사항을 검토하고, 만족도가 높게 나타난 요소는 지속적으로 유지할 필요가 있다.`
-          : '조사 결과를 바탕으로 서비스 운영 과정의 강점은 유지하고, 반복적으로 제기되는 불편사항은 개선 과제로 관리할 필요가 있다.',
-        topFreeTextCategories.some((category) => category.key === 'facility_environment_improvement')
-          ? '시설 및 환경 개선 의견은 안전하고 안정적인 이용 환경 조성을 위한 검토 과제로 관리한다.'
-          : '',
-        topFreeTextCategories.some((category) => category.key === 'schedule_improvement')
-          ? '운영 시간과 일정 관련 의견은 향후 프로그램 편성 시 이용자 접근성을 높이는 관점에서 검토한다.'
-          : '',
-        topFreeTextCategories.some((category) => category.key === 'new_program_request')
-          ? '신규 프로그램 개설 요구는 대상자 특성과 수요를 함께 확인하여 차기 사업 계획 수립 시 참고한다.'
-          : '',
-      ].filter(Boolean).join(' '),
+      generateFreeTextAnalysisSummary(analytics),
+    improvementPlanText: generateRuleBasedImprovementPlan(analytics),
     finalSummaryText: summary || '분석할 응답 데이터가 없습니다.',
   };
 }
@@ -453,6 +307,7 @@ function FreeTextCategoryTable({ rows }) {
         <tr>
           <th>유형</th>
           <th>건수</th>
+          <th>분석 결과</th>
           <th>대표 의견</th>
         </tr>
       </thead>
@@ -461,6 +316,7 @@ function FreeTextCategoryTable({ rows }) {
           <tr key={row.key}>
             <td>{row.label}</td>
             <td>{row.count}건</td>
+            <td>{row.analysisText}</td>
             <td>
               {row.examples.length > 0 ? (
                 <ul className="report-category-examples">
@@ -496,6 +352,17 @@ export default function SurveyReportPage() {
   const [loadingMsg, setLoadingMsg] = useState('설문 데이터를 불러오는 중...');
   const [error, setError] = useState('');
   const reportOpenedLoggedRef = useRef(false);
+  const autoPrintHandledRef = useRef(false);
+  const reportNavigation = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { reportId: surveyId, print: false };
+    }
+    const params = new URLSearchParams(window.location.search);
+    return {
+      reportId: params.get('reportId')?.trim() || surveyId,
+      print: params.get('print') === '1',
+    };
+  }, [surveyId]);
 
   useEffect(() => {
     async function load() {
@@ -508,8 +375,12 @@ export default function SurveyReportPage() {
         setLoadingMsg('응답 데이터를 불러오는 중...');
         const [allResponses, reportData] = await Promise.all([
           fetchAllResponsesForSurveyExport(surveyData),
-          fetchSurveyReport(surveyId),
+          fetchSurveyReport(surveyId, reportNavigation.reportId),
         ]);
+        if (reportNavigation.reportId !== surveyId && !reportData) {
+          setError('저장된 보고서를 찾을 수 없거나 삭제된 보고서입니다.');
+          return;
+        }
         setSurvey(surveyData);
         setResponses(allResponses);
         setSavedReport(reportData);
@@ -521,7 +392,7 @@ export default function SurveyReportPage() {
       }
     }
     load();
-  }, [surveyId]);
+  }, [reportNavigation.reportId, surveyId]);
 
   const analytics = useMemo(
     () => (survey ? buildSurveyAnalytics(survey, responses) : null),
@@ -531,7 +402,7 @@ export default function SurveyReportPage() {
   const dateRange = useMemo(() => getDateRange(responses), [responses]);
 
   const summary = useMemo(
-    () => (analytics ? generateSummary(analytics, responses.length) : ''),
+    () => (analytics ? generateRuleBasedReportSummary(analytics, responses.length) : ''),
     [analytics, responses.length],
   );
 
@@ -679,10 +550,12 @@ export default function SurveyReportPage() {
           author: reportMeta.author,
           reportDate: reportMeta.reportDate || reportMeta.writtenDate,
           sections: reportSections,
+          status: savedReport?.status ?? 'draft',
         },
         auditActor,
+        reportNavigation.reportId,
       );
-      const nextSavedReport = await fetchSurveyReport(surveyId);
+      const nextSavedReport = await fetchSurveyReport(surveyId, reportNavigation.reportId);
       setSavedReport(nextSavedReport);
       setDirty(false);
       setEditing(false);
@@ -761,6 +634,31 @@ export default function SurveyReportPage() {
     }
   };
 
+  const handleSummaryRegenerate = () => {
+    if (!defaultReportSections) {
+      return;
+    }
+
+    setReportSections((current) => ({
+      ...(current ?? defaultReportSections),
+      openEndedSummaryText: defaultReportSections.openEndedSummaryText,
+      improvementPlanText: defaultReportSections.improvementPlanText,
+      finalSummaryText: defaultReportSections.finalSummaryText,
+    }));
+    setDirty(true);
+    setStatusMessage('종합 요약과 개선방향 자동문을 다시 생성했습니다. 내용을 확인한 뒤 저장해주세요.');
+    createAuditLog({
+      action: 'report_summary_regenerated',
+      surveyId,
+      actor: auditActor,
+      metadata: {
+        reportId: savedReport?.id ?? surveyId,
+        surveyId,
+        reportTitle: reportMeta.title,
+      },
+    });
+  };
+
   const handleDocxDownload = async () => {
     if (!survey || !analytics || !reportSections) {
       return;
@@ -792,7 +690,7 @@ export default function SurveyReportPage() {
         surveyTitle: survey.title ?? '',
         actor: auditActor,
         metadata: {
-          reportId: savedReport?.id ?? surveyId,
+          reportId: savedReport?.id ?? reportNavigation.reportId,
           surveyId,
           reportTitle: reportMeta.title,
           surveyTitle: survey.title ?? '',
@@ -832,6 +730,43 @@ export default function SurveyReportPage() {
       }
     }, 120);
   };
+
+  useEffect(() => {
+    if (
+      !reportNavigation.print ||
+      loading ||
+      error ||
+      !survey ||
+      !reportSections ||
+      autoPrintHandledRef.current
+    ) {
+      return;
+    }
+
+    autoPrintHandledRef.current = true;
+    createAuditLog({
+      action: 'report_print_clicked',
+      surveyId,
+      surveyTitle: survey.title ?? '',
+      actor: auditActor,
+      metadata: {
+        ...getReportAuditMetadata(reportMeta, survey),
+        reportId: savedReport?.id ?? reportNavigation.reportId,
+      },
+    });
+    window.setTimeout(() => window.print(), 250);
+  }, [
+    auditActor,
+    error,
+    loading,
+    reportMeta,
+    reportNavigation.print,
+    reportNavigation.reportId,
+    reportSections,
+    savedReport?.id,
+    survey,
+    surveyId,
+  ]);
 
   if (loading) {
     return (
@@ -998,7 +933,6 @@ export default function SurveyReportPage() {
           </div>
 
           <section className="report-toc" aria-label="목차">
-            <p className="report-toc-kicker">Table of Contents</p>
             <h2 className="report-toc-title">목차</h2>
             <ol className="report-toc-list">
               {tocItems.map((item) => (
@@ -1216,6 +1150,9 @@ export default function SurveyReportPage() {
               />
               <div className="report-subsection">
                 <h3>{freeTextSectionNumber}-1. 자유의견 주요 유형</h3>
+                <p className="report-analysis-note">
+                  한 의견은 내용에 따라 최대 2개 유형으로 분류되어 유형별 건수 합계가 전체 자유의견 수와 다를 수 있습니다.
+                </p>
                 <FreeTextCategoryTable rows={analytics.freeTextCategories ?? []} />
               </div>
               {(() => {
@@ -1243,6 +1180,18 @@ export default function SurveyReportPage() {
           {analytics && (
             <section className="report-section">
               <h2 className="report-section-title">{finalSectionNumber}. 종합 요약 및 개선방향</h2>
+              {editing && (
+                <div className="report-summary-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={handleSummaryRegenerate}
+                    type="button"
+                  >
+                    자동문 다시 생성
+                  </button>
+                  <span>현재 분석 결과를 기준으로 종합 요약과 개선방향을 다시 작성합니다.</span>
+                </div>
+              )}
               <div className="report-summary-box">
                 {editing ? (
                   <textarea

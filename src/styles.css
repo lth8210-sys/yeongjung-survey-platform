@@ -2102,6 +2102,45 @@ button:disabled {
   min-width: 140px;
 }
 
+.report-list-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.report-admin-table {
+  min-width: 1120px;
+}
+
+.report-admin-table th:last-child,
+.report-admin-table td:last-child {
+  min-width: 390px;
+}
+
+.report-admin-table td:first-child {
+  min-width: 230px;
+}
+
+.report-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.report-row-actions .secondary-button,
+.report-row-actions .danger-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.report-list-status {
+  margin: 0;
+  color: #2456b3;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .pagination-bar {
   display: flex;
   align-items: center;
@@ -2633,15 +2672,6 @@ button:disabled {
   padding: 34px 0 10px;
 }
 
-.report-toc-kicker {
-  margin: 0 0 6px;
-  color: #0f3b63;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
 .report-toc-title {
   margin: 0 0 26px;
   padding-bottom: 10px;
@@ -2914,6 +2944,30 @@ button:disabled {
   font-weight: 600;
 }
 
+.report-freetext-category-table th:nth-child(1) {
+  width: 16%;
+}
+
+.report-freetext-category-table th:nth-child(2) {
+  width: 9%;
+}
+
+.report-freetext-category-table th:nth-child(3),
+.report-freetext-category-table th:nth-child(4) {
+  width: 37.5%;
+}
+
+.report-freetext-category-table td {
+  word-break: keep-all;
+}
+
+.report-analysis-note {
+  margin: -2px 0 10px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .report-category-examples {
   margin: 0;
   padding-left: 18px;
@@ -2944,6 +2998,26 @@ button:disabled {
   padding: 20px 24px;
   line-height: 1.8;
   font-size: 14px;
+}
+
+.report-summary-box p,
+.report-edit-block p {
+  white-space: pre-line;
+}
+
+.report-summary-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.report-summary-actions .secondary-button {
+  min-height: 34px;
+  flex: 0 0 auto;
 }
 
 /* 푸터 */
@@ -2991,6 +3065,14 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .report-subsection {
+    overflow-x: auto;
+  }
+
+  .report-freetext-category-table {
+    min-width: 680px;
+  }
+
   .report-cover {
     min-height: 420px;
   }
@@ -3028,7 +3110,8 @@ button:disabled {
   .report-print-footer,
   .report-print-hint,
   .report-edit-mode-banner,
-  .report-save-hint {
+  .report-save-hint,
+  .report-summary-actions {
     display: none !important;
   }
 

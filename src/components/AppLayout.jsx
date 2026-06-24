@@ -56,8 +56,10 @@ function AppLayout() {
         <nav className="topnav">
           <NavLink to="/">홈</NavLink>
           <NavLink to="/surveys">설문 목록</NavLink>
+          {canAccessAdmin && <NavLink to="/admin/surveys">설문 관리</NavLink>}
           {canCreateSurvey && <NavLink to="/admin/surveys/new">새 폼 만들기</NavLink>}
           {canAccessAdmin && <NavLink to="/admin/responses">응답 관리</NavLink>}
+          {canCreateSurvey && <NavLink to="/admin/reports">결과보고서 관리</NavLink>}
           {canManageUsers && <NavLink to="/admin/users">사용자 관리</NavLink>}
           {canManageUsers && <NavLink to="/admin/audit-logs">감사로그</NavLink>}
           {isSuperAdmin && <NavLink to="/admin/settings">관리자 설정</NavLink>}

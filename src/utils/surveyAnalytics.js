@@ -41,44 +41,28 @@ export function formatAverage(value) {
 
 export const FREE_TEXT_CATEGORY_RULES = [
   {
-    key: 'program_satisfaction',
-    label: '프로그램 만족',
-    keywords: ['프로그램', '수업', '교육', '강좌', '내용', '활동', '강의', '배움', '유익', '재밌', '재미', '좋았', '만족'],
+    key: 'positive_evaluation',
+    label: '긍정 평가',
   },
   {
-    key: 'instructor_satisfaction',
-    label: '강사 만족',
-    keywords: ['강사', '선생님', '지도', '설명', '친절', '강의력', '진행', '알려', '가르쳐'],
+    key: 'practice_application',
+    label: '실천 적용 제안',
   },
   {
-    key: 'facility_environment_improvement',
-    label: '시설 및 환경 개선',
-    keywords: ['시설', '환경', '공간', '장소', '장비', '도구', '기자재', '카드리더기', '리더기', '출입카드', '출입', '고장', '작동', '깨끗', '소음', '온도', '책상', '의자', '주차', '냉난방'],
+    key: 'education_expansion',
+    label: '교육 확대 요청',
   },
   {
-    key: 'schedule_improvement',
-    label: '운영 및 일정 개선',
-    keywords: ['시간', '일정', '요일', '기간', '횟수', '회기', '짧', '길', '오전', '오후', '주말', '평일', '방학'],
+    key: 'operation_improvement',
+    label: '운영 개선 의견',
   },
   {
-    key: 'new_program_request',
-    label: '신규 프로그램 개설 요청',
-    keywords: ['개설', '신설', '새로운', '신규', '만들어', '생겼', '있었으면', '있으면', 'ai', '인공지능', '외국어', '영어', '중국어', '일본어', '코딩', '컴퓨터', '디지털', '배우고 싶'],
+    key: 'promotion_participation',
+    label: '홍보 및 참여 확대',
   },
   {
-    key: 'program_expansion_request',
-    label: '프로그램 확대 요청',
-    keywords: ['추가', '심화', '다음', '계속', '재참여', '다양화', '다양', '늘려', '늘었', '확대', '많이', '많았으면', '강좌도', '프로그램도', '더 생기', '더 있었', '더 많'],
-  },
-  {
-    key: 'promotion_participation_request',
-    label: '홍보 및 참여 접근성 개선',
-    keywords: ['홍보', '알림', '안내', '모집', '참여', '많은 사람', '공유', '접수', '신청', '접근', '방법', '온라인', '문자', '카톡', '카카오'],
-  },
-  {
-    key: 'user_suggestion',
-    label: '이용자 제안사항',
-    keywords: ['제안', '건의', '바랍니다', '해주세요', '필요', '개선', '요청', '희망', '원합니다', '불편'],
+    key: 'facility_environment',
+    label: '시설 및 환경 의견',
   },
   {
     key: 'etc',
@@ -102,17 +86,16 @@ const SIMPLE_FREE_TEXT_ANSWERS = new Set([
   '만족함',
   '만족합니다',
   '매우 만족',
+  '감사합니다',
+  '감사',
+  'ai',
+  '연극',
+  '탁구',
+  '탁구요',
+  '테니스',
+  '원예',
   '네',
   '아니요',
-]);
-
-const REQUEST_OR_IMPROVEMENT_CATEGORY_KEYS = new Set([
-  'facility_environment_improvement',
-  'schedule_improvement',
-  'new_program_request',
-  'program_expansion_request',
-  'promotion_participation_request',
-  'user_suggestion',
 ]);
 
 const EXPLICIT_POSITIVE_KEYWORDS = [
@@ -125,25 +108,186 @@ const EXPLICIT_POSITIVE_KEYWORDS = [
   '도움',
   '감사',
   '훌륭',
+  '이해',
+  '배울 수',
+  '도움이',
+  '유용',
+  '효과',
 ];
 
-const FACILITY_EXCLUSION_KEYWORDS = [
-  '출입카드',
+const REQUEST_CONTEXT_KEYWORDS = [
+  '희망',
+  '필요',
+  '개선',
+  '확대',
+  '추가',
+  '더 듣',
+  '더 배우',
+  '더 있',
+  '있었으면',
+  '있으면 좋',
+  '개설',
+  '신설',
+  '운영해',
+  '운영되',
+  '바랍니다',
+  '해주세요',
+  '원합니다',
+  '요청',
+  '늘려',
+  '강화',
+  '부족',
+  '불편',
+];
+
+const PRACTICE_CONTEXT_KEYWORDS = [
+  '실천',
+  '현장 적용',
+  '업무 적용',
+  '적용 방법',
+  '슈퍼비전',
+  '사례 공유',
+  '자산 발굴',
+  '자산 연결',
+  '지역사회 자산',
+  '실습',
+];
+
+const EDUCATION_TOPIC_KEYWORDS = [
+  '교육',
+  '강의',
+  '강좌',
+  '수업',
+  '과정',
+  '프로그램',
+  '사례',
+  '실습',
+  '슈퍼비전',
+  '심화',
+  '후속',
+  '워크숍',
+  '특강',
+];
+
+const OPERATION_KEYWORDS = [
+  '시간',
+  '일정',
+  '요일',
+  '기간',
+  '횟수',
+  '회기',
+  '주말',
+  '평일',
+  '오전',
+  '오후',
+  '접수',
+  '신청',
+  '운영 방식',
+  '진행 방식',
+  '대기',
+];
+
+const PROMOTION_KEYWORDS = [
+  '홍보',
+  '알림',
+  '안내',
+  '모집',
+  '참여 확대',
+  '참여 기회',
+  '접근성',
+  '문자',
+  '카톡',
+  '카카오',
+  '온라인 안내',
+  '정보 제공',
+];
+
+const FACILITY_KEYWORDS = [
+  '시설',
+  '환경',
+  '공간',
+  '장소',
+  '장비',
+  '도구',
+  '기자재',
   '카드리더기',
   '리더기',
+  '출입카드',
+  '출입 시스템',
   '매트',
   '왁스',
-  '기자재',
-  '도구',
-  '시설',
-  '장비',
+  '고장',
+  '작동',
+  '소음',
+  '온도',
+  '책상',
+  '의자',
+  '주차',
+  '냉난방',
 ];
+
+const CONCRETE_SUGGESTION_KEYWORDS = [
+  '희망',
+  '필요',
+  '개선',
+  '확대',
+  '교육',
+  '사례',
+  '실천',
+  '슈퍼비전',
+];
+
+const CATEGORY_ANALYSIS_CONCEPTS = {
+  positive_evaluation: [
+    { pattern: /자산기반|강점 기반|강점관점/, label: '자산기반·강점관점에 대한 이해 향상' },
+    { pattern: /현장|적용|실천/, label: '현장 적용 가능성' },
+    { pattern: /강사|선생님|설명|진행/, label: '강사와 교육 진행에 대한 긍정적 평가' },
+    { pattern: /내용|교육|강의|수업|사례/, label: '교육 내용에 대한 긍정적 평가' },
+  ],
+  practice_application: [
+    { pattern: /실천 방법|적용 방법|현장 적용|업무 적용/, label: '현장 실천 방법 공유' },
+    { pattern: /슈퍼비전/, label: '후속 슈퍼비전 운영' },
+    { pattern: /사례 공유|사례 중심/, label: '실천 사례 공유' },
+    { pattern: /자산 발굴|자산 연결|지역사회 자산/, label: '지역사회 자산 발굴·연결 실습' },
+    { pattern: /실습/, label: '실습 기회 강화' },
+  ],
+  education_expansion: [
+    { pattern: /사례 중심|사례 교육|사례를/, label: '사례 중심 교육' },
+    { pattern: /심화|후속/, label: '후속 심화 교육' },
+    { pattern: /실습/, label: '추가 실습 운영' },
+    { pattern: /슈퍼비전/, label: '슈퍼비전 교육' },
+    { pattern: /주말/, label: '주말 교육 운영' },
+    { pattern: /ai|인공지능/, label: 'AI 활용 교육' },
+  ],
+  operation_improvement: [
+    { pattern: /시간|오전|오후/, label: '운영 시간 조정' },
+    { pattern: /일정|요일|주말|평일/, label: '교육 일정 다양화' },
+    { pattern: /횟수|회기|기간/, label: '운영 횟수와 기간 보완' },
+    { pattern: /접수|신청|대기/, label: '신청·접수 절차 개선' },
+  ],
+  promotion_participation: [
+    { pattern: /홍보|알림|안내/, label: '교육 정보 안내 강화' },
+    { pattern: /모집|참여 확대|참여 기회/, label: '참여 기회 확대' },
+    { pattern: /문자|카톡|카카오|온라인/, label: '온라인 홍보 채널 활용' },
+  ],
+  facility_environment: [
+    { pattern: /출입카드|카드리더기|리더기|출입 시스템/, label: '출입 시스템 개선' },
+    { pattern: /기자재|장비|도구|매트|왁스/, label: '기자재와 교육 도구 관리' },
+    { pattern: /공간|장소|시설|환경|냉난방|소음|온도/, label: '교육 환경 개선' },
+    { pattern: /주차|책상|의자/, label: '이용 편의시설 개선' },
+  ],
+};
 
 function normalizeFreeTextAnswer(answer) {
   return String(answer ?? '')
     .trim()
+    .replace(/\uFFFC/g, '')
     .replace(/[.!?。,\s]+$/g, '')
     .toLowerCase();
+}
+
+function includesAny(text, keywords) {
+  return keywords.some((keyword) => text.includes(keyword));
 }
 
 function isSimpleFreeTextAnswer(answer) {
@@ -163,20 +307,24 @@ function isRepresentativeFreeTextAnswer(answer) {
   const trimmedAnswer = String(answer ?? '').trim();
   const normalizedAnswer = normalizeFreeTextAnswer(trimmedAnswer);
 
-  if (normalizedAnswer.length < 8) {
+  if (normalizedAnswer.length < 10) {
     return false;
   }
 
   const compactAnswer = normalizedAnswer.replace(/\s+/g, '');
-  if (/^[a-z0-9가-힣]+요?$/.test(compactAnswer) && !/(희망|개설|요청|개선|불편|필요|만족)/.test(compactAnswer)) {
+  if (!/\s/.test(normalizedAnswer) && /^[a-z0-9가-힣]+요?$/.test(compactAnswer)) {
     return false;
   }
 
-  const hasSentenceCue = /[\s~·,]|(하고|에도|에서|으로|으면|희망|개설|요청|개선|불편|필요|좋았|만족|바랍니다|주세요)/.test(
-    trimmedAnswer,
-  );
+  const isSimpleImpression =
+    /^(정말\s*)?(좋았|좋다|좋아요|만족|만족한다|만족합니다|감사|감사합니다)[.! ]*$/.test(
+      normalizedAnswer,
+    );
+  if (isSimpleImpression) {
+    return false;
+  }
 
-  return hasSentenceCue || normalizedAnswer.length >= 12;
+  return normalizedAnswer.length >= 20 || includesAny(normalizedAnswer, CONCRETE_SUGGESTION_KEYWORDS);
 }
 
 export function classifyFreeTextAnswer(answer) {
@@ -190,28 +338,38 @@ export function classifyFreeTextAnswer(answer) {
     return [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
   }
 
-  const matchedRules = FREE_TEXT_CATEGORY_RULES.filter((rule) =>
-    rule.key !== 'etc' && rule.keywords.some((keyword) => normalizedAnswer.includes(keyword.toLowerCase())),
-  );
-  const hasRequestOrImprovement = matchedRules.some((rule) =>
-    REQUEST_OR_IMPROVEMENT_CATEGORY_KEYS.has(rule.key),
-  );
-  const hasExplicitPositive = EXPLICIT_POSITIVE_KEYWORDS.some((keyword) =>
-    normalizedAnswer.includes(keyword.toLowerCase()),
-  );
-  const refinedRules =
-    hasRequestOrImprovement && !hasExplicitPositive
-      ? matchedRules.filter((rule) => rule.key !== 'program_satisfaction')
-      : matchedRules;
-  const hasFacilityKeyword = FACILITY_EXCLUSION_KEYWORDS.some((keyword) =>
-    normalizedAnswer.includes(keyword.toLowerCase()),
-  );
-  const finalRules = hasFacilityKeyword
-    ? refinedRules.filter((rule) => rule.key !== 'program_expansion_request')
-    : refinedRules;
+  const ruleMap = new Map(FREE_TEXT_CATEGORY_RULES.map((rule) => [rule.key, rule]));
+  const hasPositiveContext = includesAny(normalizedAnswer, EXPLICIT_POSITIVE_KEYWORDS);
+  const hasRequestContext = includesAny(normalizedAnswer, REQUEST_CONTEXT_KEYWORDS);
+  const hasPracticeContext = includesAny(normalizedAnswer, PRACTICE_CONTEXT_KEYWORDS);
+  const hasEducationTopic = includesAny(normalizedAnswer, EDUCATION_TOPIC_KEYWORDS);
+  const matches = [];
 
-  return finalRules.length > 0
-    ? finalRules
+  if (includesAny(normalizedAnswer, FACILITY_KEYWORDS)) {
+    matches.push(ruleMap.get('facility_environment'));
+  }
+  if (includesAny(normalizedAnswer, OPERATION_KEYWORDS) && hasRequestContext) {
+    matches.push(ruleMap.get('operation_improvement'));
+  }
+  if (includesAny(normalizedAnswer, PROMOTION_KEYWORDS) && hasRequestContext) {
+    matches.push(ruleMap.get('promotion_participation'));
+  }
+  if (hasEducationTopic && hasRequestContext) {
+    matches.push(ruleMap.get('education_expansion'));
+  }
+  if (hasPracticeContext && hasRequestContext) {
+    matches.push(ruleMap.get('practice_application'));
+  }
+  if (hasPositiveContext) {
+    matches.push(ruleMap.get('positive_evaluation'));
+  }
+
+  const uniqueMatches = matches.filter(
+    (rule, index, list) => rule && list.findIndex((item) => item?.key === rule.key) === index,
+  );
+
+  return uniqueMatches.length > 0
+    ? uniqueMatches.slice(0, 2)
     : [FREE_TEXT_CATEGORY_RULES[FREE_TEXT_CATEGORY_RULES.length - 1]];
 }
 
@@ -232,7 +390,9 @@ export function buildFreeTextCategorySummary(textResponses) {
     ]),
   );
 
-  (textResponses ?? []).forEach((item) => {
+  const representativeCandidates = [];
+
+  (textResponses ?? []).forEach((item, sourceIndex) => {
     const answer = String(item?.answer ?? '').trim();
     if (!answer) return;
 
@@ -240,27 +400,232 @@ export function buildFreeTextCategorySummary(textResponses) {
     categories.forEach((category) => {
       const group = groups.get(category.key) ?? groups.get('etc');
       group.count += 1;
-      if (group.examples.length < 3 && isRepresentativeFreeTextAnswer(answer)) {
-        group.examples.push(answer);
+      if (isRepresentativeFreeTextAnswer(answer)) {
+        representativeCandidates.push({
+          answer,
+          categoryKey: group.key,
+          sourceIndex,
+          isLong: normalizeFreeTextAnswer(answer).length >= 20,
+          isConcrete: includesAny(normalizeFreeTextAnswer(answer), CONCRETE_SUGGESTION_KEYWORDS),
+        });
       }
     });
   });
 
   const etcCategory = getEtcCategory();
-  const visibleGroups = Array.from(groups.values())
-    .filter((group) => group.count > 0 && group.examples.length > 0);
-
-  const sortedGroups = visibleGroups.sort((first, second) => {
+  const sortedGroups = Array.from(groups.values())
+    .filter((group) => group.count > 0)
+    .sort((first, second) => {
     if (first.key === etcCategory.key) return 1;
     if (second.key === etcCategory.key) return -1;
     return second.count - first.count;
   });
-  const nonEtcGroups = sortedGroups.filter((group) => group.key !== etcCategory.key).slice(0, 5);
-  const etcGroup = sortedGroups.find((group) => group.key === etcCategory.key);
 
-  return nonEtcGroups.length < 5 && etcGroup
-    ? [...nonEtcGroups, etcGroup]
-    : nonEtcGroups;
+  const usedAnswers = new Set();
+  sortedGroups.forEach((group) => {
+    const candidates = representativeCandidates
+      .filter((candidate) => candidate.categoryKey === group.key)
+      .sort((first, second) => {
+        if (first.isLong !== second.isLong) return first.isLong ? -1 : 1;
+        if (first.isConcrete !== second.isConcrete) return first.isConcrete ? -1 : 1;
+        if (first.answer.length !== second.answer.length) {
+          return second.answer.length - first.answer.length;
+        }
+        return first.sourceIndex - second.sourceIndex;
+      });
+
+    candidates.forEach((candidate) => {
+      const normalized = normalizeFreeTextAnswer(candidate.answer);
+      if (group.examples.length < 3 && !usedAnswers.has(normalized)) {
+        group.examples.push(candidate.answer);
+        usedAnswers.add(normalized);
+      }
+    });
+
+    const fullText = (textResponses ?? [])
+      .filter((item) =>
+        classifyFreeTextAnswer(item?.answer).some((category) => category.key === group.key),
+      )
+      .map((item) => String(item?.answer ?? ''))
+      .join(' ')
+      .toLowerCase();
+    const concepts = (CATEGORY_ANALYSIS_CONCEPTS[group.key] ?? [])
+      .filter((concept) => concept.pattern.test(fullText))
+      .map((concept) => concept.label)
+      .slice(0, 3);
+    group.analysisText = buildCategoryAnalysisText(group.label, concepts);
+  });
+
+  return sortedGroups.filter(
+    (group) => group.key !== etcCategory.key || group.examples.length > 0,
+  );
+}
+
+function buildCategoryAnalysisText(label, concepts) {
+  if (concepts.length > 0) {
+    const key = FREE_TEXT_CATEGORY_RULES.find((rule) => rule.label === label)?.key;
+    if (key === 'positive_evaluation') {
+      return `${concepts.join(', ')} 등이 확인되었다.`;
+    }
+    if (key === 'education_expansion') {
+      return `${concepts.join(', ')}에 대한 요구가 확인되었다.`;
+    }
+    if (key === 'practice_application') {
+      return `${concepts.join(', ')}에 대한 제안이 확인되었다.`;
+    }
+    return `${concepts.join(', ')}에 대한 의견이 확인되었다.`;
+  }
+
+  const fallback = {
+    positive_evaluation: '교육 내용과 참여 경험에 대한 긍정적 의견이 확인되었다.',
+    practice_application: '교육 내용을 현장에 적용하기 위한 방법과 지원에 대한 제안이 확인되었다.',
+    education_expansion: '후속 교육과 교육 내용 확대에 대한 요구가 확인되었다.',
+    operation_improvement: '교육 일정과 운영 방식에 대한 개선 의견이 제시되었다.',
+    promotion_participation: '교육 안내와 참여 기회 확대에 대한 의견이 확인되었다.',
+    facility_environment: '시설, 기자재 및 교육 환경에 대한 의견이 제시되었다.',
+    etc: '기타 다양한 의견이 확인되었다.',
+  };
+  return fallback[
+    FREE_TEXT_CATEGORY_RULES.find((rule) => rule.label === label)?.key ?? 'etc'
+  ];
+}
+
+function getTopMeaning(row) {
+  const title = String(row?.question?.title ?? '').trim();
+  if (!title) return '';
+  if (/중요|인식|관점|이해/.test(title)) {
+    return `'${title}' 문항이 상대적으로 높게 나타나 해당 내용의 중요성과 이해에 대한 긍정적 인식을 확인할 수 있었다.`;
+  }
+  if (/효과|도움|변화/.test(title)) {
+    return `'${title}' 문항이 상대적으로 높게 나타나 교육 효과와 유용성에 대한 긍정적 평가를 확인할 수 있었다.`;
+  }
+  if (/지속|재참여|추천|의향/.test(title)) {
+    return `'${title}' 문항이 상대적으로 높게 나타나 향후 참여와 프로그램 지속에 대한 긍정적 의향을 확인할 수 있었다.`;
+  }
+  return `'${title}' 영역이 상대적으로 높게 평가되어 해당 영역이 본 사업의 주요 강점으로 확인되었다.`;
+}
+
+function getLowMeaning(row) {
+  const title = String(row?.question?.title ?? '').trim();
+  if (!title) return '';
+  if (/실천|적용|활용|발굴|연결/.test(title)) {
+    return `반면 '${title}' 문항은 상대적으로 낮게 나타나 교육 내용을 현장에 적용할 수 있도록 실천 지원을 강화할 필요가 있다.`;
+  }
+  if (/시설|환경|기자재|공간/.test(title)) {
+    return `반면 '${title}' 문항은 상대적으로 낮게 나타나 시설과 교육 환경에 대한 개선 검토가 필요하다.`;
+  }
+  if (/시간|일정|운영|접근/.test(title)) {
+    return `반면 '${title}' 문항은 상대적으로 낮게 나타나 운영 방식과 이용 접근성을 보완할 필요가 있다.`;
+  }
+  return `반면 '${title}' 영역은 상대적으로 낮게 평가되어 향후 운영 개선 시 우선적으로 검토할 필요가 있다.`;
+}
+
+function getAverageLevelSentence(totalAverage) {
+  const average = formatAverage(totalAverage);
+  if (totalAverage >= 4.7) {
+    return `전체 평균 만족도는 ${average}점으로 매우 높은 만족 수준을 보였다.`;
+  }
+  if (totalAverage >= 4) {
+    return `전체 평균 만족도는 ${average}점으로 전반적으로 높은 만족 수준을 보였다.`;
+  }
+  if (totalAverage >= 3) {
+    return `전체 평균 만족도는 ${average}점으로 보통 이상의 만족 수준을 보였다.`;
+  }
+  return `전체 평균 만족도는 ${average}점으로 나타나 전반적인 운영 개선 검토가 필요한 수준으로 확인되었다.`;
+}
+
+export function generateFreeTextAnalysisSummary(analytics) {
+  const textCount = analytics?.textResponses?.length ?? 0;
+  const categories = (analytics?.freeTextCategories ?? [])
+    .filter((category) => category.key !== 'etc')
+    .slice(0, 4);
+
+  if (textCount === 0) {
+    return '수집된 자유의견이 없거나 분석 가능한 주관식 응답이 제한적이다.';
+  }
+  if (categories.length === 0) {
+    return `자유의견은 총 ${textCount}건이 수집되었으며, 구체적인 유형으로 분류하기 어려운 기타 의견이 확인되었다.`;
+  }
+
+  const categorySentences = categories.map(
+    (category) => `${category.label}(${category.count}건)에서는 ${category.analysisText}`,
+  );
+  return `자유의견은 총 ${textCount}건이 수집되었다. ${categorySentences.join(' ')}`;
+}
+
+export function generateRuleBasedReportSummary(analytics, responseCount) {
+  const parts = [`본 조사에는 총 ${responseCount}명이 참여하였다.`];
+  const totalAverage = analytics?.totalAverage;
+
+  if (Number.isFinite(totalAverage)) {
+    parts.push(getAverageLevelSentence(totalAverage));
+    const top = analytics?.topRows?.[0];
+    const low = analytics?.lowRows?.[0];
+    if (top) parts.push(getTopMeaning(top));
+    if (low && (!top || low.question.id !== top.question.id)) {
+      parts.push(getLowMeaning(low));
+    }
+  }
+
+  const topCategories = (analytics?.freeTextCategories ?? [])
+    .filter((category) => category.key !== 'etc')
+    .slice(0, 3);
+  if (topCategories.length > 0) {
+    const labels = topCategories.map((category) => category.label).join(', ');
+    parts.push(`자유의견에서는 ${labels} 등이 주요 흐름으로 확인되었다.`);
+    parts.push(topCategories.map((category) => category.analysisText).join(' '));
+  }
+
+  if (Number.isFinite(totalAverage) && totalAverage >= 4) {
+    parts.push('종합적으로 본 사업은 참여자의 이해와 만족을 높이는 데 긍정적으로 기여한 것으로 평가되며, 상대적으로 낮게 나타난 영역과 자유의견의 개선 요구를 향후 운영에 반영할 필요가 있다.');
+  } else {
+    parts.push('종합적으로 조사 결과에서 확인된 강점은 유지하고, 상대적으로 낮게 나타난 영역과 자유의견의 개선 요구를 중심으로 후속 운영 계획을 구체화할 필요가 있다.');
+  }
+
+  return parts.join(' ');
+}
+
+export function generateRuleBasedImprovementPlan(analytics) {
+  const items = [];
+  const addItem = (item) => {
+    if (item && !items.includes(item) && items.length < 5) items.push(item);
+  };
+  const categories = analytics?.freeTextCategories ?? [];
+  const categoryKeys = new Set(categories.map((category) => category.key));
+  const categoryText = (analytics?.textResponses ?? [])
+    .map((item) => String(item?.answer ?? ''))
+    .join(' ')
+    .toLowerCase();
+  const lowTitle = String(analytics?.lowRows?.[0]?.question?.title ?? '');
+
+  if (categoryKeys.has('education_expansion')) {
+    addItem(/사례/.test(categoryText) ? '사례 중심 교육 확대' : '참여자 요구 기반 심화교육 검토');
+  }
+  if (categoryKeys.has('practice_application')) {
+    addItem('실천 적용 사례 공유 강화');
+    if (/슈퍼비전/.test(categoryText)) addItem('후속 슈퍼비전 운영 검토');
+  }
+  if (/자산|발굴|연결/.test(lowTitle) || /자산 발굴|자산 연결/.test(categoryText)) {
+    addItem('지역사회 자산 발굴 및 연결 실습 강화');
+  } else if (/실천|적용|활용/.test(lowTitle)) {
+    addItem('교육 내용의 현장 적용 지원 강화');
+  }
+  if (categoryKeys.has('operation_improvement')) {
+    addItem('참여 접근성을 고려한 운영 시간 및 일정 조정');
+  }
+  if (categoryKeys.has('promotion_participation')) {
+    addItem('홍보 채널 다각화 및 참여 기회 확대');
+  }
+  if (categoryKeys.has('facility_environment')) {
+    addItem('시설 및 기자재 점검과 교육 환경 개선');
+  }
+  if (items.length < 3) {
+    addItem('만족도 하위 문항을 반영한 세부 운영 보완');
+    addItem('참여자 요구 기반 후속 교육 검토');
+    addItem('조사 결과의 차기 사업계획 반영');
+  }
+
+  return items.map((item, index) => `${index + 1}. ${item}`).join('\n');
 }
 
 function getNumericScore(answer, question) {
