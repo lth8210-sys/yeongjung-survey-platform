@@ -426,6 +426,7 @@ function SurveyBuilderPage() {
   const questionSectionRef = useRef(null);
   const blockPickerRef = useRef(null);
   const hasVisiblePages = sections.length > 1;
+  const piiDetection = useMemo(() => detectPrivacyQuestions(questions), [questions]);
   const previewSurvey = useMemo(() => {
     let validQuestions = [];
     let validSections = [];
@@ -1603,7 +1604,6 @@ function SurveyBuilderPage() {
     return '';
   };
   const saveDisabledReason = getSaveDisabledReason();
-  const piiDetection = useMemo(() => detectPrivacyQuestions(questions), [questions]);
   const getTemplateBadges = (template) => {
     const badges = [];
     if (Array.isArray(template.tags) && template.tags.length > 0) {
