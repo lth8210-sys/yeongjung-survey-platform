@@ -4,6 +4,7 @@ import QrModal from '../components/QrModal';
 import { useAuth } from '../contexts/AuthContext';
 import {
   changeSurveyStatus,
+  createAuditLog,
   deleteSurvey,
   duplicateSurvey,
   fetchManagedSurveys,
@@ -22,6 +23,79 @@ import {
   restoreSurvey,
   SURVEY_STATUSES,
 } from '../firebase/surveys';
+import {
+  createSurveyTemplate,
+  SURVEY_TEMPLATE_CATEGORIES,
+} from '../firebase/surveyTemplates';
+
+function TemplateSaveModal({ survey, saving, onClose, onSave }) {
+  const [name, setName] = useState(survey?.title ?? '');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('기타');
+
+  if (!survey) return null;
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose();
+      }}
+      role="presentation"
+    >
+      <div aria-modal="true" className="template-modal panel" role="dialog">
+        <div className="builder-header-row">
+          <div>
+            <span className="eyebrow">템플릿 저장</span>
+            <h2>{survey.title}</h2>
+          </div>
+          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
+            닫기
+          </button>
+        </div>
+        <p className="inline-note">
+          응답과 통계는 제외하고 섹션, 문항, 보기와 운영 설정만 새 템플릿으로 저장합니다.
+        </p>
+        <label className="field">
+          <span>템플릿명</span>
+          <input onChange={(event) => setName(event.target.value)} value={name} />
+        </label>
+        <label className="field">
+          <span>설명</span>
+          <textarea
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="언제 사용하면 좋은 템플릿인지 입력하세요."
+            rows="4"
+            value={description}
+          />
+        </label>
+        <label className="field">
+          <span>분류</span>
+          <select onChange={(event) => setCategory(event.target.value)} value={category}>
+            {SURVEY_TEMPLATE_CATEGORIES.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="card-actions template-modal-actions">
+          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
+            취소
+          </button>
+          <button
+            className="primary-button"
+            disabled={saving || !name.trim()}
+            onClick={() => onSave({ name, description, category })}
+            type="button"
+          >
+            {saving ? '저장 중...' : '템플릿 저장'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SurveyListPage() {
   const {
@@ -41,6 +115,9 @@ function SurveyListPage() {
   const [activeSurveyId, setActiveSurveyId] = useState('');
   const [qrTarget, setQrTarget] = useState(null);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [templateSurvey, setTemplateSurvey] = useState(null);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateMessage, setTemplateMessage] = useState('');
 
   const loadSurveys = async () => {
     if (!isFirebaseConfigured) {
@@ -192,6 +269,46 @@ function SurveyListPage() {
     }
   };
 
+  const handleTemplateSave = async ({ name, description, category }) => {
+    if (!templateSurvey) return;
+
+    try {
+      setTemplateSaving(true);
+      setTemplateMessage('');
+      const actor = {
+        uid: user?.uid ?? '',
+        email: user?.email ?? '',
+        displayName: user?.displayName ?? '',
+      };
+      const created = await createSurveyTemplate({
+        name,
+        description,
+        category,
+        survey: templateSurvey,
+        sourceSurveyId: templateSurvey.id,
+        actor,
+      });
+      createAuditLog({
+        action: 'survey_template_created',
+        surveyId: templateSurvey.id,
+        surveyTitle: templateSurvey.title ?? '',
+        actor,
+        metadata: {
+          templateId: created.id,
+          templateName: name.trim(),
+          sourceSurveyId: templateSurvey.id,
+        },
+      });
+      setTemplateSurvey(null);
+      setTemplateMessage(`'${name.trim()}' 템플릿을 저장했습니다.`);
+    } catch (templateError) {
+      console.error('[SurveyTemplates] create failed', templateError);
+      setTemplateMessage(templateError.message || '템플릿 저장에 실패했습니다.');
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
   if (loading) {
     return <div className="empty-state">설문 목록을 불러오는 중입니다.</div>;
   }
@@ -225,6 +342,8 @@ function SurveyListPage() {
           </label>
         )}
       </div>
+
+      {templateMessage && <div className="inline-note">{templateMessage}</div>}
 
       {surveys.length === 0 ? (
         <div className="empty-state">
@@ -280,6 +399,16 @@ function SurveyListPage() {
                       >
                         복제
                       </button>
+                      {!deletedSurvey && (
+                        <button
+                          className="secondary-button"
+                          disabled={activeSurveyId === survey.id}
+                          onClick={() => setTemplateSurvey(survey)}
+                          type="button"
+                        >
+                          템플릿 저장
+                        </button>
+                      )}
                       {deletedSurvey ? (
                         <>
                           <button
@@ -388,6 +517,12 @@ function SurveyListPage() {
         onClose={() => setQrTarget(null)}
         title={qrTarget ? `${qrTarget.title} QR` : ''}
         url={qrTarget?.url ?? ''}
+      />
+      <TemplateSaveModal
+        onClose={() => setTemplateSurvey(null)}
+        onSave={handleTemplateSave}
+        saving={templateSaving}
+        survey={templateSurvey}
       />
     </section>
   );

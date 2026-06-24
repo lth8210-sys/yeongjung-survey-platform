@@ -1,88 +1,157 @@
-# 영중 설문 플랫폼 현재 상태
+# 영중폼 현재 운영 상태
 
-최종 업데이트: 2026-06-10
+최종 업데이트: 2026-06-24
+운영 기준: v0.36
 
-## 현재 배포 상태
+## 1. 서비스 개요
 
-- React + Vite + Firebase 기반으로 운영 배포 중입니다.
-- Firebase Hosting은 `dist/` 산출물을 서비스합니다.
-- SPA 라우팅은 `firebase.json`의 rewrite 설정으로 모든 경로를 `/index.html`에 연결합니다.
-- Firestore 보안 규칙은 `firestore.rules`, 인덱스는 `firestore.indexes.json`에서 관리합니다.
+영중폼은 영중종합사회복지관의 설문 수집, 응답 관리, 통계 분석, 결과보고서 작성 및 배포를 지원하는 내부 운영 플랫폼입니다.
 
-## Hosting URL
+현재 지원 흐름은 다음과 같습니다.
 
-- https://yeongjung-survey-platform.web.app
+> 설문 또는 템플릿 생성 → 공개 응답 수집 → 응답 관리 → 통계 분석 → 결과보고서 생성·수정·저장 → Word/PDF/Excel 활용 → 감사로그 확인
 
-## GitHub 저장소
+### 운영 원칙
 
-- https://github.com/lth8210-sys/yeongjung-survey-platform.git
+- Gemini, OpenAI 등 외부 AI API를 사용하지 않습니다.
+- 자유의견 분석과 보고서 자동문은 규칙 기반으로 생성합니다.
+- 원본 응답과 원본 자유의견은 보고서 편집으로 변경되지 않습니다.
+- CSV 원본 데이터는 분석용 정규화의 영향을 받지 않습니다.
+- Word와 통계 Excel은 브라우저에서 생성하며 별도 변환 서버를 사용하지 않습니다.
 
-## 현재 주요 기능
+## 2. 기술 및 배포 구성
 
-- Google 로그인 기반 관리자 접근
-- 홈/관리자 대시보드
-- 설문 목록 및 설문 제작/수정
-- 템플릿 기반 설문 생성
-- 공개 응답 페이지: `/surveys/:surveyId`, `/survey/:surveyId`
-- 응답 관리: `/admin/surveys/:surveyId/responses`
-- 전체 최근 응답 관리: `/admin/responses`
-- 응답 CSV 다운로드
+- Frontend: React 19, React Router, Vite
+- Backend: Firebase Authentication, Cloud Firestore
+- Hosting: Firebase Hosting
+- Word 생성: `docx`, `file-saver`
+- Excel 생성: `exceljs`, `file-saver`
+- Hosting 산출물: `dist/`
+- Firestore 규칙: `firestore.rules`
+- Firestore 인덱스: `firestore.indexes.json`
+- Firebase 프로젝트: `yeongjung-survey-platform`
+- 운영 URL: <https://yeongjung-survey-platform.web.app>
+
+`package.json`의 애플리케이션 버전은 현재 `0.1.0`이며, v0.35는 운영 기능 단계 명칭입니다.
+
+## 3. 사용자 역할
+
+| 역할 | 주요 권한 |
+| --- | --- |
+| `super_admin` | 전체 설문·응답·보고서 관리, 사용자 관리, 감사로그, 관리자 설정 |
+| `admin` | 전체 설문·응답·보고서 관리, 사용자 관리, 감사로그 |
+| `creator` | 본인이 소유한 설문·응답·보고서 생성 및 관리 |
+| `viewer` | 허용된 관리 화면 조회 중심, 보고서 저장·관리 제한 |
+
+- Firestore 사용자 문서는 `users/{uid}`를 사용합니다.
+- 한국어 역할값 `슈퍼관리자`, `관리자`, `제작자`, `조회자`도 rules에서 표준 역할값으로 정규화합니다.
+- 슈퍼관리자 이메일 목록은 `firestore.rules`와 `src/firebase/users.js`에서 동일하게 유지해야 합니다.
+- 사내 계정은 `@yeongjung.or.kr` 도메인을 기준으로 판정합니다.
+
+## 4. 관리자 메뉴와 경로
+
+| 메뉴 | 경로 | 사용 권한 | 용도 |
+| --- | --- | --- | --- |
+| 설문 관리 | `/admin/surveys` | 관리자 접근 가능 사용자 | 설문 목록, 상태 확인, 편집, 미리보기 |
+| 새 폼 만들기 | `/admin/surveys/new` | `creator` 이상 | 신규 설문 생성 |
+| 설문 템플릿 관리 | `/admin/templates` | `creator` 이상 | 템플릿 검색·사용·복제, 관리자 수정·비활성화 |
+| 응답 관리 | `/admin/responses` | 관리자 접근 가능 사용자 | 최근 응답 조회 |
+| 설문별 응답 관리 | `/admin/surveys/{surveyId}/responses` | 해당 설문 관리 권한 | 응답 처리, 분석, 다운로드, 보고서 생성 |
+| 결과보고서 관리 | `/admin/reports` | `creator` 이상 | 저장된 보고서 검색·열기·다운로드·복제·삭제 |
+| 사용자 관리 | `/admin/users` | `admin` 이상 | 내부 사용자 역할 및 상태 관리 |
+| 감사로그 | `/admin/audit-logs` | `admin` 이상 | 관리자 활동 조회 및 필터 |
+| 관리자 설정 | `/admin/settings` | `super_admin` | 최고 관리자 설정 |
+
+공개 응답 경로는 `/surveys/{surveyId}`이며, 기존 호환 경로 `/survey/{surveyId}`도 유지합니다.
+
+## 5. 현재 주요 기능
+
+### 설문
+
+- 설문 생성, 편집, 미리보기 및 공개
+- 빈 설문 또는 Firestore 템플릿으로 새 설문 생성
+- 기존 설문의 구조를 응답 데이터 없이 템플릿으로 저장
+- 템플릿 검색, 분류 필터, 복제 및 soft disable
+- 객관식, 다중선택, 단답형, 장문형 등 문항 지원
+- 필수 응답과 개인정보 동의 처리
+- 공개 기간, 마감 및 정원 관련 상태 처리
+- 템플릿과 레거시 문항 타입 정규화
+
+### 응답 관리
+
+- 설문별 응답 목록과 최근 응답 조회
+- 처리 상태 변경 및 관리자 메모
+- 응답 검색과 상태 필터
+- 개인정보 문항 익명화
 - 응답 soft delete
-- 응답 삭제 감사로그
-- 사용자 관리: `/admin/users`
-- 감사로그 조회: `/admin/audit-logs`
-- 설문 미리보기: `/admin/surveys/:surveyId/preview`
+- 원본형, 명단형, 슬롯형 CSV 다운로드
+- 통계 Excel 다운로드
+- 만족도, 응답자 특성, 자유의견 분석
 
-## 최근 해결된 핵심 이슈
+삭제된 응답은 `deleted: true`와 관련 필드로 관리하며 기본 목록, 통계 및 다운로드에서 제외됩니다. 원본 문서를 실제 삭제하지 않습니다.
 
-- 주관식/장문형 문항이 응답자 화면에서 누락되고 객관식 이후 자동 제출되던 문제를 보완했습니다.
-- `short_text`, `long_text`, `text`, `textarea`, `paragraph`, `subjective` 등 legacy/템플릿 `question.type` 값을 `normalizeQuestionType`에서 표준 타입으로 정규화합니다.
-- `sectionId`, `pageId`, `pageKey`, `sectionKey` alias 매칭 실패로 질문이 `groupedSections`에서 빠지는 문제를 구제합니다.
-- 섹션에 매칭되지 않은 응답 대상 질문은 숨기지 않고 fallback 섹션에 포함하는 방향으로 처리합니다.
-- 마지막 페이지 판단을 단순 섹션 수가 아니라 이후 렌더 가능한 질문 존재 여부 기준으로 강화했습니다.
-- 제출 직전 미방문 렌더 가능 질문이 있으면 제출을 차단하고 해당 질문 섹션으로 이동합니다.
+### 결과보고서
 
-## 현재 안정화 완료 항목
+- 응답 관리 화면에서 보고서 설정 후 새 탭으로 생성
+- 표지, 목차, 조사 개요, 응답자 특성, 만족도 분석, 자유의견, 종합 요약 구성
+- 보고문 편집 및 Firestore 저장
+- 저장본 우선 로드
+- 규칙 기반 자유의견 다중 분류와 대표 의견 선정
+- 규칙 기반 종합 요약 및 개선방향 생성
+- 브라우저 인쇄/PDF 저장
+- 편집 가능한 Word 문서 다운로드
+- 저장된 보고서 검색, 복제 및 soft delete
 
-- `renderedQuestionIds`는 질문 컴포넌트 마운트 기준이 아니라 현재 섹션 진입 기준으로 등록합니다.
-- production에서는 `[SurveyResponseDebug]`, `[BLOCK_SUBMIT_UNVISITED_QUESTIONS]`, raw/grouped debug 로그와 임시 debug panel을 노출하지 않습니다.
-- 응답 삭제는 실제 문서 삭제가 아니라 `deleted: true`, `deletedAt`, `deletedBy`, `hiddenFromDefaultList` 기반 soft delete입니다.
-- 삭제된 응답은 기본 응답 목록, 통계, 다운로드에서 제외됩니다.
-- 응답 삭제 시 `audit_logs`에 `action: response_delete`, `surveyId`, `responseId`, `deletedBy`, `deletedAt`을 기록합니다.
-- 응답 삭제 권한은 `canDeleteResponses`, 응답 관리 권한은 `canManageSurveyResponses`로 사용자 관리 권한과 분리했습니다.
-- 설문/질문 타입 상수는 `src/firebase/surveyConstants.js`, 정규화 유틸은 `src/firebase/surveyNormalize.js`로 분리했습니다.
+세부 사용법과 데이터 구조는 [REPORT_FEATURES.md](./REPORT_FEATURES.md)를 참고합니다.
 
-## 남아 있는 주의사항
+### 통계 Excel
 
-- `src/firebase/surveys.js`, `src/pages/SurveyResponsePage.jsx`, `src/pages/SurveyBuilderPage.jsx`는 여전히 큽니다. 기능 변경 시 영향 범위를 좁혀 수정해야 합니다.
-- Firestore Rules와 `src/firebase/users.js`의 슈퍼관리자 이메일 목록은 동기화가 필요합니다.
-- Firestore Rules 변경은 Hosting 배포만으로 반영되지 않습니다.
-- 응답 흐름 수정 시 실제 운영 설문 데이터의 `questions`, `sections`, page/section alias를 함께 확인해야 합니다.
-- `npm run build`는 통과해야 하며, 큰 chunk 경고는 현재 알려진 상태입니다.
+응답 관리 화면의 `통계 Excel 다운로드` 버튼으로 다음 시트를 포함한 `.xlsx` 파일을 생성합니다.
 
-## 다음 우선순위
+1. 설문 개요
+2. 응답 원본
+3. 객관식 빈도분석
+4. 만족도 분석
+5. 응답자 특성
+6. 자유의견 분석
+7. 종합요약
 
-- 운영 설문 1건 이상으로 객관식 -> 주관식 -> 제출 흐름을 수동 점검합니다.
-- 응답 삭제 후 목록/통계/다운로드/audit log를 관리자 계정으로 확인합니다.
-- 응답 흐름 관련 테스트 데이터를 문서화하거나 간단한 검증 스크립트를 추가하는 방안을 검토합니다.
-- `SurveyResponsePage.jsx` 내부 응답 흐름 계산부를 작은 유틸로 점진 분리합니다.
+## 6. 주요 Firestore 컬렉션
 
-## 바로 하지 않을 작업
+| 컬렉션 | 용도 |
+| --- | --- |
+| `users` | 내부 사용자 역할과 상태 |
+| `memberships` | 내부 사용자 가입 및 역할 연결 |
+| `surveys` | 설문 정의와 운영 상태 |
+| `responses` | 설문 응답 및 처리 정보 |
+| `survey_reports` | 결과보고서 설정, 편집 문구, 복제본, 삭제 상태 |
+| `survey_templates` | 재사용 가능한 설문 구조와 운영 설정 |
+| `audit_logs` | 관리자 활동 기록 |
 
-- TypeScript 전환
-- XState 등 상태머신 도입
-- Cloud Functions 구조 변경
-- Firestore 컬렉션 대개편
-- 대규모 UI 개편
-- repository 계층 전면 분리
+## 7. 현재 운영상 주의사항
 
-## 운영 확인 체크 항목
+- Hosting 배포만으로 Firestore rules는 반영되지 않습니다.
+- `/admin/reports` 또는 감사로그에서 `permission-denied`가 발생하면 운영 rules 배포 상태를 먼저 확인합니다.
+- 관리자 전체 목록 조회와 달리 `creator`의 보고서 조회는 보고서 `surveyId`와 본인 소유 설문이 일치해야 합니다.
+- 기존 보고서 문서에 `deleted`가 없어도 관리자 조회는 허용되며 화면에서는 삭제되지 않은 문서로 처리합니다.
+- 보고서 상태는 `draft`와 `final`을 지원하지만 현재 일반 저장은 기본적으로 `draft`입니다.
+- PDF의 날짜, URL, 페이지 번호는 브라우저 자체 머리글·바닥글입니다. 인쇄 설정에서 해제해야 합니다.
+- 보고서와 Excel의 프로그램명 정규화는 분석 화면에만 적용되고 원본 응답과 CSV는 변경하지 않습니다.
+- `src/firebase/surveys.js`와 주요 보고서·응답 페이지는 영향 범위가 넓으므로 변경 후 빌드와 실데이터 검증이 필요합니다.
+- 템플릿은 저장 시점의 독립 스냅샷입니다. 원 설문과 템플릿을 이후 수정해도 서로 자동 동기화되지 않습니다.
 
-- 공개 설문 URL이 열리는지 확인합니다.
-- 객관식 뒤 주관식/장문형/개인정보 동의 문항이 순서대로 표시되는지 확인합니다.
-- 선택 주관식은 비워도 제출 가능한지 확인합니다.
-- 필수 주관식은 비우면 제출되지 않고 오류가 표시되는지 확인합니다.
-- 마지막 질문 페이지 버튼이 `제출하기` 또는 `제출 및 저장`인지 확인합니다.
-- 응답 저장 후 관리자 응답 목록에 반영되는지 확인합니다.
-- 응답 삭제 후 목록/통계/다운로드에서 제외되는지 확인합니다.
-- `audit_logs`에 `response_delete` 기록이 남는지 확인합니다.
+## 8. 현재 확인된 제한 및 후속 과제
+
+- 감사로그 화면에 매핑되지 않은 과거 action은 영문 action 값으로 보일 수 있습니다.
+- 로그인·로그아웃 및 모든 설문 CRUD가 현재 감사로그 action 목록에 포함되는 것은 아닙니다.
+- 결과보고서 `final` 전환을 위한 별도 승인 UI는 아직 제공하지 않습니다.
+- 대량 응답의 Word/Excel 생성은 브라우저 메모리와 기기 성능에 영향을 받을 수 있습니다.
+- 운영 데이터 마이그레이션이나 Firestore 컬렉션 대개편은 현재 범위에서 제외합니다.
+
+## 9. 관련 문서
+
+- [OPERATIONS.md](./OPERATIONS.md): 일상 운영, 배포, 장애 대응
+- [REPORT_FEATURES.md](./REPORT_FEATURES.md): 결과보고서와 통계 Excel 상세
+- [AUDIT_LOGS.md](./AUDIT_LOGS.md): 감사로그 구조, action, 권한 및 오류 대응
+- [ARCHITECTURE.md](./ARCHITECTURE.md): 기존 시스템 구조
+- [AI_HANDOFF.md](./AI_HANDOFF.md): 개발 작업 인수인계

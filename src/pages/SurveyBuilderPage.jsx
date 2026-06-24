@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import QuestionBlockPicker from '../components/QuestionBlockPicker';
 import QuestionEditor from '../components/QuestionEditor';
 import SectionEditor from '../components/SectionEditor';
@@ -8,10 +14,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { FORM_TEMPLATES } from '../data/formTemplates';
 import {
   alignQuestionsToSections,
+  createAuditLog,
   createSurvey,
   detectPrivacyQuestions,
   fetchResponseCountBySurveyId,
   fetchSurveyById,
+  formatFirestoreDate,
   getFirestoreErrorMessage,
   isApplicationFormType,
   normalizeSurveyConfiguration,
@@ -25,6 +33,12 @@ import {
   validatePrivacyConsent,
   waitForSurveyById,
 } from '../firebase/surveys';
+import {
+  fetchSurveyTemplateById,
+  fetchSurveyTemplates,
+  incrementSurveyTemplateUsage,
+  instantiateSurveyTemplate,
+} from '../firebase/surveyTemplates';
 import {
   BRANCH_ACTIONS,
   FORM_TYPE_CONFIGS,
@@ -321,6 +335,7 @@ function SurveyBuilderPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { surveyId } = useParams();
+  const [searchParams] = useSearchParams();
   const {
     user,
     role,
@@ -335,6 +350,7 @@ function SurveyBuilderPage() {
   const isEditMode = Boolean(surveyId);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [tableBlocks, setTableBlocks] = useState([]);
   const [sections, setSections] = useState([createEmptySection(0)]);
   const [questions, setQuestions] = useState([
     {
@@ -388,6 +404,14 @@ function SurveyBuilderPage() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showStartWizard, setShowStartWizard] = useState(!isEditMode);
+  const [creationMode, setCreationMode] = useState(isEditMode ? 'builder' : '');
+  const [storedTemplates, setStoredTemplates] = useState([]);
+  const [storedTemplatesLoading, setStoredTemplatesLoading] = useState(!isEditMode);
+  const [storedTemplatesError, setStoredTemplatesError] = useState('');
+  const [selectedStoredTemplateId, setSelectedStoredTemplateId] = useState('');
+  const [selectedStoredTemplateName, setSelectedStoredTemplateName] = useState('');
+  const [selectedStoredTemplateSourceSurveyId, setSelectedStoredTemplateSourceSurveyId] =
+    useState('');
   const [wizardStartType, setWizardStartType] = useState('blank');
   const [wizardAudience, setWizardAudience] = useState('지역주민');
   const [wizardOpensAt, setWizardOpensAt] = useState('');
@@ -430,6 +454,7 @@ function SurveyBuilderPage() {
       title: title.trim() || '제목 없는 설문',
       description: description.trim(),
       descriptionFormat: 'markdown',
+      tableBlocks,
       questions: validQuestions,
       sections: validSections,
       status,
@@ -477,6 +502,7 @@ function SurveyBuilderPage() {
     slotDuplicateCheckEnabled,
     status,
     surveyId,
+    tableBlocks,
     templateMetadata,
     title,
   ]);
@@ -558,6 +584,7 @@ function SurveyBuilderPage() {
 
         setTitle(survey.title ?? '');
         setDescription(survey.description ?? '');
+        setTableBlocks(Array.isArray(survey.tableBlocks) ? survey.tableBlocks : []);
         const normalizedSections = normalizeSurveySections(survey.sections, survey.questions);
         const normalizedQuestions = alignQuestionsToSections(survey.questions, normalizedSections);
         setSections(normalizedSections);
@@ -938,6 +965,98 @@ function SurveyBuilderPage() {
     }
   };
 
+  const applyStoredTemplate = (template) => {
+    const instantiated = instantiateSurveyTemplate(template);
+    const nextSections =
+      instantiated.sections.length > 0 ? instantiated.sections : [createEmptySection(0)];
+    const nextQuestions =
+      instantiated.questions.length > 0
+        ? instantiated.questions
+        : [{ ...createEmptyQuestion(), sectionId: nextSections[0]?.id ?? '' }];
+
+    setTitle('');
+    setDescription(instantiated.description);
+    setTableBlocks(instantiated.tableBlocks);
+    setSections(nextSections);
+    setQuestions(nextQuestions);
+    setStatus(SURVEY_STATUSES.DRAFT);
+    setFormType(instantiated.formType);
+    setBranchingEnabled(instantiated.branchingEnabled);
+    setQuotaEnabled(instantiated.quotaEnabled);
+    setMaxResponses(instantiated.maxResponses ? String(instantiated.maxResponses) : '');
+    setDuplicateCheckEnabled(instantiated.duplicateCheckEnabled);
+    setSlotDuplicateCheckEnabled(instantiated.slotDuplicateCheckEnabled);
+    setOneSlotPerPersonEnabled(instantiated.oneSlotPerPersonEnabled);
+    setApplicantListView(instantiated.applicantListView);
+    setProcessingStatusEnabled(instantiated.processingStatusEnabled);
+    setOpensAt(instantiated.opensAt);
+    setClosesAt(instantiated.closesAt);
+    setApplicationGuide(instantiated.applicationGuide);
+    setScheduleSummary(instantiated.scheduleSummary);
+    setCautionText(instantiated.cautionText);
+    setAllowResponseEdit(instantiated.allowResponseEdit);
+    setCompletionMessage(instantiated.completionMessage);
+    setAdminNotificationEnabled(instantiated.adminNotificationEnabled);
+    setOptionQuotaCounts({});
+    setSelectedStoredTemplateId(template.id);
+    setSelectedStoredTemplateName(template.name);
+    setSelectedStoredTemplateSourceSurveyId(template.sourceSurveyId ?? '');
+    setSelectedTemplateId(template.id);
+    setTemplateMetadata({
+      templateId: template.id,
+      templateCategory: template.category ?? '',
+      templateType: 'firestore',
+      templateVersion: 1,
+    });
+    setCreationMode('template');
+    setShowStartWizard(false);
+    setShowTemplatePicker(false);
+    setMessage(`'${template.name}' 구조를 불러왔습니다. 새 설문 제목을 입력한 뒤 저장하세요.`);
+  };
+
+  useEffect(() => {
+    if (isEditMode) return undefined;
+
+    let cancelled = false;
+    const requestedTemplateId = searchParams.get('templateId')?.trim() ?? '';
+
+    async function loadStoredTemplates() {
+      try {
+        setStoredTemplatesLoading(true);
+        setStoredTemplatesError('');
+        const items = await fetchSurveyTemplates();
+        if (cancelled) return;
+        setStoredTemplates(items);
+
+        if (requestedTemplateId) {
+          const selected =
+            items.find((template) => template.id === requestedTemplateId) ??
+            (await fetchSurveyTemplateById(requestedTemplateId));
+          if (cancelled) return;
+          if (!selected || selected.active === false) {
+            setStoredTemplatesError('선택한 템플릿을 찾을 수 없거나 비활성화되었습니다.');
+            return;
+          }
+          applyStoredTemplate(selected);
+        }
+      } catch (templateError) {
+        if (!cancelled) {
+          console.error('[SurveyTemplates] builder load failed', templateError);
+          setStoredTemplatesError(
+            '설문 템플릿을 불러오지 못했습니다. 권한과 Firestore 규칙을 확인해주세요.',
+          );
+        }
+      } finally {
+        if (!cancelled) setStoredTemplatesLoading(false);
+      }
+    }
+
+    loadStoredTemplates();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, searchParams]);
+
   const applyTemplate = async (template) => {
     const disabledReason = getSaveDisabledReason();
 
@@ -1103,6 +1222,7 @@ function SurveyBuilderPage() {
     setTemplateMetadata({});
     setTitle('');
     setDescription('');
+    setTableBlocks([]);
     setSections([blankSection]);
     setQuestions([
       {
@@ -1137,6 +1257,10 @@ function SurveyBuilderPage() {
     setCompletionMessage('');
     setAdminNotificationEnabled(false);
     setOptionQuotaCounts({});
+    setSelectedStoredTemplateId('');
+    setSelectedStoredTemplateName('');
+    setSelectedStoredTemplateSourceSurveyId('');
+    setCreationMode('blank');
     setShowStartWizard(false);
     setMessage('빈 폼으로 초기화했습니다.');
   };
@@ -1172,6 +1296,7 @@ function SurveyBuilderPage() {
         ? `${wizardAudience} 대상 ${startTypeMeta.label}입니다.`
         : '',
     );
+    setTableBlocks([]);
     setSections([blankSection]);
     setQuestions(
       starterQuestions.length
@@ -1201,6 +1326,10 @@ function SurveyBuilderPage() {
     setAllowResponseEdit(false);
     setCompletionMessage('');
     setAdminNotificationEnabled(false);
+    setSelectedStoredTemplateId('');
+    setSelectedStoredTemplateName('');
+    setSelectedStoredTemplateSourceSurveyId('');
+    setCreationMode('blank');
     setShowStartWizard(false);
     setShowTemplatePicker(false);
     setMessage('기본 정보만 정리해두었습니다. 이제 질문을 바로 추가해보세요.');
@@ -1307,6 +1436,7 @@ function SurveyBuilderPage() {
           title: title.trim(),
           description: description.trim(),
           descriptionFormat: 'markdown',
+          tableBlocks,
           questions: validQuestions,
           sections: validSections,
           status,
@@ -1349,6 +1479,7 @@ function SurveyBuilderPage() {
         title: title.trim(),
         description: description.trim(),
         descriptionFormat: 'markdown',
+        tableBlocks,
         questions: validQuestions,
         sections: validSections,
         status,
@@ -1377,6 +1508,29 @@ function SurveyBuilderPage() {
           role,
         },
       });
+      if (selectedStoredTemplateId) {
+        const actor = {
+          uid: user?.uid ?? '',
+          email: user?.email ?? '',
+          displayName: user?.displayName ?? '',
+        };
+        try {
+          await incrementSurveyTemplateUsage(selectedStoredTemplateId);
+        } catch (templateUsageError) {
+          console.warn('[SurveyTemplates] usage update failed', templateUsageError);
+        }
+        createAuditLog({
+          action: 'survey_template_used',
+          surveyId: createdSurveyId,
+          surveyTitle: title.trim(),
+          actor,
+          metadata: {
+            templateId: selectedStoredTemplateId,
+            templateName: selectedStoredTemplateName,
+            sourceSurveyId: selectedStoredTemplateSourceSurveyId,
+          },
+        });
+      }
       navigate(`/admin/surveys/${createdSurveyId}/edit`, {
         replace: true,
         state: {
@@ -1488,6 +1642,82 @@ function SurveyBuilderPage() {
     return badges;
   };
   const questionDisplayMap = buildQuestionDisplayMap(questions, sections);
+
+  if (!isEditMode && !creationMode) {
+    return (
+      <section className="stack-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">새 폼 만들기</span>
+            <h1>어떻게 시작할까요?</h1>
+            <p>빈 설문을 직접 구성하거나 저장된 템플릿의 구조를 복사해 시작할 수 있습니다.</p>
+          </div>
+          <Link className="secondary-button" to="/admin/templates">
+            설문 템플릿 관리
+          </Link>
+        </div>
+
+        <div className="template-card-grid">
+          <article className="template-start-card template-start-card-selected">
+            <div>
+              <span className="template-badge">직접 만들기</span>
+              <h2>빈 설문 만들기</h2>
+              <p>현재의 시작 도우미와 기본 문항 생성 방식을 그대로 사용합니다.</p>
+            </div>
+            <button
+              className="primary-button"
+              onClick={() => {
+                setCreationMode('blank');
+                setShowStartWizard(true);
+              }}
+              type="button"
+            >
+              빈 설문으로 시작
+            </button>
+          </article>
+
+          {storedTemplatesLoading ? (
+            <div className="empty-state">저장된 템플릿을 불러오는 중입니다.</div>
+          ) : storedTemplatesError ? (
+            <div className="empty-state">{storedTemplatesError}</div>
+          ) : storedTemplates.length === 0 ? (
+            <article className="template-start-card">
+              <div>
+                <span className="template-badge">템플릿</span>
+                <h2>저장된 템플릿이 없습니다</h2>
+                <p>설문 관리에서 기존 설문을 템플릿으로 저장할 수 있습니다.</p>
+              </div>
+              <Link className="secondary-button" to="/admin/surveys">
+                설문 관리로 이동
+              </Link>
+            </article>
+          ) : (
+            storedTemplates.map((template) => (
+              <article className="template-start-card" key={template.id}>
+                <div>
+                  <div className="template-badge-row">
+                    <span className="template-badge">{template.category}</span>
+                  </div>
+                  <h2>{template.name}</h2>
+                  <p>{template.description || '설명이 없습니다.'}</p>
+                  <small>
+                    사용 {template.usageCount}회 · 최근 수정 {formatFirestoreDate(template.updatedAt)}
+                  </small>
+                </div>
+                <button
+                  className="secondary-button"
+                  onClick={() => applyStoredTemplate(template)}
+                  type="button"
+                >
+                  이 템플릿으로 시작
+                </button>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
+    );
+  }
 
   const renderBuilderActionRow = () => (
     <div className="builder-direct-actions-wrap" ref={blockPickerRef}>

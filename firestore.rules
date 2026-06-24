@@ -425,6 +425,71 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /survey_templates/{templateId} {
+      allow get, list: if isAtLeastAdmin() || (
+        isCreator() &&
+        resource.data.active == true
+      );
+      allow create: if (isAtLeastAdmin() || isCreator()) &&
+        request.resource.data.keys().hasOnly([
+          "name",
+          "description",
+          "category",
+          "surveyData",
+          "sourceSurveyId",
+          "copiedFromTemplateId",
+          "usageCount",
+          "active",
+          "createdBy",
+          "updatedBy",
+          "createdAt",
+          "updatedAt"
+        ]) &&
+        request.resource.data.name is string &&
+        request.resource.data.description is string &&
+        request.resource.data.category is string &&
+        request.resource.data.surveyData is map &&
+        request.resource.data.sourceSurveyId is string &&
+        request.resource.data.usageCount == 0 &&
+        request.resource.data.active == true &&
+        request.resource.data.createdBy is map &&
+        request.resource.data.createdBy.uid == request.auth.uid &&
+        request.resource.data.updatedBy is map &&
+        request.resource.data.updatedBy.uid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        (
+          !request.resource.data.keys().hasAny(["copiedFromTemplateId"]) ||
+          request.resource.data.copiedFromTemplateId is string
+        );
+      allow update: if (
+        isAtLeastAdmin() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "name",
+          "description",
+          "category",
+          "active",
+          "updatedBy",
+          "updatedAt"
+        ]) &&
+        request.resource.data.name is string &&
+        request.resource.data.description is string &&
+        request.resource.data.category is string &&
+        request.resource.data.active is bool &&
+        request.resource.data.updatedBy is map &&
+        request.resource.data.updatedBy.uid == request.auth.uid &&
+        request.resource.data.updatedAt == request.time
+      ) || (
+        (isAtLeastAdmin() || isCreator()) &&
+        resource.data.active == true &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "usageCount"
+        ]) &&
+        request.resource.data.usageCount == resource.data.usageCount + 1
+      );
+      allow delete: if false;
+    }
+
     match /audit_logs/{logId} {
       allow create: if (isAtLeastAdmin() || isCreator()) &&
         request.resource.data.keys().hasOnly([

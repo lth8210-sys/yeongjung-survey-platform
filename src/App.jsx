@@ -14,6 +14,7 @@ import SurveyReportPage from './pages/SurveyReportPage';
 import SurveyReportsAdminPage from './pages/SurveyReportsAdminPage';
 import SurveyResponsesAdminPage from './pages/SurveyResponsesAdminPage';
 import SurveyResponsePage from './pages/SurveyResponsePage';
+import SurveyTemplatesAdminPage from './pages/SurveyTemplatesAdminPage';
 import UserManagementPage from './pages/UserManagementPage';
 
 function App() {
@@ -61,6 +62,14 @@ function App() {
           element={
             <AdminRoute requireCreate>
               <SurveyReportsAdminPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="admin/templates"
+          element={
+            <AdminRoute requireCreate>
+              <SurveyTemplatesAdminPage />
             </AdminRoute>
           }
         />

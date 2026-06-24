@@ -1,8 +1,158 @@
-# 운영 및 배포 절차
+# 영중폼 운영 및 배포 절차
 
-최종 업데이트: 2026-06-10
+최종 업데이트: 2026-06-24
+운영 기준: v0.36
 
-## 로컬 실행 방법
+## 1. 로그인과 권한 확인
+
+1. 운영 URL <https://yeongjung-survey-platform.web.app>에 접속합니다.
+2. `Google 로그인`을 선택합니다.
+3. 로그인 영역에 표시되는 이름, 이메일, 역할을 확인합니다.
+4. 필요한 메뉴가 보이지 않으면 `users/{uid}`의 `role`, `status`, `email`을 확인합니다.
+
+역할은 `super_admin`, `admin`, `creator`, `viewer`를 사용하며 `status`가 `active`여야 관리 권한이 정상 적용됩니다.
+
+## 2. 관리자 메뉴별 사용 방법
+
+### 설문 관리
+
+경로: `/admin/surveys`
+
+- 설문 목록과 운영 상태를 확인합니다.
+- 설문 편집, 미리보기, 응답 관리 화면으로 이동합니다.
+- 신규 설문은 `새 폼 만들기` 메뉴에서 생성합니다.
+- 운영 전 공개 기간, 필수 문항, 개인정보 동의, 마감 조건을 확인합니다.
+
+### 응답 관리
+
+경로:
+
+- 전체 최근 응답: `/admin/responses`
+- 설문별 응답: `/admin/surveys/{surveyId}/responses`
+
+설문별 응답 관리 화면에서는 다음 작업을 수행합니다.
+
+- 검색 및 처리 상태 필터
+- 응답 처리 상태 변경
+- 관리자 메모 작성
+- 개인정보 문항 익명화
+- 응답 soft delete
+- CSV 및 통계 Excel 다운로드
+- 만족도·응답자 특성·자유의견 분석 확인
+- 결과보고서 생성
+
+### 설문 템플릿 관리
+
+경로: `/admin/templates`
+
+- `creator` 이상은 활성 템플릿 조회, 사용, 생성 및 복제가 가능합니다.
+- `admin` 이상은 템플릿명·설명·분류 수정과 비활성화를 수행할 수 있습니다.
+- 기존 설문 카드의 `템플릿 저장`에서 설문 구조를 새 템플릿으로 저장합니다.
+- 새 폼 만들기에서 `빈 설문 만들기` 또는 활성 템플릿을 선택합니다.
+- 템플릿 사용 시 섹션 ID와 문항 ID가 새로 발급되며 원 설문과 연결되지 않습니다.
+- 템플릿 비활성화는 `active: false`이며 실제 문서를 삭제하지 않습니다.
+
+#### 응답 삭제
+
+- 실제 Firestore 문서를 삭제하지 않고 `deleted: true`로 처리합니다.
+- 삭제된 응답은 기본 목록, 분석 및 다운로드에서 제외됩니다.
+- 설문 응답 수와 선택지 정원 집계가 함께 조정됩니다.
+- `response_delete` 감사로그가 기록됩니다.
+
+#### 개인정보 익명화
+
+- 관리자 이상 권한에서만 수행합니다.
+- 대상 답변은 `[익명처리됨]`으로 변경됩니다.
+- 처리 상태, 제출일, 통계용 정보는 유지됩니다.
+- 실행 전 복구가 필요한 데이터인지 반드시 확인합니다.
+
+### 결과보고서 관리
+
+경로: `/admin/reports`
+
+- 보고서 제목 또는 설문명으로 검색합니다.
+- 전체, 임시저장, 최종본 상태로 필터합니다.
+- 기본 정렬은 최종 수정일 내림차순입니다.
+- `열기`, `Word 다운로드`, `PDF 출력`, `복제`, `삭제`를 사용할 수 있습니다.
+- 삭제는 `deleted: true`로 처리하는 soft delete입니다.
+
+보고서 작성 상세 절차는 [REPORT_FEATURES.md](./REPORT_FEATURES.md)를 참고합니다.
+
+### 사용자 관리
+
+경로: `/admin/users`
+
+- `admin` 이상만 접근합니다.
+- 사용자 역할과 활성 상태를 변경할 때 최소 권한 원칙을 적용합니다.
+- 슈퍼관리자 이메일은 rules와 코드에 별도 보호 목록이 있으므로 변경 시 두 위치를 함께 점검합니다.
+
+### 감사로그
+
+경로: `/admin/audit-logs`
+
+- `admin` 이상만 조회할 수 있습니다.
+- 작업 유형과 설문 ID로 필터할 수 있습니다.
+- 한 번에 30건씩 최신순으로 조회합니다.
+- 상세 action과 권한은 [AUDIT_LOGS.md](./AUDIT_LOGS.md)를 참고합니다.
+
+## 3. 결과보고서 운영 절차
+
+1. 설문별 응답 관리 화면에서 분석 데이터가 정상인지 확인합니다.
+2. `결과보고서 생성`을 누릅니다.
+3. 보고서 제목, 조사기간, 조사대상, 작성부서, 작성일, 작성자를 확인합니다.
+4. `보고서 열기`를 눌러 새 탭에서 보고서를 엽니다.
+5. 자동 생성된 표와 보고문을 검토합니다.
+6. `보고서 수정`을 눌러 파란색 편집 영역의 문장만 수정합니다.
+7. 수정 후 `저장`합니다.
+8. 읽기 모드에서 Word를 다운로드하거나 PDF로 출력합니다.
+
+### 저장되지 않은 변경사항
+
+- 편집 중 페이지를 닫거나 이동하면 경고가 표시됩니다.
+- `저장 후 인쇄/PDF`는 저장 완료 후 인쇄 창을 엽니다.
+- 저장된 보고문이 Word와 PDF 출력의 기준이 됩니다.
+
+### PDF 저장
+
+1. 읽기 모드에서 `인쇄/PDF 저장`을 누릅니다.
+2. 프린터에서 `PDF로 저장`을 선택합니다.
+3. 용지를 A4로 설정합니다.
+4. 브라우저의 `머리글과 바닥글` 옵션을 해제합니다.
+5. 표지, 목차, 본문 페이지 나눔을 확인한 뒤 저장합니다.
+
+### Word 다운로드
+
+- 읽기 모드에서만 버튼이 표시됩니다.
+- 저장된 보고문이 있으면 저장본을 사용합니다.
+- 표는 Word에서 편집 가능한 표로 생성됩니다.
+- 자유의견 원문은 번호 목록으로 생성됩니다.
+- 다운로드 실패 시 팝업 차단이 아니라 브라우저 다운로드 권한과 콘솔 오류를 확인합니다.
+
+## 4. 통계 Excel 다운로드
+
+1. 설문별 응답 관리 화면을 엽니다.
+2. 분석 대상 응답 수를 확인합니다.
+3. `통계 Excel 다운로드`를 누릅니다.
+4. 개인정보 문항이 있는 경우 안내를 확인한 뒤 계속합니다.
+5. 생성 완료 메시지와 파일 다운로드를 확인합니다.
+
+파일명은 `{설문명}_통계분석.xlsx` 형식입니다.
+
+### 시트 구성
+
+| 시트 | 내용 |
+| --- | --- |
+| 설문 개요 | 설문명, 응답 수, 응답 기간, 생성일 |
+| 응답 원본 | 기존 CSV와 동일한 열 순서 |
+| 객관식 빈도분석 | 문항별 선택지, 응답 수, 비율 |
+| 만족도 분석 | 평균, 응답 수, 표준편차, 최고점, 최저점 |
+| 응답자 특성 | 프로그램, 지역, 참여기간 빈도 |
+| 자유의견 분석 | 유형, 건수, 비율, 분석 결과, 대표 의견 |
+| 종합요약 | 결과보고서의 규칙 기반 자동 요약 |
+
+다중선택과 자유의견 다중 태그는 비율 합계가 100%를 초과할 수 있습니다.
+
+## 5. 로컬 실행 및 검증
 
 ```bash
 npm install
@@ -10,147 +160,156 @@ cp .env.example .env.local
 npm run dev
 ```
 
-- 개발 기본 주소는 `http://localhost:5173`입니다.
-- Firebase Authentication 승인 도메인 설정에 따라 `127.0.0.1` 접속은 `auth/unauthorized-domain` 오류가 날 수 있습니다.
-- `.env.local`에는 Firebase 웹 앱 설정과 관리자 이메일 목록을 넣습니다.
-- 민감정보는 문서나 Git에 기록하지 않습니다.
+- 기본 개발 주소: `http://localhost:5173`
+- `.env.local`은 Git에 커밋하지 않습니다.
+- Firebase Authentication 승인 도메인에 없는 주소는 로그인 오류가 발생할 수 있습니다.
 
-## 빌드 방법
-
-```bash
-npm run build
-```
-
-- Vite production build가 `dist/`에 생성됩니다.
-- 현재 큰 chunk 경고는 알려진 상태입니다. 빌드 실패가 아니면 배포 자체를 막지는 않습니다.
-
-## GitHub push 절차
-
-```bash
-git status
-git diff --stat
-git add <변경 파일>
-git commit -m "<작업 요약>"
-git push origin <브랜치명>
-```
-
-- 기능 코드와 운영 문서 변경을 섞을 때는 diff 범위를 반드시 확인합니다.
-- 민감정보, API key, token, 실제 개인정보가 포함되지 않았는지 확인합니다.
-
-## Firebase Hosting 배포 절차
+배포 전 필수 검증:
 
 ```bash
 npm run build
-firebase deploy --only hosting
 ```
 
-- Hosting은 `dist/` 산출물을 배포합니다.
-- SPA rewrite 설정은 `firebase.json`에 있습니다.
+## 6. Firebase 배포
 
-## Firestore rules 변경 시 배포 절차
+### 프로젝트 선택과 로그인
 
-`firestore.rules` 또는 `firestore.indexes.json`을 변경한 경우 Hosting 배포만으로는 반영되지 않습니다.
+```bash
+npm run firebase:login
+npm run firebase:use
+```
+
+### Hosting만 배포
 
 ```bash
 npm run build
-firebase deploy --only firestore
-firebase deploy --only hosting
+npx firebase deploy --only hosting
 ```
 
-전체 배포가 필요하면 다음 명령을 사용할 수 있습니다.
+### Firestore rules 사전 검증 및 배포
 
 ```bash
-firebase deploy
+npx firebase deploy --only firestore:rules --dry-run
+npx firebase deploy --only firestore:rules
 ```
 
-## 배포 후 확인 항목
+### Firestore 인덱스 배포
 
-- https://yeongjung-survey-platform.web.app 접속 확인
-- 관리자 Google 로그인 확인
-- `/admin/surveys` 목록 로드 확인
-- 공개 응답 URL `/surveys/:surveyId` 접속 확인
-- 객관식 -> 주관식 -> 개인정보 동의 -> 제출 흐름 확인
-- production 화면에 debug panel이 보이지 않는지 확인
-- 브라우저 콘솔에 raw questions/sections 등 내부 설문 구조 로그가 노출되지 않는지 확인
-- 응답 저장 후 관리자 응답 목록에 반영되는지 확인
-- 삭제된 응답이 목록/통계/다운로드에서 제외되는지 확인
+```bash
+npx firebase deploy --only firestore:indexes
+```
 
-## 실제 설문 응답 테스트 방법
+### rules와 인덱스 함께 배포
 
-1. 관리자 계정으로 로그인합니다.
-2. `/admin/surveys/new`에서 템플릿 기반 설문을 생성합니다.
-3. 설문을 공개 상태로 저장합니다.
-4. 공개 URL `/surveys/:surveyId`로 접속합니다.
-5. 객관식 문항 응답 후 다음을 누릅니다.
-6. 주관식/장문형 문항이 표시되는지 확인합니다.
-7. 선택 주관식은 비운 채 제출 가능한지 확인합니다.
-8. 필수 주관식은 비우면 제출되지 않는지 확인합니다.
-9. 마지막 질문 페이지 버튼이 `제출하기` 또는 `제출 및 저장`인지 확인합니다.
-10. 제출 완료 후 `/admin/surveys/:surveyId/responses`에서 저장 데이터를 확인합니다.
+```bash
+npm run firestore:deploy
+```
 
-## 응답 삭제 테스트 방법
+### 전체 배포
 
-1. 관리자 또는 슈퍼관리자 계정으로 로그인합니다.
-2. 테스트 응답 1건을 생성합니다.
-3. `/admin/surveys/:surveyId/responses`로 이동합니다.
-4. 개별 응답의 삭제 버튼을 누릅니다.
-5. 확인 모달의 문구를 확인합니다.
-   - `이 응답을 삭제하시겠습니까?`
-   - `삭제된 응답은 복구할 수 없습니다.`
-6. 삭제 후 응답 목록에서 즉시 사라지는지 확인합니다.
-7. 통계 수치가 감소하는지 확인합니다.
-8. CSV 다운로드에서 삭제 응답이 제외되는지 확인합니다.
-9. 같은 응답을 다시 삭제하려고 할 때 중복 처리되지 않는지 확인합니다.
+```bash
+npm run build
+npx firebase deploy
+```
 
-## 감사로그 확인 방법
+## 7. Firestore rules 배포 주의사항
 
-- 화면: `/admin/audit-logs`
-- Firestore collection: `audit_logs`
-- 응답 삭제 로그 필수 값:
-  - `action: response_delete`
-  - `surveyId`
-  - `responseId`
-  - `deletedBy`
-  - `deletedAt`
-  - `createdAt`
+- Hosting 배포는 `firestore.rules`를 배포하지 않습니다.
+- 권한 코드를 수정한 뒤 rules를 배포하지 않으면 운영 화면에서 계속 `permission-denied`가 발생합니다.
+- rules 배포 전 `git diff -- firestore.rules`로 허용 범위를 확인합니다.
+- `users/{uid}`의 역할과 상태가 rules의 정규화 값과 일치하는지 확인합니다.
+- `survey_reports`는 관리자 전체 조회와 제작자 소유 설문 조회 조건이 다릅니다.
+- `survey_templates`는 관리자 전체 조회, 제작자 활성 템플릿 조회를 허용합니다.
+- 제작자는 사용횟수 증가 외에 기존 템플릿을 수정하거나 비활성화할 수 없습니다.
+- `audit_logs` 생성은 `admin`, `super_admin`, `creator`에게 허용되지만 조회는 `admin` 이상만 허용됩니다.
+- 슈퍼관리자 이메일 목록을 변경하면 `firestore.rules`와 `src/firebase/users.js`를 함께 변경하고 배포합니다.
+- rules 배포 후 기존 로그인 토큰이나 캐시가 남아 있으면 로그아웃·재로그인 및 강력 새로고침을 수행합니다.
 
-## 운영 오류 기록 양식
+## 8. 배포 후 점검
+
+1. 운영 URL 접속과 Google 로그인을 확인합니다.
+2. 현재 계정 역할과 메뉴 노출을 확인합니다.
+3. `/admin/surveys`가 정상 로드되는지 확인합니다.
+4. 테스트 응답을 제출하고 응답 관리 화면에서 확인합니다.
+5. 통계 Excel을 내려받아 7개 시트를 확인합니다.
+6. 결과보고서를 생성, 수정, 저장한 뒤 새로고침합니다.
+7. Word 문서를 열어 저장 문구와 표를 확인합니다.
+8. PDF 미리보기에서 표지, 목차, 본문 페이지 나눔을 확인합니다.
+9. `/admin/reports`에서 저장본을 열고 검색·복제·삭제를 확인합니다.
+10. `/admin/audit-logs`에서 실행한 작업의 action을 확인합니다.
+
+## 9. 자주 발생하는 문제
+
+### `/admin/reports`에서 `permission-denied`
+
+1. 운영 rules가 최신인지 확인합니다.
+2. `npx firebase deploy --only firestore:rules`를 실행합니다.
+3. `users/{uid}`의 `role`, `status`, `email`을 확인합니다.
+4. `creator`라면 보고서 `surveyId`가 본인 소유 설문과 일치하는지 확인합니다.
+5. 로그아웃 후 다시 로그인하고 강력 새로고침합니다.
+
+### 감사로그 저장이 `permission-denied`
+
+- 최신 rules 배포 여부를 확인합니다.
+- 현재 계정이 활성 `admin`, `super_admin`, `creator`인지 확인합니다.
+- `actor`가 `uid`, `email`, `displayName` 문자열을 포함하는지 확인합니다.
+- 오래된 배포 파일이 서비스 중이면 Hosting도 다시 빌드·배포합니다.
+
+### 감사로그 조회가 실패함
+
+- 감사로그 화면은 `admin` 이상만 접근할 수 있습니다.
+- `failed-precondition`이면 `firestore.indexes.json`을 배포합니다.
+- action과 설문 ID를 동시에 필터할 때 복합 인덱스가 필요할 수 있습니다.
+
+### 수정한 코드가 운영 화면에 보이지 않음
+
+```bash
+npm run build
+npx firebase deploy --only hosting
+```
+
+배포 후 브라우저 강력 새로고침을 수행하고 배포 프로젝트가 `yeongjung-survey-platform`인지 확인합니다.
+
+### PDF에 날짜·URL·페이지 번호가 표시됨
+
+브라우저 인쇄 설정의 `머리글과 바닥글`을 해제합니다. 애플리케이션의 반복 footer가 아닐 수 있습니다.
+
+### 보고서 수정 내용이 Word/PDF에 반영되지 않음
+
+- 편집 후 저장 성공 메시지를 확인합니다.
+- 새로고침 후 수정 문구가 유지되는지 확인합니다.
+- 복제 보고서는 URL의 `reportId`가 해당 복사본인지 확인합니다.
+
+### 보고서 목록에 기존 문서가 보이지 않음
+
+- 보고서가 `deleted: true`인지 확인합니다.
+- `surveyId`가 존재하고 현재 사용자가 접근 가능한 원 설문인지 확인합니다.
+- 기존 문서에 `deleted`가 없는 것은 관리자 조회를 막지 않습니다.
+
+### Word 또는 Excel 다운로드가 느림
+
+- 문서는 브라우저에서 생성되므로 응답 수와 자유의견 길이에 따라 시간이 걸립니다.
+- 생성 중 탭을 닫지 않습니다.
+- 브라우저 다운로드 차단 여부와 사용 가능한 메모리를 확인합니다.
+
+## 10. 장애 기록 양식
 
 ```md
 ## 오류 기록
 
 - 발생일시:
 - 발견자:
-- 화면/URL:
-- 계정 역할:
+- 운영 URL:
+- 계정 이메일/역할:
+- 화면 경로:
 - 설문 ID:
-- 응답 ID:
+- 보고서 ID 또는 응답 ID:
 - 재현 절차:
 - 기대 결과:
 - 실제 결과:
-- 콘솔 오류:
-- Firestore 데이터 특이사항:
+- 콘솔 오류 코드:
+- 최근 Hosting 배포 시각:
+- 최근 rules 배포 시각:
 - 임시 조치:
 - 최종 조치:
 ```
-
-## 직원 사용 전 점검 체크리스트
-
-- 설문 제목/설명이 올바른지 확인
-- 필수 문항 표시 확인
-- 선택 문항이 비워도 제출 가능한지 확인
-- 개인정보 동의 문항 확인
-- 공개 기간/마감 상태 확인
-- 응답 링크 QR/복사 링크 확인
-- 테스트 응답 제출 후 관리자 화면에서 데이터 확인
-- 테스트 응답 삭제 및 감사로그 확인
-
-## 장애 발생 시 기본 대응
-
-1. 배포 직후 문제라면 직전 commit과 배포 시간을 기록합니다.
-2. 브라우저 콘솔 오류와 Firestore 권한 오류를 구분합니다.
-3. `npm run build`를 로컬에서 재실행해 빌드 오류 여부를 확인합니다.
-4. Firestore Rules 변경 여부를 확인하고 필요 시 `firebase deploy --only firestore`를 실행합니다.
-5. 특정 설문 문제라면 Firestore의 `surveys/{surveyId}.questions`와 `sections`를 확인합니다.
-6. 응답 누락 문제라면 `visibleQuestionIds`, `visibleSectionIds`, `answers` 저장값을 확인합니다.
-7. 임시 운영 안내가 필요하면 설문을 `closed` 처리하거나 관리자에게 수동 대응 절차를 공유합니다.

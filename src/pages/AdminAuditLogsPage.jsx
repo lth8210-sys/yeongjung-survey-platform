@@ -24,6 +24,12 @@ const ACTION_OPTIONS = [
   { value: 'response_anonymized', label: '익명화' },
   { value: 'responses_csv_downloaded', label: 'CSV 다운로드' },
   { value: 'statistics_excel_downloaded', label: '통계 Excel 다운로드' },
+  { value: 'survey_template_created', label: '설문 템플릿 생성' },
+  { value: 'survey_template_updated', label: '설문 템플릿 수정' },
+  { value: 'survey_template_used', label: '설문 템플릿 사용' },
+  { value: 'survey_template_copied', label: '설문 템플릿 복제' },
+  { value: 'survey_template_disabled', label: '설문 템플릿 비활성화' },
+  { value: 'template_list_opened', label: '설문 템플릿 목록 열람' },
 ];
 const ACTION_LABELS = Object.fromEntries(ACTION_OPTIONS.map((option) => [option.value, option.label]));
 const METADATA_LABELS = {
@@ -43,6 +49,10 @@ const METADATA_LABELS = {
   loadedCount: '로드 건수',
   responseCount: '응답 수',
   anonymizedQuestionCount: '익명화 문항 수',
+  templateId: '템플릿 ID',
+  templateName: '템플릿명',
+  sourceSurveyId: '원 설문 ID',
+  copiedTemplateId: '복사본 템플릿 ID',
 };
 const DOWNLOAD_TYPE_LABELS = {
   raw: '원본형',

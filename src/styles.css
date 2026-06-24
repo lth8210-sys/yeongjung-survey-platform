@@ -1604,6 +1604,36 @@ button:disabled {
   font-weight: 700;
 }
 
+.template-table-description {
+  display: block;
+  max-width: 360px;
+  margin-top: 6px;
+  color: #5e7082;
+  line-height: 1.45;
+}
+
+.template-row-actions {
+  min-width: 300px;
+}
+
+.template-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.template-modal-actions {
+  justify-content: flex-end;
+}
+
+.template-admin-table th:first-child {
+  min-width: 260px;
+}
+
+.template-admin-table th:last-child {
+  min-width: 320px;
+}
+
 .example-rule-card {
   display: grid;
   gap: 10px;
