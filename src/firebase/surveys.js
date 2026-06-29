@@ -1542,56 +1542,126 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   ensureFirestoreReady();
   const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
 
+  console.group('[fetchManagedSurveys] 진단 시작');
+  console.log('userAccess.uid:', userAccess.uid);
+  console.log('userAccess.email:', normalizedEmail);
+  console.log('userAccess.role:', userAccess.role);
+  console.log('options:', options);
+
+  // 진단: Firestore user 문서 직접 읽기
+  if (userAccess.uid && db) {
+    try {
+      const userDocSnap = await getDoc(doc(db, 'users', userAccess.uid));
+      if (userDocSnap.exists()) {
+        const ud = userDocSnap.data();
+        console.log('Firestore user 문서:', {
+          role: ud.role, status: ud.status, isActive: ud.isActive,
+          active: ud.active, is_active: ud.is_active, email: ud.email,
+        });
+      } else {
+        console.warn('Firestore user 문서 없음 (hasUserDoc=false) → currentStatus()="" → isCreator()=false');
+      }
+    } catch (e) {
+      console.warn('user 문서 읽기 실패:', e.code, e.message);
+    }
+  }
+
   if (canManageAllSurveys(userAccess.role)) {
+    console.log('경로: fetchAdminSurveys (admin/superadmin)');
+    console.groupEnd();
     return fetchAdminSurveys(options);
   }
 
-  if (userAccess.role) {
-    const managedQueries = [
-      getDocs(query(surveysCollection, where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION))),
-    ];
-
-    if (userAccess.role === USER_ROLES.CREATOR && (userAccess.uid || normalizedEmail)) {
-      if (userAccess.uid) {
-        managedQueries.push(getDocs(query(surveysCollection, where('ownerUid', '==', userAccess.uid))));
-        managedQueries.push(getDocs(query(surveysCollection, where('createdByUid', '==', userAccess.uid))));
-        managedQueries.push(getDocs(query(surveysCollection, where('ownerId', '==', userAccess.uid))));
-        managedQueries.push(getDocs(query(surveysCollection, where('userId', '==', userAccess.uid))));
-        managedQueries.push(getDocs(query(surveysCollection, where('createdBy.uid', '==', userAccess.uid))));
-      }
-
-      if (normalizedEmail) {
-        managedQueries.push(getDocs(query(surveysCollection, where('ownerEmail', '==', normalizedEmail))));
-        managedQueries.push(getDocs(query(surveysCollection, where('createdByEmail', '==', normalizedEmail))));
-        managedQueries.push(getDocs(query(surveysCollection, where('createdBy.email', '==', normalizedEmail))));
-      }
-    }
-
-    const allResults = await Promise.allSettled(managedQueries);
-    const rejected = allResults.filter((r) => r.status === 'rejected');
-
-    if (rejected.length > 0) {
-      console.warn(
-        '[fetchManagedSurveys] 일부 쿼리 실패 — 권한 또는 인덱스 문제일 수 있습니다:',
-        rejected.map((r) => r.reason?.message ?? r.reason),
-      );
-    }
-
-    const snapshots = allResults
-      .filter((result) => result.status === 'fulfilled')
-      .map((result) => result.value);
-    const mergedDocs = snapshots.flatMap((snapshot) => snapshot.docs).reduce((result, item) => {
-      result.set(item.id, item);
-      return result;
-    }, new Map());
-
-    return filterDeletedSurveys(
-      sortSurveysByCreatedAtDesc([...mergedDocs.values()].map(mapSurveyDoc)),
-      options.includeDeleted,
-    );
+  if (!userAccess.role) {
+    console.warn('role 없음 → 빈 배열 반환');
+    console.groupEnd();
+    return [];
   }
 
-  return [];
+  const queryLabels = ['organization'];
+  const managedQueries = [
+    getDocs(query(surveysCollection, where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION))),
+  ];
+
+  if (userAccess.role === USER_ROLES.CREATOR && (userAccess.uid || normalizedEmail)) {
+    console.log('경로: creator 전용 쿼리 추가');
+    if (userAccess.uid) {
+      queryLabels.push('ownerUid', 'createdByUid', 'ownerId', 'userId', 'createdBy.uid');
+      managedQueries.push(getDocs(query(surveysCollection, where('ownerUid', '==', userAccess.uid))));
+      managedQueries.push(getDocs(query(surveysCollection, where('createdByUid', '==', userAccess.uid))));
+      managedQueries.push(getDocs(query(surveysCollection, where('ownerId', '==', userAccess.uid))));
+      managedQueries.push(getDocs(query(surveysCollection, where('userId', '==', userAccess.uid))));
+      managedQueries.push(getDocs(query(surveysCollection, where('createdBy.uid', '==', userAccess.uid))));
+    }
+
+    if (normalizedEmail) {
+      queryLabels.push('ownerEmail', 'createdByEmail', 'createdBy.email');
+      managedQueries.push(getDocs(query(surveysCollection, where('ownerEmail', '==', normalizedEmail))));
+      managedQueries.push(getDocs(query(surveysCollection, where('createdByEmail', '==', normalizedEmail))));
+      managedQueries.push(getDocs(query(surveysCollection, where('createdBy.email', '==', normalizedEmail))));
+    }
+  } else {
+    console.log(`경로: role=${userAccess.role} → organization 쿼리만 실행`);
+  }
+
+  const allResults = await Promise.allSettled(managedQueries);
+
+  console.log('--- 쿼리별 결과 ---');
+  allResults.forEach((result, index) => {
+    const label = queryLabels[index] ?? `query[${index}]`;
+    if (result.status === 'fulfilled') {
+      console.log(`  ${label}: ${result.value.docs.length}건`);
+    } else {
+      console.warn(`  ${label}: 실패 →`, result.reason?.code, result.reason?.message ?? result.reason);
+    }
+  });
+
+  const snapshots = allResults
+    .filter((result) => result.status === 'fulfilled')
+    .map((result) => result.value);
+  const mergedDocs = snapshots.flatMap((snapshot) => snapshot.docs).reduce((result, item) => {
+    result.set(item.id, item);
+    return result;
+  }, new Map());
+
+  const allMapped = [...mergedDocs.values()].map(mapSurveyDoc);
+
+  console.log(`--- 중복제거 후 총 ${allMapped.length}건 ---`);
+  if (allMapped.length > 0) {
+    console.log('문서 구조 샘플 (최대 3건):');
+    allMapped.slice(0, 3).forEach((s) => {
+      console.log({
+        id: s.id,
+        title: s.title,
+        status: s.storedStatus,
+        deleted: s.deleted,
+        permanentlyDeleted: s.permanentlyDeleted,
+        visibility: s.visibility,
+        ownerUid: s.ownerUid,
+        createdByUid: s.createdByUid,
+        ownerId: s.ownerId,
+        userId: s.userId,
+        'createdBy.uid': s.createdBy?.uid,
+        ownerEmail: s.ownerEmail,
+        createdByEmail: s.createdByEmail,
+        'createdBy.email': s.createdBy?.email,
+      });
+    });
+  }
+
+  const filtered = filterDeletedSurveys(
+    sortSurveysByCreatedAtDesc(allMapped),
+    options.includeDeleted,
+  );
+
+  console.log(`filterDeletedSurveys 후: ${filtered.length}건 (includeDeleted=${options.includeDeleted})`);
+  if (allMapped.length > 0 && filtered.length < allMapped.length) {
+    const removedIds = allMapped.filter((s) => !filtered.find((f) => f.id === s.id)).map((s) => `${s.id}(deleted=${s.deleted},perm=${s.permanentlyDeleted})`);
+    console.warn('필터로 제거된 설문:', removedIds);
+  }
+
+  console.groupEnd();
+  return filtered;
 }
 
 export async function fetchPublishedSurveys(options = {}) {

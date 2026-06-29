@@ -105,6 +105,7 @@ function SurveyListPage() {
     canEditSurvey,
     canViewSurveyResponses,
     role,
+    status,
     user,
     firebaseStatusMessage,
     isFirebaseConfigured,
@@ -120,7 +121,16 @@ function SurveyListPage() {
   const [templateMessage, setTemplateMessage] = useState('');
 
   const loadSurveys = async () => {
+    console.group('[SurveyListPage] loadSurveys 진단');
+    console.log('사용자 uid:', user?.uid);
+    console.log('사용자 email:', user?.email);
+    console.log('role:', role, '/ status:', status);
+    console.log('canAccessAdmin:', canAccessAdmin, '/ showDeleted:', showDeleted);
+    console.log('isFirebaseConfigured:', isFirebaseConfigured);
+
     if (!isFirebaseConfigured) {
+      console.warn('Firebase 미설정 → 종료');
+      console.groupEnd();
       setError(firebaseStatusMessage || 'Firebase 설정이 필요합니다.');
       setLoading(false);
       return;
@@ -129,13 +139,24 @@ function SurveyListPage() {
     try {
       setLoading(true);
       setError('');
-      const result = canAccessAdmin
-        ? await fetchManagedSurveys(
-            { uid: user?.uid, email: user?.email ?? '', role },
-            { includeDeleted: showDeleted },
-          )
-        : await fetchPublishedSurveys();
-      setSurveys(await hydrateSurveyResponseCounts(result));
+
+      let result;
+      if (canAccessAdmin) {
+        console.log('경로: fetchManagedSurveys');
+        result = await fetchManagedSurveys(
+          { uid: user?.uid, email: user?.email ?? '', role },
+          { includeDeleted: showDeleted },
+        );
+      } else {
+        console.log('경로: fetchPublishedSurveys (canAccessAdmin=false)');
+        result = await fetchPublishedSurveys();
+      }
+
+      console.log(`fetchManagedSurveys/fetchPublishedSurveys 반환: ${result.length}건`);
+      const hydrated = await hydrateSurveyResponseCounts(result);
+      console.log(`hydrateSurveyResponseCounts 후: ${hydrated.length}건`);
+      setSurveys(hydrated);
+      console.log('setSurveys 완료');
     } catch (loadError) {
       console.error('설문 목록 조회 실패:', {
         code: loadError?.code,
@@ -152,6 +173,7 @@ function SurveyListPage() {
       );
     } finally {
       setLoading(false);
+      console.groupEnd();
     }
   };
 
