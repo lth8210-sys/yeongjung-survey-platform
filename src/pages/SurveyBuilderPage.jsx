@@ -15,6 +15,7 @@ import { FORM_TEMPLATES } from '../data/formTemplates';
 import {
   alignQuestionsToSections,
   createAuditLog,
+  createDefaultRegionAgeQuotaConfig,
   createSurvey,
   detectPrivacyQuestions,
   fetchResponseCountBySurveyId,
@@ -23,6 +24,7 @@ import {
   getFirestoreErrorMessage,
   isApplicationFormType,
   normalizeSurveyConfiguration,
+  normalizeRegionAgeQuotaConfig,
   normalizeSurveySections,
   normalizeSurveyStatus,
   normalizeMaxResponses,
@@ -33,6 +35,7 @@ import {
   validatePrivacyConsent,
   waitForSurveyById,
 } from '../firebase/surveys';
+import { normalizeSurveyVisibility, SURVEY_VISIBILITIES } from '../firebase/users';
 import {
   fetchSurveyTemplateById,
   fetchSurveyTemplates,
@@ -390,6 +393,8 @@ function SurveyBuilderPage() {
   const [allowResponseEdit, setAllowResponseEdit] = useState(false);
   const [completionMessage, setCompletionMessage] = useState('');
   const [adminNotificationEnabled, setAdminNotificationEnabled] = useState(false);
+  const [visibility, setVisibility] = useState(SURVEY_VISIBILITIES.PRIVATE);
+  const [quotaConfig, setQuotaConfig] = useState(() => createDefaultRegionAgeQuotaConfig());
   const [loading, setLoading] = useState(isEditMode);
   const [notFound, setNotFound] = useState(false);
   const [fetchError, setFetchError] = useState('');
@@ -476,6 +481,8 @@ function SurveyBuilderPage() {
       allowResponseEdit,
       completionMessage,
       adminNotificationEnabled,
+      visibility,
+      quotaConfig,
       optionQuotaCounts,
       ...templateMetadata,
     };
@@ -497,6 +504,7 @@ function SurveyBuilderPage() {
     optionQuotaCounts,
     processingStatusEnabled,
     questions,
+    quotaConfig,
     quotaEnabled,
     scheduleSummary,
     sections,
@@ -506,6 +514,7 @@ function SurveyBuilderPage() {
     tableBlocks,
     templateMetadata,
     title,
+    visibility,
   ]);
 
   const handleInsertDescriptionTableExample = () => {
@@ -618,6 +627,8 @@ function SurveyBuilderPage() {
         setAllowResponseEdit(normalizedConfiguration.allowResponseEdit);
         setCompletionMessage(normalizedConfiguration.completionMessage ?? '');
         setAdminNotificationEnabled(normalizedConfiguration.adminNotificationEnabled);
+        setVisibility(normalizeSurveyVisibility(survey.visibility));
+        setQuotaConfig(normalizeRegionAgeQuotaConfig(survey.quotaConfig));
         setSelectedTemplateId(survey.templateId ?? '');
         setTemplateMetadata({
           templateId: survey.templateId ?? '',
@@ -998,6 +1009,8 @@ function SurveyBuilderPage() {
     setAllowResponseEdit(instantiated.allowResponseEdit);
     setCompletionMessage(instantiated.completionMessage);
     setAdminNotificationEnabled(instantiated.adminNotificationEnabled);
+    setVisibility(SURVEY_VISIBILITIES.PRIVATE);
+    setQuotaConfig(createDefaultRegionAgeQuotaConfig());
     setOptionQuotaCounts({});
     setSelectedStoredTemplateId(template.id);
     setSelectedStoredTemplateName(template.name);
@@ -1157,6 +1170,8 @@ function SurveyBuilderPage() {
     setAllowResponseEdit(Boolean(template.survey.allowResponseEdit));
     setCompletionMessage(template.survey.completionMessage ?? '');
     setAdminNotificationEnabled(Boolean(template.survey.adminNotificationEnabled));
+    setVisibility(SURVEY_VISIBILITIES.PRIVATE);
+    setQuotaConfig(createDefaultRegionAgeQuotaConfig());
     setOptionQuotaCounts({});
     setShowStartWizard(false);
     setShowTemplatePicker(false);
@@ -1191,6 +1206,7 @@ function SurveyBuilderPage() {
         allowResponseEdit: Boolean(template.survey.allowResponseEdit),
         completionMessage: template.survey.completionMessage ?? '',
         adminNotificationEnabled: Boolean(template.survey.adminNotificationEnabled),
+        visibility: SURVEY_VISIBILITIES.PRIVATE,
         templateMetadata: nextTemplateMetadata,
         createdBy: {
           uid: user?.uid ?? '',
@@ -1257,6 +1273,8 @@ function SurveyBuilderPage() {
     setAllowResponseEdit(false);
     setCompletionMessage('');
     setAdminNotificationEnabled(false);
+    setVisibility(SURVEY_VISIBILITIES.PRIVATE);
+    setQuotaConfig(createDefaultRegionAgeQuotaConfig());
     setOptionQuotaCounts({});
     setSelectedStoredTemplateId('');
     setSelectedStoredTemplateName('');
@@ -1327,6 +1345,11 @@ function SurveyBuilderPage() {
     setAllowResponseEdit(false);
     setCompletionMessage('');
     setAdminNotificationEnabled(false);
+    setVisibility(SURVEY_VISIBILITIES.PRIVATE);
+    setQuotaConfig(createDefaultRegionAgeQuotaConfig({
+      enabled: wizardStartType === 'needs_survey' && wizardUseQuota,
+      totalTarget: wizardUseQuota ? 520 : 0,
+    }));
     setSelectedStoredTemplateId('');
     setSelectedStoredTemplateName('');
     setSelectedStoredTemplateSourceSurveyId('');
@@ -1458,6 +1481,8 @@ function SurveyBuilderPage() {
           allowResponseEdit,
           completionMessage,
           adminNotificationEnabled,
+          visibility,
+          quotaConfig: normalizeRegionAgeQuotaConfig(quotaConfig),
           templateMetadata,
           updatedBy: {
             uid: user?.uid ?? '',
@@ -1501,6 +1526,8 @@ function SurveyBuilderPage() {
         allowResponseEdit,
         completionMessage,
         adminNotificationEnabled,
+        visibility,
+        quotaConfig: normalizeRegionAgeQuotaConfig(quotaConfig),
         templateMetadata,
         createdBy: {
           uid: user?.uid ?? '',
@@ -1640,6 +1667,38 @@ function SurveyBuilderPage() {
     }
 
     return badges;
+  };
+  const normalizedQuotaConfig = normalizeRegionAgeQuotaConfig(quotaConfig);
+  const updateQuotaConfig = (updater) => {
+    setQuotaConfig((current) => normalizeRegionAgeQuotaConfig(updater(normalizeRegionAgeQuotaConfig(current))));
+  };
+  const updateQuotaCellTarget = (regionId, ageGroupId, value) => {
+    updateQuotaConfig((current) => ({
+      ...current,
+      matrix: {
+        ...current.matrix,
+        [regionId]: {
+          ...(current.matrix?.[regionId] ?? {}),
+          [ageGroupId]: Math.max(0, Math.floor(Number(value) || 0)),
+        },
+      },
+    }));
+  };
+  const updateQuotaRegionAreas = (regionId, value) => {
+    updateQuotaConfig((current) => ({
+      ...current,
+      regions: current.regions.map((region) =>
+        region.id === regionId
+          ? {
+              ...region,
+              areas: String(value ?? '')
+                .split(',')
+                .map((area) => area.trim())
+                .filter(Boolean),
+            }
+          : region,
+      ),
+    }));
   };
   const questionDisplayMap = buildQuestionDisplayMap(questions, sections);
 
@@ -2177,6 +2236,21 @@ function SurveyBuilderPage() {
                     />
                     <span>관리자 알림</span>
                   </label>
+
+                  <label className="checkbox-field">
+                    <input
+                      checked={visibility === SURVEY_VISIBILITIES.ORGANIZATION}
+                      onChange={(event) =>
+                        setVisibility(
+                          event.target.checked
+                            ? SURVEY_VISIBILITIES.ORGANIZATION
+                            : SURVEY_VISIBILITIES.PRIVATE,
+                        )
+                      }
+                      type="checkbox"
+                    />
+                    <span>기관 직원에게 공유</span>
+                  </label>
                 </div>
 
                 {quotaEnabled && (
@@ -2192,6 +2266,122 @@ function SurveyBuilderPage() {
                     <small>응답 수가 정원에 도달하면 자동으로 마감됩니다.</small>
                   </label>
                 )}
+
+                <div className="builder-subpanel">
+                  <div className="builder-header-row">
+                    <div>
+                      <strong>권역 × 연령대 할당표본</strong>
+                      <p className="meta-description">
+                        욕구조사처럼 지역과 연령대별 목표 응답 수를 따로 관리할 때 사용합니다.
+                      </p>
+                    </div>
+                    <label className="checkbox-field">
+                      <input
+                        checked={normalizedQuotaConfig.enabled}
+                        onChange={(event) =>
+                          updateQuotaConfig((current) => ({
+                            ...current,
+                            enabled: event.target.checked,
+                            totalTarget: current.totalTarget || 520,
+                          }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>사용</span>
+                    </label>
+                  </div>
+
+                  {normalizedQuotaConfig.enabled && (
+                    <>
+                      <div className="builder-settings-grid">
+                        <label className="field">
+                          <span>전체 목표 응답 수</span>
+                          <input
+                            min="1"
+                            onChange={(event) =>
+                              updateQuotaConfig((current) => ({
+                                ...current,
+                                totalTarget: Math.max(0, Math.floor(Number(event.target.value) || 0)),
+                              }))
+                            }
+                            type="number"
+                            value={normalizedQuotaConfig.totalTarget}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>기준연도</span>
+                          <input
+                            min="1900"
+                            onChange={(event) =>
+                              updateQuotaConfig((current) => ({
+                                ...current,
+                                baseYear: Math.max(1900, Math.floor(Number(event.target.value) || 2026)),
+                              }))
+                            }
+                            type="number"
+                            value={normalizedQuotaConfig.baseYear}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>마감 방식</span>
+                          <select
+                            onChange={(event) =>
+                              updateQuotaConfig((current) => ({
+                                ...current,
+                                closeMode: event.target.value,
+                              }))
+                            }
+                            value={normalizedQuotaConfig.closeMode}
+                          >
+                            <option value="block">목표 도달 시 차단</option>
+                            <option value="allow_over">초과응답 허용</option>
+                            <option value="admin_only">관리자만 초과 허용</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="response-table-wrapper quota-config-table-wrapper">
+                        <table className="response-table quota-config-table">
+                          <thead>
+                            <tr>
+                              <th>권역</th>
+                              {normalizedQuotaConfig.ageGroups.map((ageGroup) => (
+                                <th key={`quota-age-${ageGroup.id}`}>{ageGroup.label}</th>
+                              ))}
+                              <th>세부 행정동</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {normalizedQuotaConfig.regions.map((region) => (
+                              <tr key={`quota-region-${region.id}`}>
+                                <td>{region.label}</td>
+                                {normalizedQuotaConfig.ageGroups.map((ageGroup) => (
+                                  <td key={`${region.id}-${ageGroup.id}`}>
+                                    <input
+                                      min="0"
+                                      onChange={(event) =>
+                                        updateQuotaCellTarget(region.id, ageGroup.id, event.target.value)
+                                      }
+                                      type="number"
+                                      value={normalizedQuotaConfig.matrix?.[region.id]?.[ageGroup.id] ?? 0}
+                                    />
+                                  </td>
+                                ))}
+                                <td>
+                                  <input
+                                    onChange={(event) => updateQuotaRegionAreas(region.id, event.target.value)}
+                                    type="text"
+                                    value={region.areas.join(', ')}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
 
                 <label className="field">
                   <span>제출 완료 문구</span>

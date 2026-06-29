@@ -12,6 +12,8 @@ import {
   getScaleQuestionConfig,
   getQuotaSummary,
   getReceptionPeriodText,
+  buildRegionAgeQuotaDashboard,
+  resolveRegionAgeQuota,
   isApplicationFormType,
   submitSurveyResponse,
 } from '../firebase/surveys';
@@ -126,7 +128,7 @@ function SurveyDescription({ survey, fallback }) {
 }
 
 function SurveyResponsePage() {
-  const { firebaseStatusMessage, isFirebaseConfigured, user } = useAuth();
+  const { firebaseStatusMessage, isFirebaseConfigured, user, role } = useAuth();
   const { surveyId } = useParams();
   const [survey, setSurvey] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -146,6 +148,10 @@ function SurveyResponsePage() {
     status: 'idle',
     savedAt: null,
   });
+  const [quotaInput, setQuotaInput] = useState({
+    birthYear: '',
+    area: '',
+  });
 
   const publicState = getPublicSurveyState(survey);
   const isDraftSurvey = publicState.key === 'draft';
@@ -155,6 +161,28 @@ function SurveyResponsePage() {
   const closedMessage = getClosedSurveyMessage(survey?.formType);
   const draftMessage = getDraftSurveyMessage(survey?.formType);
   const quotaSummary = getQuotaSummary(survey);
+  const regionAgeQuotaEnabled = Boolean(survey?.quotaConfig?.enabled);
+  const quotaDashboard = useMemo(
+    () => buildRegionAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
+    [survey?.quotaConfig, survey?.quotaCounts],
+  );
+  const resolvedQuota = useMemo(
+    () => resolveRegionAgeQuota(quotaInput, survey?.quotaConfig),
+    [quotaInput, survey?.quotaConfig],
+  );
+  const selectedQuotaCell = resolvedQuota.valid
+    ? quotaDashboard.rows
+        .find((row) => row.region.id === resolvedQuota.region.id)
+        ?.cells.find((cell) => cell.ageGroupId === resolvedQuota.ageGroup.id)
+    : null;
+  const selectedQuotaClosed = Boolean(
+    regionAgeQuotaEnabled &&
+      selectedQuotaCell?.target > 0 &&
+      selectedQuotaCell.current >= selectedQuotaCell.target &&
+      (survey?.quotaConfig?.closeMode === 'block' ||
+        (survey?.quotaConfig?.closeMode === 'admin_only' && !['admin', 'super_admin'].includes(role))),
+  );
+  const quotaGateBlocked = regionAgeQuotaEnabled && (!resolvedQuota.valid || selectedQuotaClosed);
   const getQuestionKey = (question, index) => question?.id || `legacy-question-${index + 1}`;
   const applicationForm = isApplicationFormType(survey?.formType);
   const draftUserId = user?.uid ?? 'anonymous';
@@ -1074,6 +1102,27 @@ function SurveyResponsePage() {
     return Object.keys(nextErrors).length === 0;
   };
 
+  const findFirstInvalidQuestionId = (questionsToValidate = responseQuestions) => {
+    const invalidQuestion = questionsToValidate.find((question) => {
+      const normalizedType = getNormalizedQuestionType(question);
+
+      if (isNonResponseQuestionType(normalizedType) || question.meta?.consentTemplate === 'base') {
+        return false;
+      }
+
+      const questionIndex = survey.questions.findIndex((item) => item.id === question.id);
+      const resolvedAnswer = resolveAnswer(question, questionIndex);
+
+      return (
+        (question.required && isAnswerEmpty(question, resolvedAnswer)) ||
+        (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX && resolvedAnswer !== true) ||
+        (question.meta?.consentApproval && resolvedAnswer !== true && resolvedAnswer !== '동의합니다')
+      );
+    });
+
+    return invalidQuestion?.id ?? '';
+  };
+
   const renderOtherInput = (question, index, shouldShow) => {
     if (!question.allowOther || !shouldShow) {
       return null;
@@ -1424,6 +1473,10 @@ function SurveyResponsePage() {
   const handleNextSection = () => {
     if (!validateAnswers(currentSectionQuestions)) {
       setMessage('현재 페이지의 필수 응답 항목을 확인해주세요.');
+      const invalidQuestionId = findFirstInvalidQuestionId(currentSectionQuestions);
+      if (invalidQuestionId) {
+        moveToQuestionSection(invalidQuestionId);
+      }
       return;
     }
 
@@ -1441,21 +1494,34 @@ function SurveyResponsePage() {
   };
 
   const moveToQuestionSection = (questionId) => {
-    if (responseMode !== 'paged') {
-      return false;
-    }
-
     const targetSectionIndex = groupedSections.findIndex((section) =>
       (section.questions ?? []).some((question) => question.id === questionId),
     );
 
-    if (targetSectionIndex >= 0) {
+    if (responseMode === 'paged' && targetSectionIndex >= 0 && targetSectionIndex !== currentSectionSafeIndex) {
       setCurrentSectionIndex(targetSectionIndex);
       scrollToTop();
       return true;
     }
 
+    if (typeof document !== 'undefined') {
+      document.getElementById(`question-${questionId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+      return true;
+    }
+
     return false;
+  };
+
+  const moveToSection = (sectionIndex) => {
+    if (responseMode !== 'paged') {
+      return;
+    }
+
+    setCurrentSectionIndex(sectionIndex);
+    scrollToTop();
   };
 
   const handleSubmit = async (event) => {
@@ -1550,9 +1616,29 @@ function SurveyResponsePage() {
 
     if (!validateAnswers()) {
       setMessage('필수 응답 항목을 확인해주세요.');
+      const invalidQuestionId = findFirstInvalidQuestionId();
+      if (invalidQuestionId) {
+        moveToQuestionSection(invalidQuestionId);
+      }
       setSubmitting(false);
       submitLockedRef.current = false;
       return;
+    }
+
+    if (regionAgeQuotaEnabled) {
+      if (!resolvedQuota.valid) {
+        setMessage('출생년도와 거주지역을 먼저 확인해주세요.');
+        setSubmitting(false);
+        submitLockedRef.current = false;
+        return;
+      }
+
+      if (selectedQuotaClosed) {
+        setMessage('선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
+        setSubmitting(false);
+        submitLockedRef.current = false;
+        return;
+      }
     }
 
     const submitQuestions = responseQuestions.filter(
@@ -1591,6 +1677,12 @@ function SurveyResponsePage() {
       visibleSectionIds: visibleFlow.visibleSectionIds,
       skippedQuestionIds: visibleFlow.skippedQuestionIds,
       clientSubmitId,
+      quotaInput: regionAgeQuotaEnabled ? quotaInput : null,
+      currentUserAccess: {
+        uid: user?.uid ?? '',
+        email: user?.email ?? '',
+        role,
+      },
     };
 
     if (import.meta.env.DEV) {
@@ -1707,7 +1799,7 @@ function SurveyResponsePage() {
 
     if (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX || question.meta?.consentApproval) {
       return (
-        <div className="field consent-field" key={`${survey.id}-${questionKey}`}>
+        <div className="field consent-field" id={`question-${question.id}`} key={`${survey.id}-${questionKey}`}>
           {titleWithNumber}
           {question.description && <small>{question.description}</small>}
           {renderQuestionInput(question, index)}
@@ -1718,14 +1810,14 @@ function SurveyResponsePage() {
 
     if (isNonResponseQuestionType(normalizedType)) {
       return (
-        <div className="field" key={`${survey.id}-${questionKey}`}>
+        <div className="field" id={`question-${question.id}`} key={`${survey.id}-${questionKey}`}>
           {renderQuestionInput(question, index)}
         </div>
       );
     }
 
     return (
-      <div className="field" key={`${survey.id}-${questionKey}`}>
+      <div className="field" id={`question-${question.id}`} key={`${survey.id}-${questionKey}`}>
         {titleWithNumber}
         {question.description && (
           <small>{question.description}</small>
@@ -1738,6 +1830,112 @@ function SurveyResponsePage() {
         )}
         {renderQuestionInput(question, index)}
         {fieldErrors[questionKey] && <small className="error-text">{fieldErrors[questionKey]}</small>}
+      </div>
+    );
+  };
+
+  const renderQuotaGate = () => {
+    if (!regionAgeQuotaEnabled) {
+      return null;
+    }
+
+    const areas = quotaDashboard.config.regions.flatMap((region) => region.areas);
+
+    return (
+      <div className="application-info-card quota-gate-panel">
+        <strong>거주지역과 출생년도를 확인해주세요</strong>
+        <div className="builder-settings-grid">
+          <label className="field">
+            <span>출생년도</span>
+            <input
+              max={quotaDashboard.config.baseYear}
+              min="1900"
+              onChange={(event) =>
+                setQuotaInput((current) => ({ ...current, birthYear: event.target.value }))
+              }
+              placeholder="예: 1978"
+              type="number"
+              value={quotaInput.birthYear}
+            />
+          </label>
+          <label className="field">
+            <span>거주지역</span>
+            <select
+              onChange={(event) =>
+                setQuotaInput((current) => ({ ...current, area: event.target.value }))
+              }
+              value={quotaInput.area}
+            >
+              <option value="">세부 행정동 선택</option>
+              {areas.map((area) => (
+                <option key={`quota-area-${area}`} value={area}>
+                  {area}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {resolvedQuota.valid && (
+          <p className="meta-description">
+            {resolvedQuota.region.label} · {resolvedQuota.ageGroup.label}
+            {selectedQuotaCell
+              ? ` · 현재 ${selectedQuotaCell.current}/${selectedQuotaCell.target}명`
+              : ''}
+          </p>
+        )}
+        {selectedQuotaClosed && (
+          <div className="form-message">
+            선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderQuestionNavigator = () => {
+    const navigatorSections = responseMode === 'paged' ? groupedSections : flowGroupedSections;
+    const answerMissing = (question) => {
+      const questionIndex = getQuestionIndex(question);
+      const answer = resolveAnswer(question, questionIndex);
+      return isAnswerEmpty(question, answer);
+    };
+
+    return (
+      <div className="response-question-navigator">
+        {navigatorSections.map((section, sectionIndex) => (
+          <div className="response-question-nav-section" key={`nav-${section.id}`}>
+            <button
+              className={sectionIndex === currentSectionSafeIndex ? 'primary-button' : 'secondary-button'}
+              onClick={() => moveToSection(sectionIndex)}
+              type="button"
+            >
+              {section.title || `섹션 ${sectionIndex + 1}`}
+            </button>
+            <div className="response-question-nav-items">
+              {(section.questions ?? [])
+                .filter((question) => isRenderableQuestion(question))
+                .map((question) => {
+                  const displayInfo = questionDisplayMap[question.id];
+                  const missing = answerMissing(question);
+                  const hasError = Boolean(fieldErrors[question.id]);
+
+                  return (
+                    <button
+                      className={`response-question-nav-button ${
+                        missing ? 'response-question-nav-missing' : ''
+                      } ${hasError ? 'response-question-nav-error' : ''}`}
+                      key={`nav-question-${question.id}`}
+                      onClick={() => moveToQuestionSection(question.id)}
+                      title={question.title}
+                      type="button"
+                    >
+                      {displayInfo?.shortLabel ?? '?'}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        ))}
       </div>
     );
   };
@@ -1928,7 +2126,11 @@ function SurveyResponsePage() {
           </>
         )}
 
+        {renderQuotaGate()}
+
         <form className="response-form" onSubmit={handleSubmit}>
+          {renderQuestionNavigator()}
+
           {responseMode === 'paged' && currentSection ? (
             <>
               <div className="response-progress-panel paged-progress-panel">
@@ -2002,7 +2204,7 @@ function SurveyResponsePage() {
               {!isLastReachableSection ? (
                 <button
                   className="primary-button"
-                  disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination)}
+                  disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination) || quotaGateBlocked}
                   onClick={handleNextSection}
                   type="button"
                 >
@@ -2011,7 +2213,7 @@ function SurveyResponsePage() {
               ) : (
                 <button
                   className="primary-button"
-                  disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination) || !canSubmitCurrentPage}
+                  disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination) || !canSubmitCurrentPage || quotaGateBlocked}
                   type="submit"
                 >
                   {submitting ? '제출 중...' : applicationForm ? '제출 및 저장' : '제출하기'}
@@ -2021,7 +2223,7 @@ function SurveyResponsePage() {
           ) : (
             <button
               className="primary-button"
-              disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination)}
+              disabled={submitting || !publicState.canSubmit || Boolean(visibleFlow.termination) || quotaGateBlocked}
               type="submit"
             >
               {submitting ? '제출 중...' : applicationForm ? '제출 및 저장' : '제출하기'}

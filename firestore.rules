@@ -9,17 +9,28 @@ service cloud.firestore {
       return isSignedIn() ? request.auth.token.email : '';
     }
 
+    function isInternalEmailValue(email) {
+      return email is string && email.matches('.*@yeongjung\\.or\\.kr$');
+    }
+
     function isInternalUser() {
-      return isSignedIn() && userEmail().matches('.*@yeongjung\\.or\\.kr$');
+      return isSignedIn() && (
+        isInternalEmailValue(userEmail()) ||
+        (hasUserDoc() && isInternalEmailValue(userDoc().data.email))
+      );
     }
 
     // SYNC REQUIRED: 이 목록을 변경하면 아래 protectedSuperAdminEmail()과
     // src/firebase/users.js의 SUPER_ADMIN_EMAILS도 함께 변경해야 합니다.
-    function isSuperAdminEmail() {
-      return userEmail() in [
+    function isProtectedSuperAdminEmailValue(email) {
+      return email in [
         "lth8210@yeongjung.or.kr",
         "yj100@yeongjung.or.kr"
       ];
+    }
+
+    function isSuperAdminEmail() {
+      return isProtectedSuperAdminEmailValue(userEmail());
     }
 
     function userDoc() {
@@ -30,8 +41,17 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function isSuperAdminUserDoc() {
+      return isSignedIn() &&
+        hasUserDoc() &&
+        (
+          normalizeStoredRole(userDoc().data.role) == 'super_admin' ||
+          isProtectedSuperAdminEmailValue(userDoc().data.email)
+        );
+    }
+
     function currentRole() {
-      return isSuperAdminEmail()
+      return isSuperAdminEmail() || isSuperAdminUserDoc()
         ? 'super_admin'
         : !isInternalUser()
           ? ''
@@ -41,12 +61,12 @@ service cloud.firestore {
     }
 
     function currentStatus() {
-      return isSuperAdminEmail()
+      return isSuperAdminEmail() || isSuperAdminUserDoc()
         ? 'active'
         : !isInternalUser()
           ? ''
           : hasUserDoc()
-            ? normalizeStoredStatus(userDoc().data.status)
+            ? normalizeStoredUserStatus(userDoc().data)
             : '';
     }
 
@@ -57,8 +77,18 @@ service cloud.firestore {
           ? 'admin'
           : role == '제작자'
             ? 'creator'
-            : role == '조회자'
+        : role == '조회자'
+          ? 'viewer'
+          : role == '직원'
+            ? 'viewer'
+            : role == 'staff'
               ? 'viewer'
+              : role == 'superAdmin'
+                ? 'super_admin'
+                : role == 'super_admin'
+                  ? 'super_admin'
+                  : role == 'superadmin'
+                    ? 'super_admin'
               : role;
     }
 
@@ -76,6 +106,18 @@ service cloud.firestore {
                 : status;
     }
 
+    function normalizeStoredUserStatus(data) {
+      return data.status != null
+        ? normalizeStoredStatus(data.status)
+        : data.isActive is bool
+          ? (data.isActive ? 'active' : 'inactive')
+          : data.active is bool
+            ? (data.active ? 'active' : 'inactive')
+            : data.is_active is bool
+              ? (data.is_active ? 'active' : 'inactive')
+              : 'active';
+    }
+
     function isAtLeastAdmin() {
       return currentStatus() == 'active' && currentRole() in ['super_admin', 'admin'];
     }
@@ -86,6 +128,14 @@ service cloud.firestore {
 
     function isViewer() {
       return currentStatus() == 'active' && currentRole() == 'viewer';
+    }
+
+    function normalizedSurveyVisibility(data) {
+      return data.visibility == "organization" ? "organization" : "private";
+    }
+
+    function isOrganizationVisibleSurvey(data) {
+      return normalizedSurveyVisibility(data) == "organization";
     }
 
     function requestRole() {
@@ -129,10 +179,7 @@ service cloud.firestore {
 
     // SYNC REQUIRED: 위 isSuperAdminEmail() 및 src/firebase/users.js SUPER_ADMIN_EMAILS와 동일하게 유지.
     function protectedSuperAdminEmail(email) {
-      return email in [
-        "lth8210@yeongjung.or.kr",
-        "yj100@yeongjung.or.kr"
-      ];
+      return isProtectedSuperAdminEmailValue(email);
     }
 
     function protectedSuperAdminData(data) {
@@ -155,8 +202,14 @@ service cloud.firestore {
       return isSignedIn() && (
         data.ownerUid == request.auth.uid ||
         data.createdByUid == request.auth.uid ||
+        data.ownerId == request.auth.uid ||
+        data.userId == request.auth.uid ||
         data.ownerEmail == userEmail() ||
-        data.createdByEmail == userEmail()
+        data.createdByEmail == userEmail() ||
+        (data.createdBy is map && (
+          data.createdBy.uid == request.auth.uid ||
+          data.createdBy.email == userEmail()
+        ))
       );
     }
 
@@ -172,8 +225,8 @@ service cloud.firestore {
     function canReadManagedSurvey(data) {
       return isInternalUser() && (
         isAtLeastAdmin() ||
-        isViewer() ||
-        (isCreator() && isSurveyOwner(data))
+        (isCreator() && isSurveyOwner(data)) ||
+        (currentStatus() == 'active' && isOrganizationVisibleSurvey(data))
       );
     }
 
@@ -190,6 +243,24 @@ service cloud.firestore {
         surveyId is string &&
         exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         isSurveyOwner(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
+      );
+    }
+
+    function canReadManagedResponse(data) {
+      return isAtLeastAdmin() || (
+        isInternalUser() &&
+        data.surveyId is string &&
+        exists(/databases/$(database)/documents/surveys/$(data.surveyId)) &&
+        (
+          (isCreator() && (
+            isResponseOwner(data) ||
+            isSurveyOwner(get(/databases/$(database)/documents/surveys/$(data.surveyId)).data)
+          )) ||
+          (
+            currentStatus() == 'active' &&
+            isOrganizationVisibleSurvey(get(/databases/$(database)/documents/surveys/$(data.surveyId)).data)
+          )
+        )
       );
     }
 
@@ -212,6 +283,37 @@ service cloud.firestore {
           (resource.data.responseCount is int &&
             request.resource.data.responseCount == resource.data.responseCount + 1)
         );
+    }
+
+    function canReadSurveySubdoc(surveyId) {
+      return exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        (
+          surveyStatusForRead(get(/databases/$(database)/documents/surveys/$(surveyId)).data) ||
+          canReadManagedSurvey(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
+        );
+    }
+
+    function canEditSurveySubdoc(surveyId) {
+      return exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        canEditManagedSurvey(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+    }
+
+    function validPublicQuotaCountsWrite(surveyId) {
+      let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+      let surveyBefore = get(surveyPath).data;
+      let surveyAfter = getAfter(surveyPath).data;
+
+      return exists(surveyPath) &&
+        surveyStatusForResponse(surveyBefore) &&
+        request.resource.data.keys().hasOnly(["total", "cells", "updatedAt"]) &&
+        request.resource.data.total is int &&
+        request.resource.data.cells is map &&
+        request.resource.data.updatedAt == request.time &&
+        (
+          (!(surveyBefore.responseCount is int) && surveyAfter.responseCount == 1) ||
+          (surveyBefore.responseCount is int && surveyAfter.responseCount == surveyBefore.responseCount + 1)
+        ) &&
+        surveyAfter.status in ["published", "closed"];
     }
 
     match /users/{userId} {
@@ -279,6 +381,17 @@ service cloud.firestore {
       allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
     }
 
+    match /surveys/{surveyId}/quotaConfig/{configId} {
+      allow read: if canReadSurveySubdoc(surveyId);
+      allow create, update, delete: if canEditSurveySubdoc(surveyId);
+    }
+
+    match /surveys/{surveyId}/quotaCounts/{countsId} {
+      allow read: if canReadSurveySubdoc(surveyId);
+      allow create, update: if canEditSurveySubdoc(surveyId) || validPublicQuotaCountsWrite(surveyId);
+      allow delete: if canEditSurveySubdoc(surveyId);
+    }
+
     match /surveys/{surveyId}/applicationApplicantLocks/{lockId} {
       allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
@@ -339,13 +452,7 @@ service cloud.firestore {
           )
         ) &&
         getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.status in ["published", "closed"];
-      allow read: if isAtLeastAdmin() || (
-        isCreator() &&
-        (
-          isResponseOwner(resource.data) ||
-          isSurveyOwner(get(/databases/$(database)/documents/surveys/$(resource.data.surveyId)).data)
-        )
-      );
+      allow read: if canReadManagedResponse(resource.data);
       allow update: if isAtLeastAdmin() || (
         isCreator() &&
         (

@@ -29,6 +29,7 @@ import {
   getQuestionOptionItems,
   getOrderedResponseAnswerItems,
   getQuotaSummary,
+  buildRegionAgeQuotaDashboard,
   getResponseStatusMeta,
   getSurveyStatusMeta,
   isApplicationFormType,
@@ -332,6 +333,7 @@ function SurveyResponsesAdminPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [viewMode, setViewMode] = useState('raw');
+  const [activeTab, setActiveTab] = useState('responses');
   const [editingStates, setEditingStates] = useState({});
   const [selectedSlotFilter, setSelectedSlotFilter] = useState(null);
   const [missingSurveyNotice, setMissingSurveyNotice] = useState('');
@@ -819,6 +821,12 @@ function SurveyResponsesAdminPage() {
       '응답 ID',
       '처리 상태',
       '관리자 비고',
+      '권역',
+      '연령대',
+      '거주지역',
+      '출생년도',
+      '나이',
+      '초과응답',
       ...orderedQuestions.map((question) => question.title || question.label || question.id),
     ];
 
@@ -833,6 +841,12 @@ function SurveyResponsesAdminPage() {
         response.id,
         getResponseStatusMeta(response.status).label,
         response.adminNote ?? '',
+        response.quota?.regionLabel ?? '',
+        response.quota?.ageGroupLabel ?? '',
+        response.quota?.area ?? '',
+        response.quota?.birthYear ?? '',
+        response.quota?.age ?? '',
+        response.quota?.isOverQuota ? 'Y' : '',
         ...orderedQuestions.map((question) => answerMap.get(question.id) ?? ''),
       ];
     });
@@ -1152,6 +1166,17 @@ function SurveyResponsesAdminPage() {
     const totalCount = getQuotaSummary(survey).responseCount ?? responses.length;
     return new Map(responses.map((r, i) => [r.id, totalCount - i]));
   }, [responses, survey]);
+  const regionAgeQuotaDashboard = useMemo(
+    () => buildRegionAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
+    [survey?.quotaConfig, survey?.quotaCounts],
+  );
+  const quotaDashboardEnabled = Boolean(survey?.quotaConfig?.enabled);
+
+  useEffect(() => {
+    if (activeTab === 'quota' && !quotaDashboardEnabled) {
+      setActiveTab('responses');
+    }
+  }, [activeTab, quotaDashboardEnabled]);
 
   if (loading) {
     return <div className="empty-state">응답 목록을 불러오는 중입니다.</div>;
@@ -1263,6 +1288,39 @@ function SurveyResponsesAdminPage() {
         )}
       </div>
 
+      <div className="response-admin-tabs" role="tablist" aria-label="응답 관리 보기">
+        <button
+          aria-selected={activeTab === 'responses'}
+          className={activeTab === 'responses' ? 'primary-button' : 'secondary-button'}
+          onClick={() => setActiveTab('responses')}
+          role="tab"
+          type="button"
+        >
+          응답목록
+        </button>
+        {quotaDashboardEnabled && (
+          <button
+            aria-selected={activeTab === 'quota'}
+            className={activeTab === 'quota' ? 'primary-button' : 'secondary-button'}
+            onClick={() => setActiveTab('quota')}
+            role="tab"
+            type="button"
+          >
+            Quota 대시보드
+          </button>
+        )}
+        <button
+          aria-selected={activeTab === 'analytics'}
+          className={activeTab === 'analytics' ? 'primary-button' : 'secondary-button'}
+          onClick={() => setActiveTab('analytics')}
+          role="tab"
+          type="button"
+        >
+          통계/분석
+        </button>
+      </div>
+
+      {activeTab === 'responses' && (
       <div className="panel response-toolbar">
         <div className="response-toolbar-main">
           <label className="field response-toolbar-search">
@@ -1350,7 +1408,100 @@ function SurveyResponsesAdminPage() {
           <p className="response-download-status">{statisticsExcelMessage}</p>
         )}
       </div>
+      )}
 
+      {activeTab === 'quota' && quotaDashboardEnabled && (
+        <div className="panel quota-dashboard-panel">
+          <div className="builder-header-row">
+            <div>
+              <h2>권역 × 연령대 할당표본 현황</h2>
+              <p className="meta-description">
+                quotaCounts 누적 문서 기준입니다. 응답 원본 전체를 다시 읽지 않습니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="analytics-summary-grid">
+            <div className="application-summary-card">
+              <small>전체 목표 대비 현재</small>
+              <strong>{regionAgeQuotaDashboard.currentTotal} / {regionAgeQuotaDashboard.targetTotal}</strong>
+            </div>
+            <div className="application-summary-card">
+              <small>전체 달성률</small>
+              <strong>{regionAgeQuotaDashboard.percent}%</strong>
+            </div>
+            <div className="application-summary-card">
+              <small>초과응답 수</small>
+              <strong>{regionAgeQuotaDashboard.overQuotaCount}건</strong>
+            </div>
+            <div className="application-summary-card">
+              <small>마감된 셀</small>
+              <strong>{regionAgeQuotaDashboard.closedCellCount}개</strong>
+            </div>
+          </div>
+
+          {regionAgeQuotaDashboard.shortageTop.length > 0 && (
+            <div className="option-status-list">
+              {regionAgeQuotaDashboard.shortageTop.map((cell, index) => (
+                <div className="inline-note" key={`shortage-${cell.regionId}-${cell.ageGroupId}`}>
+                  <strong>{index + 1}. {cell.regionLabel} {cell.ageGroupLabel}</strong>
+                  {' '}
+                  {cell.shortage}명 부족
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="response-table-wrapper">
+            <table className="response-table quota-dashboard-table">
+              <thead>
+                <tr>
+                  <th>권역</th>
+                  {regionAgeQuotaDashboard.config.ageGroups.map((ageGroup) => (
+                    <th key={`quota-dashboard-head-${ageGroup.id}`}>{ageGroup.label}</th>
+                  ))}
+                  <th>계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {regionAgeQuotaDashboard.rows.map((row) => (
+                  <tr key={`quota-dashboard-row-${row.region.id}`}>
+                    <th>{row.region.label}</th>
+                    {row.cells.map((cell) => (
+                      <td key={`quota-dashboard-cell-${cell.regionId}-${cell.ageGroupId}`}>
+                        <strong>{cell.current} / {cell.target}</strong>
+                        <span>{cell.percent}% · {cell.status}</span>
+                      </td>
+                    ))}
+                    <td>
+                      <strong>{row.currentTotal} / {row.targetTotal}</strong>
+                      <span>
+                        {row.targetTotal > 0 ? Math.round((row.currentTotal / row.targetTotal) * 100) : 0}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                <tr>
+                  <th>계</th>
+                  {regionAgeQuotaDashboard.ageTotals.map((total) => (
+                    <td key={`quota-dashboard-total-${total.ageGroup.id}`}>
+                      <strong>{total.current} / {total.target}</strong>
+                      <span>{total.percent}%</span>
+                    </td>
+                  ))}
+                  <td>
+                    <strong>{regionAgeQuotaDashboard.currentTotal} / {regionAgeQuotaDashboard.targetTotal}</strong>
+                    <span>{regionAgeQuotaDashboard.percent}%</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'analytics' && (
+      <>
       {optionQuotaQuestions.length > 0 && (
         <div className="panel">
           <div className="builder-header-row">
@@ -1797,7 +1948,11 @@ function SurveyResponsesAdminPage() {
           )}
         </div>
       )}
+      </>
+      )}
 
+      {activeTab === 'responses' && (
+      <>
       {filteredResponses.length === 0 ? (
         <div className="empty-state">
           {responses.length === 0
@@ -2012,6 +2167,8 @@ function SurveyResponsesAdminPage() {
         <div className="pagination-bar">
           <span>전체 {quotaSummary.responseCount}건을 모두 표시 중입니다.</span>
         </div>
+      )}
+      </>
       )}
 
       <QrModal

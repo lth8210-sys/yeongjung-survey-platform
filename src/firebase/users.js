@@ -27,6 +27,11 @@ export const USER_ROLES = {
   VIEWER: 'viewer',
 };
 
+export const SURVEY_VISIBILITIES = {
+  PRIVATE: 'private',
+  ORGANIZATION: 'organization',
+};
+
 export const USER_STATUSES = {
   ACTIVE: 'active',
   PENDING: 'pending',
@@ -73,8 +78,11 @@ export function normalizeUserRole(role, email = '') {
     '관리자': USER_ROLES.ADMIN,
     '제작자': USER_ROLES.CREATOR,
     '조회자': USER_ROLES.VIEWER,
+    '직원': USER_ROLES.VIEWER,
     superadmin: USER_ROLES.SUPER_ADMIN,
+    super_admin: USER_ROLES.SUPER_ADMIN,
     'super admin': USER_ROLES.SUPER_ADMIN,
+    staff: USER_ROLES.VIEWER,
   };
 
   if (legacyRoleMap[role]) {
@@ -97,6 +105,14 @@ export function normalizeDepartment(value = '') {
 }
 
 export function normalizeUserStatus(status) {
+  if (status === true) {
+    return USER_STATUSES.ACTIVE;
+  }
+
+  if (status === false) {
+    return USER_STATUSES.INACTIVE;
+  }
+
   switch (String(status ?? '').trim().toLowerCase()) {
     case USER_STATUSES.PENDING:
       return USER_STATUSES.PENDING;
@@ -108,6 +124,26 @@ export function normalizeUserStatus(status) {
     default:
       return USER_STATUSES.ACTIVE;
   }
+}
+
+function resolveStoredUserStatus(data = {}, fallback = USER_STATUSES.ACTIVE) {
+  if (data.status !== undefined && data.status !== null) {
+    return normalizeUserStatus(data.status);
+  }
+
+  if (data.isActive !== undefined && data.isActive !== null) {
+    return normalizeUserStatus(data.isActive);
+  }
+
+  if (data.active !== undefined && data.active !== null) {
+    return normalizeUserStatus(data.active);
+  }
+
+  if (data.is_active !== undefined && data.is_active !== null) {
+    return normalizeUserStatus(data.is_active);
+  }
+
+  return normalizeUserStatus(fallback);
 }
 
 export function getUserStatusLabel(status) {
@@ -191,6 +227,28 @@ export function canDownloadResponses(role) {
   return hasRoleAtLeast(role, USER_ROLES.CREATOR);
 }
 
+export function normalizeSurveyVisibility(visibility) {
+  return visibility === SURVEY_VISIBILITIES.ORGANIZATION
+    ? SURVEY_VISIBILITIES.ORGANIZATION
+    : SURVEY_VISIBILITIES.PRIVATE;
+}
+
+export function isOrganizationSurvey(survey = {}) {
+  return normalizeSurveyVisibility(survey?.visibility) === SURVEY_VISIBILITIES.ORGANIZATION;
+}
+
+export function canReadManagedSurvey(role, survey, user) {
+  if (hasRoleAtLeast(role, USER_ROLES.ADMIN)) {
+    return true;
+  }
+
+  if (role === USER_ROLES.CREATOR && isSurveyOwner(survey, user)) {
+    return true;
+  }
+
+  return Boolean(role) && isOrganizationSurvey(survey);
+}
+
 export function isSurveyOwner(survey, user) {
   if (!survey || !user) {
     return false;
@@ -201,6 +259,8 @@ export function isSurveyOwner(survey, user) {
   return (
     survey.ownerUid === user.uid ||
     survey.createdByUid === user.uid ||
+    survey.ownerId === user.uid ||
+    survey.userId === user.uid ||
     survey.createdBy?.uid === user.uid ||
     normalizeEmailKey(survey.ownerEmail) === normalizedUserEmail ||
     normalizeEmailKey(survey.createdByEmail) === normalizedUserEmail ||
@@ -221,7 +281,7 @@ export function canEditSurvey(role, survey, user) {
 }
 
 export function canViewSurveyResponses(role, survey, user) {
-  return canEditSurvey(role, survey, user);
+  return canReadManagedSurvey(role, survey, user);
 }
 
 export function canChangeSurveyStatus(role, survey, user) {
@@ -241,6 +301,7 @@ export async function fetchUserProfile(uid) {
     id: snapshot.id,
     ...data,
     role: normalizeUserRole(data.role, data.email),
+    status: resolveStoredUserStatus(data),
   };
 }
 
@@ -262,8 +323,9 @@ export async function upsertInternalUserProfile(firebaseUser) {
   const normalizedRole = existingData?.role
     ? normalizeUserRole(existingData.role, firebaseUser.email)
     : membershipRole ?? USER_ROLES.VIEWER;
-  const normalizedStatus = normalizeUserStatus(
-    existingData?.status ?? (membershipData ? USER_STATUSES.ACTIVE : USER_STATUSES.PENDING),
+  const normalizedStatus = resolveStoredUserStatus(
+    existingData ?? {},
+    membershipData ? USER_STATUSES.ACTIVE : USER_STATUSES.PENDING,
   );
   const department = normalizeDepartment(
     existingData?.department ?? membershipData?.department ?? '',
@@ -357,7 +419,7 @@ export async function fetchAllUsers() {
       role: normalizeUserRole(item.data().role, item.data().email),
       department: normalizeDepartment(item.data().department),
       team: normalizeDepartment(item.data().team),
-      status: normalizeUserStatus(item.data().status),
+      status: resolveStoredUserStatus(item.data()),
     }))
     .sort((first, second) => {
       const firstTime = first.createdAt?.toMillis?.() || 0;

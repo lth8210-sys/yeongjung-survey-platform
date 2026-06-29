@@ -380,9 +380,15 @@ function SurveyListPage() {
                 </small>
 
                 <div className="card-actions">
-                  {(normalizedStatus !== SURVEY_STATUSES.DRAFT || canAccessAdmin) && (
+                  {(normalizedStatus !== SURVEY_STATUSES.DRAFT || canEditTarget) && (
                     <Link className="primary-button" to={`/surveys/${survey.id}`}>
                       {normalizedStatus === SURVEY_STATUSES.CLOSED ? '설문 보기' : '설문 참여하기'}
+                    </Link>
+                  )}
+
+                  {canViewResponsesTarget && !canEditTarget && (
+                    <Link className="secondary-button" to={`/admin/surveys/${survey.id}/responses`}>
+                      응답 결과
                     </Link>
                   )}
 
