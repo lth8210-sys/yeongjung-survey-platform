@@ -803,7 +803,7 @@ export const FORM_TEMPLATES = [
       { key: 'community_participation', title: '4. 주민참여와 공동체' },
       { key: 'welfare_center', title: '5. 복지관 인식, 이용경험, 역할 기대' },
       { key: 'quality_of_life', title: '6. 삶의 질과 사회적 안녕' },
-      { key: 'life_cycle_needs', title: '7. 생애주기별 욕구 및 개방형 의견' },
+      { key: 'lifecycle_needs', title: '7. 생애주기별 욕구 및 개방형 의견' },
     ],
     questions: [
       createNeedsQuestion(1, '현재 주로 거주하거나 생활하는 지역은 어디입니까?', {
@@ -1119,7 +1119,7 @@ export const FORM_TEMPLATES = [
         type: QUESTION_TYPES.MULTIPLE_CHOICE,
         options: ['영유아(0~만 5세)', '아동(만 6세~만 11세)', '청소년', '청년', '중장년', '노년'],
         required: true,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-1', '[영유아] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
         description: YEONGJUNG_NEEDS_Q46_DESCRIPTION,
@@ -1127,7 +1127,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_INFANT_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-2', '[아동] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
         description: YEONGJUNG_NEEDS_Q46_DESCRIPTION,
@@ -1135,7 +1135,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_CHILD_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-3', '[청소년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
         description: YEONGJUNG_NEEDS_Q46_DESCRIPTION,
@@ -1143,7 +1143,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_TEEN_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-4', '[청년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
         description: YEONGJUNG_NEEDS_Q46_DESCRIPTION,
@@ -1151,7 +1151,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_YOUTH_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-5', '[중장년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
         description: YEONGJUNG_NEEDS_Q46_DESCRIPTION,
@@ -1159,7 +1159,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_MIDDLE_AGE_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-6', '[노년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
         description: YEONGJUNG_NEEDS_Q46_DESCRIPTION,
@@ -1167,44 +1167,44 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_SENIOR_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(47, '위에서 선택한 지원이 필요한 가장 큰 이유는 무엇입니까?', {
         type: QUESTION_TYPES.SINGLE_CHOICE,
         options: ['비용 부담', '정보 부족', '가까운 곳에 없음', '같이 갈 사람 없음', '시간대 안 맞음', '건강·이동 어려움', '관심 프로그램 부족', '기타'],
         allowOther: true,
         required: true,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(48, '복지관 이용 시, 선호하는 요일과 시간대는 언제입니까?', {
         description: '선호 요일과 시간대를 함께 선택해주세요.',
         type: QUESTION_TYPES.MULTIPLE_CHOICE,
         options: ['평일(월~금)', '토요일', '오전(09:00~12:00)', '오후(13:00~18:00)', '야간1(18:00~20:00)', '야간2(20:00~21:00)'],
         required: true,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(49, '우리 동네에서 가장 불편하거나 개선이 필요한 점은 무엇입니까? 2개까지 선택', {
         type: QUESTION_TYPES.MULTIPLE_CHOICE,
         options: ['거리·교통', '주거환경', '안전·치안', '생활정보 부족', '이웃관계 부족', '아이·청소년 공간 부족', '어르신 돌봄 부족', '문화·여가 부족', '재개발·상권변화로 인한 불편', '기타'],
         allowOther: true,
         required: true,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(50, '영등포 지역 또는 우리 동네가 더 살기 좋은 마을이 되기 위해 가장 필요하다고 생각하는 것은 무엇입니까?', {
         type: QUESTION_TYPES.LONG_TEXT,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(51, '복지관에서 새롭게 운영되었으면 하는 프로그램이나 공간이 있다면 무엇입니까?', {
         type: QUESTION_TYPES.LONG_TEXT,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(52, '복지관이 주민과 함께 만들어가면 좋을 활동이나 모임은 무엇입니까?', {
         type: QUESTION_TYPES.LONG_TEXT,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(53, '영중종합사회복지관에 바라는 점은 무엇입니까?', {
         type: QUESTION_TYPES.LONG_TEXT,
-        sectionKey: 'life_cycle_needs',
+        sectionKey: 'lifecycle_needs',
       }),
     ],
   },

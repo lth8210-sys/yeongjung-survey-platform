@@ -1555,15 +1555,29 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
       if (userAccess.uid) {
         managedQueries.push(getDocs(query(surveysCollection, where('ownerUid', '==', userAccess.uid))));
         managedQueries.push(getDocs(query(surveysCollection, where('createdByUid', '==', userAccess.uid))));
+        managedQueries.push(getDocs(query(surveysCollection, where('ownerId', '==', userAccess.uid))));
+        managedQueries.push(getDocs(query(surveysCollection, where('userId', '==', userAccess.uid))));
+        managedQueries.push(getDocs(query(surveysCollection, where('createdBy.uid', '==', userAccess.uid))));
       }
 
       if (normalizedEmail) {
         managedQueries.push(getDocs(query(surveysCollection, where('ownerEmail', '==', normalizedEmail))));
         managedQueries.push(getDocs(query(surveysCollection, where('createdByEmail', '==', normalizedEmail))));
+        managedQueries.push(getDocs(query(surveysCollection, where('createdBy.email', '==', normalizedEmail))));
       }
     }
 
-    const snapshots = (await Promise.allSettled(managedQueries))
+    const allResults = await Promise.allSettled(managedQueries);
+    const rejected = allResults.filter((r) => r.status === 'rejected');
+
+    if (rejected.length > 0) {
+      console.warn(
+        '[fetchManagedSurveys] 일부 쿼리 실패 — 권한 또는 인덱스 문제일 수 있습니다:',
+        rejected.map((r) => r.reason?.message ?? r.reason),
+      );
+    }
+
+    const snapshots = allResults
       .filter((result) => result.status === 'fulfilled')
       .map((result) => result.value);
     const mergedDocs = snapshots.flatMap((snapshot) => snapshot.docs).reduce((result, item) => {

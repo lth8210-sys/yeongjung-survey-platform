@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import SurveyResponseNavigator from '../components/SurveyResponseNavigator';
 import { useAuth } from '../contexts/AuthContext';
 import {
   formatPublicDateTime,
@@ -494,42 +495,18 @@ function SurveyResponsePage() {
   const visibleSections = visibleFlow.visibleSections ?? [];
   const flowGroupedSections = visibleFlow.groupedSections ?? [];
   const questionById = useMemo(
-    () => new Map(activeQuestions.map((question) => [question.id, question])),
-    [activeQuestions],
+    () => new Map((normalizedSurveyStructure.questions ?? []).map((question) => [question.id, question])),
+    [normalizedSurveyStructure.questions],
   );
   const groupedSections = useMemo(() => {
-    const appendUngroupedRenderableQuestions = (sectionsToCheck) => {
-      const includedQuestionIds = new Set(
-        sectionsToCheck.flatMap((section) => (section.questions ?? []).map((question) => question.id)),
-      );
-      const missingQuestions = allRenderableQuestions.filter(
-        (question) => !includedQuestionIds.has(question.id),
-      );
-
-      if (missingQuestions.length === 0) {
-        return sectionsToCheck;
-      }
-
-      return [
-        ...sectionsToCheck,
-        {
-          id: 'unclassified-renderable-questions',
-          title: '미분류 질문',
-          description: '페이지 정보가 맞지 않아 자동으로 모은 질문입니다.',
-          questions: missingQuestions,
-          pageEndAction: 'next',
-        },
-      ];
-    };
-
     if (responseMode !== 'paged') {
-      return appendUngroupedRenderableQuestions(flowGroupedSections);
+      return flowGroupedSections;
     }
 
     const sectionQuestionMap = visibleFlow.sectionToQuestionIdsMap;
 
     if (!sectionQuestionMap || visibleSections.length === 0) {
-      return appendUngroupedRenderableQuestions(flowGroupedSections);
+      return flowGroupedSections;
     }
 
     const sectionsByWholeOrder = visibleSections.map((section) => {
@@ -543,11 +520,8 @@ function SurveyResponsePage() {
       };
     }).filter((section) => section.questions.length > 0);
 
-    return appendUngroupedRenderableQuestions(
-      sectionsByWholeOrder.length > 0 ? sectionsByWholeOrder : flowGroupedSections,
-    );
+    return sectionsByWholeOrder.length > 0 ? sectionsByWholeOrder : flowGroupedSections;
   }, [
-    allRenderableQuestions,
     flowGroupedSections,
     questionById,
     responseMode,
@@ -615,8 +589,10 @@ function SurveyResponsePage() {
   const canSubmitCurrentPage =
     responseMode !== 'paged' || (isLastReachableSection && !visibleFlow.termination);
   const responseQuestions = responseMode === 'paged'
-    ? groupedSections.flatMap((section) => section.questions ?? [])
-    : displayQuestions;
+    ? groupedSections
+        .flatMap((section) => section.questions ?? [])
+        .filter((question) => isRenderableQuestion(question))
+    : displayQuestions.filter((question) => isRenderableQuestion(question));
   const responseQuestionKeys = useMemo(
     () =>
       new Set(
@@ -655,9 +631,45 @@ function SurveyResponsePage() {
     (question) => !renderedQuestionIds.has(question.id),
   );
   const progressPercent =
-    responseMode === 'paged' && groupedSections.length > 0
-      ? ((currentSectionSafeIndex + 1) / groupedSections.length) * 100
+    responseQuestions.length > 0
+      ? (responseQuestions.filter((question) => {
+        const questionIndex = getQuestionIndex(question);
+        return !isAnswerEmpty(question, resolveAnswer(question, questionIndex));
+      }).length / responseQuestions.length) * 100
       : 0;
+  const completedQuestionCount = responseQuestions.filter((question) => {
+    const questionIndex = getQuestionIndex(question);
+    return !isAnswerEmpty(question, resolveAnswer(question, questionIndex));
+  }).length;
+  const totalQuestionCount = responseQuestions.length;
+  const navigatorSections = useMemo(
+    () =>
+      groupedSections.map((section) => {
+        const renderableQuestions = (section.questions ?? []).filter((question) =>
+          isRenderableQuestion(question),
+        );
+        const unansweredRequiredCount = renderableQuestions.filter((question) => {
+          if (!question.required) {
+            return false;
+          }
+
+          const questionIndex = getQuestionIndex(question);
+          return isAnswerEmpty(question, resolveAnswer(question, questionIndex));
+        }).length;
+        const completedCount = renderableQuestions.filter((question) => {
+          const questionIndex = getQuestionIndex(question);
+          return !isAnswerEmpty(question, resolveAnswer(question, questionIndex));
+        }).length;
+
+        return {
+          ...section,
+          completedCount,
+          totalCount: renderableQuestions.length,
+          unansweredRequiredCount,
+        };
+      }),
+    [answers, groupedSections, isRenderableQuestion, otherInputs, survey?.questions],
+  );
 
   useEffect(() => {
     if (currentVisitedQuestionIds.length === 0) {
@@ -1892,54 +1904,6 @@ function SurveyResponsePage() {
     );
   };
 
-  const renderQuestionNavigator = () => {
-    const navigatorSections = responseMode === 'paged' ? groupedSections : flowGroupedSections;
-    const answerMissing = (question) => {
-      const questionIndex = getQuestionIndex(question);
-      const answer = resolveAnswer(question, questionIndex);
-      return isAnswerEmpty(question, answer);
-    };
-
-    return (
-      <div className="response-question-navigator">
-        {navigatorSections.map((section, sectionIndex) => (
-          <div className="response-question-nav-section" key={`nav-${section.id}`}>
-            <button
-              className={sectionIndex === currentSectionSafeIndex ? 'primary-button' : 'secondary-button'}
-              onClick={() => moveToSection(sectionIndex)}
-              type="button"
-            >
-              {section.title || `섹션 ${sectionIndex + 1}`}
-            </button>
-            <div className="response-question-nav-items">
-              {(section.questions ?? [])
-                .filter((question) => isRenderableQuestion(question))
-                .map((question) => {
-                  const displayInfo = questionDisplayMap[question.id];
-                  const missing = answerMissing(question);
-                  const hasError = Boolean(fieldErrors[question.id]);
-
-                  return (
-                    <button
-                      className={`response-question-nav-button ${
-                        missing ? 'response-question-nav-missing' : ''
-                      } ${hasError ? 'response-question-nav-error' : ''}`}
-                      key={`nav-question-${question.id}`}
-                      onClick={() => moveToQuestionSection(question.id)}
-                      title={question.title}
-                      type="button"
-                    >
-                      {displayInfo?.shortLabel ?? '?'}
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
   const renderConsentPanel = (questions, infoBlocks) => {
     if (questions.length === 0) {
       return null;
@@ -2129,28 +2093,19 @@ function SurveyResponsePage() {
         {renderQuotaGate()}
 
         <form className="response-form" onSubmit={handleSubmit}>
-          {renderQuestionNavigator()}
+          {responseMode === 'paged' && (
+            <SurveyResponseNavigator
+              completedQuestionCount={completedQuestionCount}
+              currentSectionIndex={currentSectionSafeIndex}
+              onSectionSelect={moveToSection}
+              progressPercent={progressPercent}
+              sections={navigatorSections}
+              totalQuestionCount={totalQuestionCount}
+            />
+          )}
 
           {responseMode === 'paged' && currentSection ? (
             <>
-              <div className="response-progress-panel paged-progress-panel">
-                <div>
-                  <span>진행률</span>
-                  <strong>
-                    {currentSectionSafeIndex + 1} / {groupedSections.length} 섹션
-                  </strong>
-                  {groupedSections.length - currentSectionSafeIndex - 1 > 0 && (
-                    <span className="muted-label"> · 남은 {groupedSections.length - currentSectionSafeIndex - 1}섹션</span>
-                  )}
-                </div>
-                <div className="response-progress-track" aria-hidden="true">
-                  <div
-                    className="response-progress-bar"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-              </div>
-
               <div className="field">
                 <div className="section-block">
                   <strong>{currentSection.title}</strong>
