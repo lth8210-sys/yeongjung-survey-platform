@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   orderBy,
@@ -1322,6 +1323,10 @@ function mapSurveyDoc(snapshot) {
   const normalizedQuestions = alignQuestionsToSections(data.questions, data.sections);
   const normalizedSections = normalizeSurveySections(data.sections, normalizedQuestions);
   const optionQuotaCounts = normalizeOptionQuotaCounts(data.optionQuotaCounts);
+  const ownerUid = data.ownerUid ?? data.createdByUid ?? data.ownerId ?? data.userId ?? data.createdBy?.uid ?? '';
+  const createdByUid = data.createdByUid ?? data.createdBy?.uid ?? data.ownerUid ?? data.ownerId ?? data.userId ?? '';
+  const ownerEmail = data.ownerEmail ?? data.createdByEmail ?? data.createdBy?.email ?? '';
+  const createdByEmail = data.createdByEmail ?? data.createdBy?.email ?? data.ownerEmail ?? '';
 
   return {
     id: snapshot.id,
@@ -1331,8 +1336,15 @@ function mapSurveyDoc(snapshot) {
       ...data,
       ...normalizedConfiguration,
     }),
-    ownerUid: data.ownerUid ?? data.createdBy?.uid ?? '',
-    ownerEmail: data.ownerEmail ?? data.createdBy?.email ?? '',
+    ownerUid,
+    createdByUid,
+    ownerEmail,
+    createdByEmail,
+    createdBy: {
+      ...(data.createdBy ?? {}),
+      uid: data.createdBy?.uid ?? createdByUid,
+      email: data.createdBy?.email ?? createdByEmail,
+    },
     visibility: normalizeSurveyVisibility(data.visibility),
     questions: normalizedQuestions,
     sections: normalizedSections,
@@ -1540,7 +1552,8 @@ export async function fetchAdminSurveys(options = {}) {
 
 export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   ensureFirestoreReady();
-  const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
+  const rawEmail = String(userAccess.email ?? '').trim();
+  const normalizedEmail = rawEmail.toLowerCase();
 
   console.group('[fetchManagedSurveys] 진단 시작');
   console.log('userAccess.uid:', userAccess.uid);
@@ -1548,21 +1561,64 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   console.log('userAccess.role:', userAccess.role);
   console.log('options:', options);
 
-  // 진단: Firestore user 문서 직접 읽기
+  // 진단: Firestore user 문서 직접 읽기 (캐시 포함)
   if (userAccess.uid && db) {
     try {
       const userDocSnap = await getDoc(doc(db, 'users', userAccess.uid));
       if (userDocSnap.exists()) {
         const ud = userDocSnap.data();
-        console.log('Firestore user 문서:', {
+        console.log('Firestore user 문서 (캐시 포함):', {
           role: ud.role, status: ud.status, isActive: ud.isActive,
           active: ud.active, is_active: ud.is_active, email: ud.email,
+          fromCache: userDocSnap.metadata.fromCache,
         });
       } else {
         console.warn('Firestore user 문서 없음 (hasUserDoc=false) → currentStatus()="" → isCreator()=false');
       }
     } catch (e) {
       console.warn('user 문서 읽기 실패:', e.code, e.message);
+    }
+
+    // 진단: 서버에서 직접 읽기 (캐시 우회) - hasUserDoc()가 실제로 true인지 검증
+    try {
+      const serverSnap = await getDocFromServer(doc(db, 'users', userAccess.uid));
+      if (serverSnap.exists()) {
+        const ud = serverSnap.data();
+        console.log('[진단] user 문서 서버 직접 읽기: 존재 →', { role: ud.role, status: ud.status, email: ud.email });
+      } else {
+        console.error('[진단] user 문서 서버에 없음! → hasUserDoc()=false → isCreator()=false. 문서를 재생성해야 합니다.');
+      }
+    } catch (e) {
+      console.warn('[진단] 서버 직접 읽기 실패:', e.code, e.message);
+    }
+
+    // 진단: survey_templates LIST (isCreator() 체크가 있는 다른 컬렉션)
+    // 성공하면 isCreator()가 Firestore 규칙에서 true → 문제는 surveys 컬렉션에 한정
+    // 실패하면 isCreator()가 Firestore 규칙에서 false → 규칙 자체 문제
+    try {
+      const templatesSnap = await getDocs(query(collection(db, 'survey_templates'), where('active', '==', true), limit(1)));
+      console.log('[진단] survey_templates LIST (isCreator()): 성공 →', templatesSnap.size, '건');
+    } catch (e) {
+      console.warn('[진단] survey_templates LIST 실패 → isCreator()가 Firestore 규칙에서 false:', e.code, e.message);
+    }
+
+    // 진단: surveys getDoc (GET vs LIST 비교)
+    // ownerUid 쿼리로 먼저 ID 확보 불가 → 대신 org 쿼리를 limit(1)으로 먼저 테스트
+    try {
+      const orgTestSnap = await getDocs(query(surveysCollection, where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION), limit(1)));
+      console.log('[진단] org 쿼리 limit(1): 성공 →', orgTestSnap.size, '건');
+      if (orgTestSnap.size > 0) {
+        const firstId = orgTestSnap.docs[0].id;
+        // 같은 문서를 getDoc으로도 접근해서 GET vs LIST 비교
+        try {
+          await getDoc(doc(db, 'surveys', firstId));
+          console.log('[진단] surveys getDoc (canReadManagedSurvey via GET): 성공 → GET은 허용');
+        } catch (e2) {
+          console.warn('[진단] surveys getDoc 실패:', e2.code, e2.message);
+        }
+      }
+    } catch (e) {
+      console.warn('[진단] org 쿼리 limit(1) 실패:', e.code, e.message);
     }
   }
 
@@ -1595,10 +1651,19 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
     }
 
     if (normalizedEmail) {
-      queryLabels.push('ownerEmail', 'createdByEmail', 'createdBy.email');
-      managedQueries.push(getDocs(query(surveysCollection, where('ownerEmail', '==', normalizedEmail))));
-      managedQueries.push(getDocs(query(surveysCollection, where('createdByEmail', '==', normalizedEmail))));
-      managedQueries.push(getDocs(query(surveysCollection, where('createdBy.email', '==', normalizedEmail))));
+      const emailVariants = [...new Set([normalizedEmail, rawEmail].filter(Boolean))];
+      emailVariants.forEach((email) => {
+        queryLabels.push(`ownerEmail:${email}`);
+        managedQueries.push(getDocs(query(surveysCollection, where('ownerEmail', '==', email))));
+      });
+      emailVariants.forEach((email) => {
+        queryLabels.push(`createdByEmail:${email}`);
+        managedQueries.push(getDocs(query(surveysCollection, where('createdByEmail', '==', email))));
+      });
+      emailVariants.forEach((email) => {
+        queryLabels.push(`createdBy.email:${email}`);
+        managedQueries.push(getDocs(query(surveysCollection, where('createdBy.email', '==', email))));
+      });
     }
   } else {
     console.log(`경로: role=${userAccess.role} → organization 쿼리만 실행`);

@@ -106,6 +106,7 @@ function SurveyListPage() {
     canViewSurveyResponses,
     role,
     status,
+    profile,
     user,
     firebaseStatusMessage,
     isFirebaseConfigured,
@@ -125,6 +126,12 @@ function SurveyListPage() {
     console.log('사용자 uid:', user?.uid);
     console.log('사용자 email:', user?.email);
     console.log('role:', role, '/ status:', status);
+    console.log('profile active flags:', {
+      status: profile?.status,
+      isActive: profile?.isActive,
+      active: profile?.active,
+      is_active: profile?.is_active,
+    });
     console.log('canAccessAdmin:', canAccessAdmin, '/ showDeleted:', showDeleted);
     console.log('isFirebaseConfigured:', isFirebaseConfigured);
 
@@ -179,7 +186,7 @@ function SurveyListPage() {
 
   useEffect(() => {
     loadSurveys();
-  }, [canAccessAdmin, firebaseStatusMessage, isFirebaseConfigured, role, showDeleted, user?.email, user?.uid]);
+  }, [canAccessAdmin, firebaseStatusMessage, isFirebaseConfigured, profile, role, showDeleted, user?.email, user?.uid]);
 
   const getPublicSurveyUrl = (targetSurveyId) => {
     if (typeof window === 'undefined') {

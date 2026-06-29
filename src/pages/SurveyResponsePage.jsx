@@ -149,10 +149,6 @@ function SurveyResponsePage() {
     status: 'idle',
     savedAt: null,
   });
-  const [quotaInput, setQuotaInput] = useState({
-    birthYear: '',
-    area: '',
-  });
 
   const publicState = getPublicSurveyState(survey);
   const isDraftSurvey = publicState.key === 'draft';
@@ -167,23 +163,6 @@ function SurveyResponsePage() {
     () => buildRegionAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
     [survey?.quotaConfig, survey?.quotaCounts],
   );
-  const resolvedQuota = useMemo(
-    () => resolveRegionAgeQuota(quotaInput, survey?.quotaConfig),
-    [quotaInput, survey?.quotaConfig],
-  );
-  const selectedQuotaCell = resolvedQuota.valid
-    ? quotaDashboard.rows
-        .find((row) => row.region.id === resolvedQuota.region.id)
-        ?.cells.find((cell) => cell.ageGroupId === resolvedQuota.ageGroup.id)
-    : null;
-  const selectedQuotaClosed = Boolean(
-    regionAgeQuotaEnabled &&
-      selectedQuotaCell?.target > 0 &&
-      selectedQuotaCell.current >= selectedQuotaCell.target &&
-      (survey?.quotaConfig?.closeMode === 'block' ||
-        (survey?.quotaConfig?.closeMode === 'admin_only' && !['admin', 'super_admin'].includes(role))),
-  );
-  const quotaGateBlocked = regionAgeQuotaEnabled && (!resolvedQuota.valid || selectedQuotaClosed);
   const getQuestionKey = (question, index) => question?.id || `legacy-question-${index + 1}`;
   const applicationForm = isApplicationFormType(survey?.formType);
   const draftUserId = user?.uid ?? 'anonymous';
@@ -450,6 +429,41 @@ function SurveyResponsePage() {
       survey.questions.map((question, index) => [getQuestionKey(question, index), resolveAnswer(question, index)]),
     );
   }, [answers, otherInputs, survey]);
+  const quotaInput = useMemo(() => {
+    const nextInput = {
+      birthYear: '',
+      area: '',
+    };
+
+    (survey?.questions ?? []).forEach((question, index) => {
+      const quotaField = question?.meta?.quotaField;
+
+      if (quotaField !== 'area' && quotaField !== 'birthYear') {
+        return;
+      }
+
+      nextInput[quotaField] = resolveAnswer(question, index);
+    });
+
+    return nextInput;
+  }, [answers, otherInputs, survey]);
+  const resolvedQuota = useMemo(
+    () => resolveRegionAgeQuota(quotaInput, survey?.quotaConfig),
+    [quotaInput, survey?.quotaConfig],
+  );
+  const selectedQuotaCell = resolvedQuota.valid
+    ? quotaDashboard.rows
+        .find((row) => row.region.id === resolvedQuota.region.id)
+        ?.cells.find((cell) => cell.ageGroupId === resolvedQuota.ageGroup.id)
+    : null;
+  const selectedQuotaClosed = Boolean(
+    regionAgeQuotaEnabled &&
+      selectedQuotaCell?.target > 0 &&
+      selectedQuotaCell.current >= selectedQuotaCell.target &&
+      (survey?.quotaConfig?.closeMode === 'block' ||
+        (survey?.quotaConfig?.closeMode === 'admin_only' && !['admin', 'super_admin'].includes(role))),
+  );
+  const quotaGateBlocked = selectedQuotaClosed;
 
   const responseMode = useMemo(() => getResponseMode(survey), [survey]);
   const normalizedSurveyStructure = useMemo(
@@ -469,16 +483,10 @@ function SurveyResponsePage() {
     [],
   );
   const allRenderableQuestions = useMemo(
-    () => (normalizedSurveyStructure.questions ?? []).filter((question) => isRenderableQuestion(question)),
-    [isRenderableQuestion, normalizedSurveyStructure.questions],
+    () => activeQuestions.filter((question) => isRenderableQuestion(question)),
+    [activeQuestions, isRenderableQuestion],
   );
-  const displayQuestions = useMemo(() => {
-    const activeQuestionIds = new Set(activeQuestions.map((question) => question.id));
-    return [
-      ...activeQuestions,
-      ...allRenderableQuestions.filter((question) => !activeQuestionIds.has(question.id)),
-    ];
-  }, [activeQuestions, allRenderableQuestions]);
+  const displayQuestions = activeQuestions;
   const visibleQuestions = displayQuestions.filter(
     (question) =>
       getNormalizedQuestionType(question) !== QUESTION_TYPES.CONSENT_CHECKBOX &&
@@ -1492,6 +1500,21 @@ function SurveyResponsePage() {
       return;
     }
 
+    if (
+      regionAgeQuotaEnabled &&
+      currentSectionQuestions.some((question) => question.meta?.quotaField === 'area' || question.meta?.quotaField === 'birthYear')
+    ) {
+      if (!resolvedQuota.valid) {
+        setMessage('Q1 거주지역과 Q4 출생연도를 확인해주세요.');
+        return;
+      }
+
+      if (selectedQuotaClosed) {
+        setMessage('선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
+        return;
+      }
+    }
+
     setMessage('');
     setCurrentSectionIndex((current) => {
       const nextIndex = groupedSections.findIndex(
@@ -1847,59 +1870,16 @@ function SurveyResponsePage() {
   };
 
   const renderQuotaGate = () => {
-    if (!regionAgeQuotaEnabled) {
+    if (!regionAgeQuotaEnabled || !selectedQuotaClosed) {
       return null;
     }
 
-    const areas = quotaDashboard.config.regions.flatMap((region) => region.areas);
-
     return (
       <div className="application-info-card quota-gate-panel">
-        <strong>거주지역과 출생년도를 확인해주세요</strong>
-        <div className="builder-settings-grid">
-          <label className="field">
-            <span>출생년도</span>
-            <input
-              max={quotaDashboard.config.baseYear}
-              min="1900"
-              onChange={(event) =>
-                setQuotaInput((current) => ({ ...current, birthYear: event.target.value }))
-              }
-              placeholder="예: 1978"
-              type="number"
-              value={quotaInput.birthYear}
-            />
-          </label>
-          <label className="field">
-            <span>거주지역</span>
-            <select
-              onChange={(event) =>
-                setQuotaInput((current) => ({ ...current, area: event.target.value }))
-              }
-              value={quotaInput.area}
-            >
-              <option value="">세부 행정동 선택</option>
-              {areas.map((area) => (
-                <option key={`quota-area-${area}`} value={area}>
-                  {area}
-                </option>
-              ))}
-            </select>
-          </label>
+        <strong>응답 마감 안내</strong>
+        <div className="form-message">
+          선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.
         </div>
-        {resolvedQuota.valid && (
-          <p className="meta-description">
-            {resolvedQuota.region.label} · {resolvedQuota.ageGroup.label}
-            {selectedQuotaCell
-              ? ` · 현재 ${selectedQuotaCell.current}/${selectedQuotaCell.target}명`
-              : ''}
-          </p>
-        )}
-        {selectedQuotaClosed && (
-          <div className="form-message">
-            선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.
-          </div>
-        )}
       </div>
     );
   };
