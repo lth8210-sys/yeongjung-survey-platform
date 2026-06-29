@@ -407,6 +407,7 @@ function SurveyBuilderPage() {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showBlockPicker, setShowBlockPicker] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [settingsPanelSnapshot, setSettingsPanelSnapshot] = useState(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showStartWizard, setShowStartWizard] = useState(!isEditMode);
   const [creationMode, setCreationMode] = useState(isEditMode ? 'builder' : '');
@@ -1700,6 +1701,55 @@ function SurveyBuilderPage() {
       ),
     }));
   };
+  const cloneQuotaConfig = (value) => normalizeRegionAgeQuotaConfig(
+    JSON.parse(JSON.stringify(normalizeRegionAgeQuotaConfig(value))),
+  );
+  const createSettingsSnapshot = () => ({
+    status,
+    duplicateCheckEnabled,
+    slotDuplicateCheckEnabled,
+    oneSlotPerPersonEnabled,
+    allowResponseEdit,
+    applicantListView,
+    quotaEnabled,
+    maxResponses,
+    adminNotificationEnabled,
+    visibility,
+    quotaConfig: cloneQuotaConfig(quotaConfig),
+    completionMessage,
+  });
+  const restoreSettingsSnapshot = (snapshot) => {
+    if (!snapshot) {
+      return;
+    }
+
+    setStatus(snapshot.status);
+    setDuplicateCheckEnabled(snapshot.duplicateCheckEnabled);
+    setSlotDuplicateCheckEnabled(snapshot.slotDuplicateCheckEnabled);
+    setOneSlotPerPersonEnabled(snapshot.oneSlotPerPersonEnabled);
+    setAllowResponseEdit(snapshot.allowResponseEdit);
+    setApplicantListView(snapshot.applicantListView);
+    setQuotaEnabled(snapshot.quotaEnabled);
+    setMaxResponses(snapshot.maxResponses);
+    setAdminNotificationEnabled(snapshot.adminNotificationEnabled);
+    setVisibility(snapshot.visibility);
+    setQuotaConfig(cloneQuotaConfig(snapshot.quotaConfig));
+    setCompletionMessage(snapshot.completionMessage);
+  };
+  const handleOpenSettingsPanel = () => {
+    setSettingsPanelSnapshot(createSettingsSnapshot());
+    setShowSettingsPanel(true);
+  };
+  const handleCancelSettingsPanel = () => {
+    restoreSettingsSnapshot(settingsPanelSnapshot);
+    setSettingsPanelSnapshot(null);
+    setShowSettingsPanel(false);
+  };
+  const handleCommitSettingsPanel = () => {
+    setSettingsPanelSnapshot(null);
+    setShowSettingsPanel(false);
+    setMessage('운영설정이 반영되었습니다. 최종 저장 버튼을 눌러 폼을 저장해주세요.');
+  };
   const questionDisplayMap = buildQuestionDisplayMap(questions, sections);
 
   if (!isEditMode && !creationMode) {
@@ -1812,7 +1862,7 @@ function SurveyBuilderPage() {
           <p>제목, 설명, 질문만 입력해도 바로 사용할 수 있습니다.</p>
         </div>
         <div className="card-actions">
-          <button className="secondary-button" onClick={() => setShowSettingsPanel(true)} type="button">
+          <button className="secondary-button" onClick={handleOpenSettingsPanel} type="button">
             ⚙ 운영 설정
           </button>
           {isEditMode && (
@@ -2147,7 +2197,7 @@ function SurveyBuilderPage() {
         {showSettingsPanel && (
           <div
             className="settings-drawer-backdrop"
-            onClick={() => setShowSettingsPanel(false)}
+            onClick={handleCancelSettingsPanel}
             role="presentation"
           >
             <aside
@@ -2163,10 +2213,10 @@ function SurveyBuilderPage() {
                 </div>
                 <button
                   className="secondary-button"
-                  onClick={() => setShowSettingsPanel(false)}
+                  onClick={handleCancelSettingsPanel}
                   type="button"
                 >
-                  닫기
+                  취소
                 </button>
               </div>
 
@@ -2396,6 +2446,17 @@ function SurveyBuilderPage() {
                 <div className="inline-note">
                   답변별 이동은 객관식 또는 드롭다운 질문카드에서
                   <strong> 응답에 따라 다음 화면 다르게 하기</strong>를 체크하면 바로 사용할 수 있습니다.
+                </div>
+              </div>
+              <div className="settings-drawer-actionbar">
+                <p>변경사항은 저장 버튼을 눌러야 반영됩니다.</p>
+                <div className="card-actions">
+                  <button className="secondary-button" onClick={handleCancelSettingsPanel} type="button">
+                    취소
+                  </button>
+                  <button className="primary-button" onClick={handleCommitSettingsPanel} type="button">
+                    운영설정 저장
+                  </button>
                 </div>
               </div>
             </aside>

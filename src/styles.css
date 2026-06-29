@@ -1404,8 +1404,8 @@ button:disabled {
 }
 
 .settings-drawer {
-  width: min(440px, 100%);
-  max-height: 100%;
+  width: min(max(720px, 76vw), calc(100vw - 40px));
+  max-height: 100vh;
   overflow-y: auto;
   display: grid;
   align-content: start;
@@ -1436,10 +1436,45 @@ button:disabled {
 .settings-drawer-body {
   display: grid;
   gap: 18px;
+  min-width: 0;
+}
+
+.settings-drawer-actionbar {
+  position: sticky;
+  bottom: -24px;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin: 4px -24px -24px;
+  padding: 16px 24px;
+  border-top: 1px solid rgba(24, 34, 47, 0.08);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 -16px 34px rgba(24, 34, 47, 0.08);
+}
+
+.settings-drawer-actionbar p {
+  margin: 0;
+  color: #5e7082;
+  font-size: 0.92rem;
 }
 
 .settings-drawer .toggle-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-drawer .builder-settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.quota-config-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(24, 34, 47, 0.08);
+  border-radius: 12px;
+  background: #fff;
 }
 
 .builder-subpanel {
@@ -2150,6 +2185,28 @@ button:disabled {
   min-width: 86px;
 }
 
+.quota-config-table {
+  min-width: 760px;
+}
+
+.quota-config-table th:first-child,
+.quota-config-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 92px;
+  background: #fff;
+  box-shadow: 8px 0 12px rgba(24, 34, 47, 0.04);
+}
+
+.quota-config-table th:first-child {
+  z-index: 3;
+}
+
+.quota-config-table td:last-child input {
+  min-width: 260px;
+}
+
 .quota-dashboard-table th,
 .quota-dashboard-table td {
   vertical-align: top;
@@ -2484,12 +2541,34 @@ button:disabled {
   }
 
   .settings-drawer-backdrop {
-    padding: 10px;
+    padding: 0;
   }
 
   .settings-drawer {
     width: 100%;
-    border-radius: 22px;
+    max-height: 100vh;
+    min-height: 100vh;
+    border-radius: 0;
+  }
+
+  .settings-drawer .toggle-grid,
+  .settings-drawer .builder-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-drawer-actionbar {
+    bottom: 0;
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: -24px;
+  }
+
+  .settings-drawer-actionbar .card-actions {
+    justify-content: stretch;
+  }
+
+  .settings-drawer-actionbar .card-actions button {
+    flex: 1 1 0;
   }
 
   .user-summary {
