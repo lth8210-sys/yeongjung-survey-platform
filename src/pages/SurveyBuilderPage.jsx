@@ -1084,6 +1084,12 @@ function SurveyBuilderPage() {
       formType: template.formType,
       ...template.settings,
     });
+    const templateVisibility = normalizeSurveyVisibility(
+      template.settings?.visibility ?? template.survey?.visibility,
+    );
+    const templateQuotaConfig = normalizeRegionAgeQuotaConfig(
+      template.quotaConfig ?? template.settings?.quotaConfig ?? createDefaultRegionAgeQuotaConfig(),
+    );
     const nextTemplateMetadata = template.templateMetadata ?? { templateId: template.id, templateVersion: 1 };
     const rawTemplateSections =
       Array.isArray(template.sections) && template.sections.length > 0
@@ -1171,8 +1177,8 @@ function SurveyBuilderPage() {
     setAllowResponseEdit(Boolean(template.survey.allowResponseEdit));
     setCompletionMessage(template.survey.completionMessage ?? '');
     setAdminNotificationEnabled(Boolean(template.survey.adminNotificationEnabled));
-    setVisibility(SURVEY_VISIBILITIES.PRIVATE);
-    setQuotaConfig(createDefaultRegionAgeQuotaConfig());
+    setVisibility(templateVisibility);
+    setQuotaConfig(templateQuotaConfig);
     setOptionQuotaCounts({});
     setShowStartWizard(false);
     setShowTemplatePicker(false);
@@ -1207,7 +1213,8 @@ function SurveyBuilderPage() {
         allowResponseEdit: Boolean(template.survey.allowResponseEdit),
         completionMessage: template.survey.completionMessage ?? '',
         adminNotificationEnabled: Boolean(template.survey.adminNotificationEnabled),
-        visibility: SURVEY_VISIBILITIES.PRIVATE,
+        visibility: templateVisibility,
+        quotaConfig: templateQuotaConfig,
         templateMetadata: nextTemplateMetadata,
         createdBy: {
           uid: user?.uid ?? '',

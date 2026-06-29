@@ -1,4 +1,4 @@
-import { FORM_TYPES, QUESTION_TYPES } from '../firebase/surveys';
+import { BRANCH_ACTIONS, FORM_TYPES, QUESTION_TYPES } from '../firebase/surveys';
 
 const AGREEMENT_5_OPTIONS = [
   '1. 전혀 그렇지 않다',
@@ -35,6 +35,70 @@ const RESIDENT_CONTACT_TYPE_OPTIONS = [
 const RESIDENT_AGE_OPTIONS = ['10대', '20대', '30대', '40대', '50대', '60대 이상'];
 const RESIDENT_ROLE_OPTIONS = ['뒤에서 지원', '따라가는 식', '앞에서 진행', '새로운 사람 앞 어색'];
 const FOLLOW_UP_CONTACT_OPTIONS = ['전화', '문자', '카톡', '방문'];
+
+const YEONGJUNG_NEEDS_REGION_OPTIONS = [
+  '영등포동 2·5·7가',
+  '영등포동 1·3·4·6·8가',
+  '영등포본동',
+  '당산1동',
+  '당산2동',
+  '문래동',
+  '여의동',
+  '양평1동',
+  '양평2동',
+  '기타',
+];
+
+const YEONGJUNG_NEEDS_QUOTA_CONFIG = {
+  enabled: true,
+  totalTarget: 520,
+  baseYear: 2026,
+  regionMode: 'region_age',
+  closeMode: 'block',
+  ageGroups: [
+    { id: 'age_0_19', label: '0~19세', minAge: 0, maxAge: 19 },
+    { id: 'age_20_39', label: '20~39세', minAge: 20, maxAge: 39 },
+    { id: 'age_40_64', label: '40~64세', minAge: 40, maxAge: 64 },
+    { id: 'age_65_plus', label: '65세 이상', minAge: 65, maxAge: null },
+  ],
+  regions: [
+    { id: 'region_1', label: '1권역', areas: ['영등포동2가', '영등포동5가', '영등포동7가'] },
+    { id: 'region_2', label: '2권역', areas: ['영등포동1가', '영등포동3가', '영등포동4가', '영등포동6가', '영등포동8가'] },
+    { id: 'region_3', label: '3권역', areas: ['영등포본동'] },
+    { id: 'region_4', label: '4권역', areas: ['문래동', '당산1동', '당산2동'] },
+    { id: 'region_5', label: '5권역', areas: ['여의동', '양평1동', '양평2동'] },
+  ],
+  matrix: {
+    region_1: { age_0_19: 26, age_20_39: 26, age_40_64: 26, age_65_plus: 26 },
+    region_2: { age_0_19: 26, age_20_39: 26, age_40_64: 26, age_65_plus: 26 },
+    region_3: { age_0_19: 26, age_20_39: 26, age_40_64: 26, age_65_plus: 26 },
+    region_4: { age_0_19: 26, age_20_39: 26, age_40_64: 26, age_65_plus: 26 },
+    region_5: { age_0_19: 26, age_20_39: 26, age_40_64: 26, age_65_plus: 26 },
+  },
+};
+
+const YEONGJUNG_NEEDS_5_POINT_OPTIONS = [
+  '전혀 그렇지 않다',
+  '그렇지 않다',
+  '보통이다',
+  '그렇다',
+  '매우 그렇다',
+];
+
+const YEONGJUNG_NEEDS_INTENTION_OPTIONS = ['전혀 없다', '별로 없다', '보통이다', '있다', '매우 있다'];
+const YEONGJUNG_NEEDS_COUNT_OPTIONS = ['0명', '1명', '2명', '3~4명', '5~8명', '9명 이상'];
+const YEONGJUNG_NEEDS_LONELINESS_OPTIONS = ['거의 없다', '가끔 그렇다', '자주 그렇다'];
+
+const createNeedsQuestion = (number, title, config = {}) => ({
+  id: `needs-q${String(number).padStart(2, '0')}`,
+  title: `Q${number}. ${title}`,
+  ...config,
+  meta: {
+    analyticsGroup: 'yeongjung_needs_2026',
+    analyticsKey: `q${String(number).padStart(2, '0')}`,
+    ...(config.meta ?? {}),
+  },
+});
 
 const DEFAULT_SATISFACTION_COMPLETION_MESSAGE =
   '소중한 의견 감사합니다.\n응답해주신 내용은 더 나은 복지관 운영과 프로그램 개선에 활용하겠습니다.';
@@ -607,6 +671,415 @@ export const FORM_TEMPLATES = [
         title: '복지관에 바라는 점이 있다면 적어주세요.',
         type: QUESTION_TYPES.LONG_TEXT,
       },
+    ],
+  },
+  {
+    id: 'yeongjung_community_needs_2026_v1',
+    title: '2026 영중 지역주민 욕구조사',
+    description:
+      '지역주민의 생활실태, 지역사회 인식, 관계와 사회적 연결, 주민참여, 복지관 인식, 삶의 질, 생애주기별 욕구를 파악하기 위한 조사입니다.',
+    preview:
+      '권역 × 연령대 quota, 조건분기, 생애주기별 욕구 문항을 포함한 2026 영중 지역주민 욕구조사 전용 템플릿입니다.',
+    category: '욕구 조사',
+    tags: ['욕구조사', '지역주민', 'Quota', '조건분기', '2026'],
+    formType: FORM_TYPES.GENERAL_SURVEY,
+    settings: {
+      branchingEnabled: true,
+      quotaEnabled: true,
+      maxResponses: 550,
+      duplicateCheckEnabled: false,
+      applicantListView: false,
+      processingStatusEnabled: false,
+      visibility: 'organization',
+    },
+    quotaConfig: YEONGJUNG_NEEDS_QUOTA_CONFIG,
+    templateMetadata: {
+      templateId: 'yeongjung_community_needs_2026_v1',
+      templateVersion: 1,
+      templateCategory: 'needs_survey',
+      templateType: 'yeongjung_community_needs',
+      organization: '영중종합사회복지관',
+      surveyYear: 2026,
+      quotaAreaQuestionId: 'needs-q01',
+      quotaBirthYearQuestionId: 'needs-q04',
+    },
+    survey: {
+      title: '2026 영중 지역주민 욕구조사',
+      description:
+        '지역주민의 생활실태, 지역사회 인식, 관계와 사회적 연결, 주민참여, 복지관 인식, 삶의 질, 생애주기별 욕구를 파악하기 위한 조사입니다.',
+      completionMessage:
+        '소중한 의견 감사합니다. 응답해주신 내용은 지역주민 욕구 파악과 복지관 사업계획 수립에 활용하겠습니다.',
+    },
+    sections: [
+      { key: 'basic_info', title: '1. 기본정보' },
+      { key: 'community_perception', title: '2. 지역사회 인식' },
+      { key: 'social_connection', title: '3. 관계와 사회적 연결' },
+      { key: 'community_participation', title: '4. 주민참여와 공동체' },
+      { key: 'welfare_center', title: '5. 복지관 인식, 이용경험, 역할 기대' },
+      { key: 'quality_of_life', title: '6. 삶의 질과 사회적 안녕' },
+      { key: 'life_cycle_needs', title: '7. 생애주기별 욕구 및 개방형 의견' },
+    ],
+    questions: [
+      createNeedsQuestion(1, '현재 주로 거주하거나 생활하는 지역은 어디입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_REGION_OPTIONS,
+        required: true,
+        sectionKey: 'basic_info',
+        meta: { quotaField: 'area' },
+      }),
+      createNeedsQuestion(2, '현재 지역에 거주한 기간은 얼마나 됩니까?', {
+        description: '총 년, 개월을 입력해주세요.',
+        type: QUESTION_TYPES.SHORT_TEXT,
+        required: true,
+        placeholder: '예: 5년 6개월',
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(3, '성별은 무엇입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['남성', '여성', '기타/응답하지 않음'],
+        required: true,
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(4, '출생연도는 어떻게 됩니까?', {
+        description: '출생연도를 숫자로 입력해주세요.',
+        type: QUESTION_TYPES.NUMBER,
+        required: true,
+        placeholder: '예: 1975',
+        validation: { min: 1900, max: 2026 },
+        sectionKey: 'basic_info',
+        meta: { quotaField: 'birthYear' },
+      }),
+      createNeedsQuestion(5, '현재 가구형태는 무엇입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['1인가구', '부부세대', '부모+자녀', '한부모+자녀', '조부모+부모+자녀', '조부모+손자녀', '동거', '기타'],
+        required: true,
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(6, '함께 살고 있는 가족 또는 동거인은 응답자 포함 총 몇 명입니까?', {
+        description: '총 인원을 숫자로 입력해주세요.',
+        type: QUESTION_TYPES.NUMBER,
+        required: true,
+        validation: { min: 1 },
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(7, '함께 살고 있는 가족 또는 동거인 중 돌보고 있는 대상이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['예', '아니오'],
+        required: true,
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(8, '정부지원 형태에 해당하는 것이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['기초생활수급자', '차상위계층', '해당 없음', '응답하지 않음'],
+        required: true,
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(9, '가구 월수입은 얼마입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['100만원 미만', '100-200만원 미만', '200-300만원 미만', '300-400만원 미만', '400-500만원 미만', '500-600만원 미만', '600만원 이상'],
+        required: true,
+        sectionKey: 'basic_info',
+      }),
+      createNeedsQuestion(10, '우리 동네의 생활환경은 대체로 좋은 편이다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(11, '우리 마을에는 어려울 때 도움받을 수 있는 기반이 있다고 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(12, '우리 마을 이웃을 신뢰할 수 있다고 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(13, '나는 우리 마을에 소속감을 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(14, '나는 이웃이나 지역주민과의 관계 속에서 존중받고 있다고 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(15, '평소 가장 자주 이용하는 생활권은 어디입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['영등포동', '영등포본동', '당산동', '문래동', '여의동', '양평동', '기타'],
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(16, '복지관 또는 지역시설을 이용할 때 가장 큰 어려움은 무엇입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['거리', '시간', '비용', '정보 부족', '주차', '건강', '관심 프로그램 없음', '어려움 없음', '기타'],
+        required: true,
+        sectionKey: 'community_perception',
+      }),
+      createNeedsQuestion(17, '[가족/친척] 한 달에 한 번 이상 연락하거나 만나는 가족/친척은 몇 명입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_COUNT_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(18, '[가족/친척] 사적인 일이나 걱정거리를 마음 편히 상의할 수 있는 가족/친척은 몇 명입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_COUNT_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(19, '[가족/친척] 급한 도움이 필요할 때 부탁할 수 있는 가족/친척은 몇 명입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_COUNT_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(20, '[친구/이웃] 한 달에 한 번 이상 연락하거나 만나는 친구/이웃은 몇 명입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_COUNT_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(21, '[친구/이웃] 사적인 일이나 걱정거리를 마음 편히 상의할 수 있는 친구/이웃은 몇 명입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_COUNT_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(22, '[친구/이웃] 급한 도움이 필요할 때 부탁할 수 있는 친구/이웃은 몇 명입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_COUNT_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(23, '나는 같이 있어 줄 사람이 부족하다고 자주 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_LONELINESS_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(24, '나는 혼자 남겨진 것 같다고 자주 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_LONELINESS_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(25, '나는 사람들 사이에서 고립되어 있다고 자주 느낀다.', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_LONELINESS_OPTIONS,
+        required: true,
+        sectionKey: 'social_connection',
+      }),
+      createNeedsQuestion(26, '주변에 도움이 필요한 이웃이 있을 때, 복지관이나 동주민센터 등으로 연결할 의향이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_INTENTION_OPTIONS,
+        required: true,
+        sectionKey: 'community_participation',
+      }),
+      createNeedsQuestion(27, '최근 1년 내에 어려운 이웃을 실제로 도운 경험이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['예', '아니오'],
+        required: true,
+        sectionKey: 'community_participation',
+      }),
+      createNeedsQuestion(28, '현재 정기적으로 참여하고 있는 모임이나 활동이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['예', '아니오'],
+        required: true,
+        sectionKey: 'community_participation',
+        branching: {
+          enabled: true,
+          rules: [
+            { whenOption: '예', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q29' },
+            { whenOption: '아니오', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q30' },
+          ],
+          fallbackAction: BRANCH_ACTIONS.NEXT,
+        },
+      }),
+      createNeedsQuestion(29, '[Q28=예] 참여하고 있다면 어떤 모임입니까? 해당 모두 선택', {
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        options: ['취미·여가', '자기개발', '종교', '봉사', '지역문제 해결', '자녀 관련', '건강·운동', '복지관 프로그램 모임', '주민자조모임', '기타'],
+        allowOther: true,
+        required: true,
+        sectionKey: 'community_participation',
+      }),
+      createNeedsQuestion(30, '[Q28=아니오] 참여하지 않는다면 그 이유는 무엇입니까? 해당 모두 선택', {
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        options: ['시간 없음', '관심 모임 없음', '정보 없음', '이용가능한 시간대가 없음', '같이 갈 사람 없음', '비용 부담', '건강상 이유', '필요성 못 느낌', '기타'],
+        allowOther: true,
+        required: true,
+        sectionKey: 'community_participation',
+      }),
+      createNeedsQuestion(31, '최근 1년 내 지역행사, 공동체 활동에 참여한 경험이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['예', '아니오'],
+        required: true,
+        sectionKey: 'community_participation',
+      }),
+      createNeedsQuestion(32, '앞으로 주민모임이나 지역활동에 참여할 의향이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_INTENTION_OPTIONS,
+        required: true,
+        sectionKey: 'community_participation',
+      }),
+      createNeedsQuestion(33, '영중종합사회복지관을 알고 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['잘 알고 있었다', '이름만 들어보았다', '이번에 처음 알았다'],
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(34, '최근 1년 내 복지관 프로그램·행사·공간 이용 경험이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['예', '아니오'],
+        required: true,
+        sectionKey: 'welfare_center',
+        branching: {
+          enabled: true,
+          rules: [
+            { whenOption: '예', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q36' },
+            { whenOption: '아니오', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q35' },
+          ],
+          fallbackAction: BRANCH_ACTIONS.NEXT,
+        },
+      }),
+      createNeedsQuestion(35, '[Q34=아니오] 이용하지 않은 이유는 무엇입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['시간 없음', '관심 프로그램 없음', '정보 부족', '이용가능한 시간대가 없음', '같이 갈 사람 없음', '비용 부담', '건강상 이유', '필요성 못 느낌', '거리 멀어서', '기타'],
+        allowOther: true,
+        required: true,
+        sectionKey: 'welfare_center',
+        branching: {
+          enabled: true,
+          rules: [
+            { whenOption: '시간 없음', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '관심 프로그램 없음', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '정보 부족', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '이용가능한 시간대가 없음', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '같이 갈 사람 없음', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '비용 부담', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '건강상 이유', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '필요성 못 느낌', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '거리 멀어서', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+            { whenOption: '기타', action: BRANCH_ACTIONS.GO_TO, targetQuestionId: 'needs-q41' },
+          ],
+          fallbackAction: BRANCH_ACTIONS.GO_TO,
+          fallbackTargetQuestionId: 'needs-q41',
+        },
+      }),
+      createNeedsQuestion(36, '복지관은 전반적으로 이용하기 편리하다고 생각하십니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(37, '나는 계속 복지관을 이용할 의향이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_INTENTION_OPTIONS,
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(38, '[Q34=예] 복지관 프로그램은 나에게 긍정적인 도움을 주고 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(39, '영중종합사회복지관을 얼마나 신뢰하십니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['전혀 신뢰하지 않는다', '신뢰하지 않는다', '보통이다', '신뢰한다', '매우 신뢰한다'],
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(40, '복지관에서 배우거나 경험한 것을 다른 사람과 나누어 본 적이 있습니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['예', '아니오'],
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(41, '복지관이 가장 중요하게 해야 할 역할은 무엇입니까? 2개까지 선택', {
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        options: ['상담·사례관리', '경제·물질지원', '주민모임·관계망', '교육문화', '돌봄·건강', '취약계층 발굴', '주민참여·공동체', '공간개방', '기타'],
+        allowOther: true,
+        required: true,
+        sectionKey: 'welfare_center',
+      }),
+      createNeedsQuestion(42, '현재 귀하의 삶에 전반적으로 얼마나 만족하십니까?', {
+        description: '0점~10점 척도',
+        type: QUESTION_TYPES.LINEAR_SCALE,
+        required: true,
+        settings: { min: 0, max: 10, minLabel: '0점', maxLabel: '10점' },
+        sectionKey: 'quality_of_life',
+      }),
+      createNeedsQuestion(43, '귀하는 요즘 스스로 행복하다고 생각하십니까?', {
+        description: '0점~10점 척도',
+        type: QUESTION_TYPES.LINEAR_SCALE,
+        required: true,
+        settings: { min: 0, max: 10, minLabel: '0점', maxLabel: '10점' },
+        sectionKey: 'quality_of_life',
+      }),
+      createNeedsQuestion(44, '최근 나는 일상이 안정되어 있다고 느낍니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
+        required: true,
+        sectionKey: 'quality_of_life',
+      }),
+      createNeedsQuestion(45, '귀하와 같이 거주하고 있는 세대는 누구입니까? 해당 모두 선택', {
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        options: ['영유아(0~만 5세)', '아동(만 6세~만 11세)', '청소년', '청년', '중장년', '노년'],
+        required: true,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(46, '귀하 또는 가족에게 가장 필요한 지원은 무엇입니까? 해당 세대별 보기에서 2개까지 선택', {
+        description:
+          '[영유아] 실내 놀이공간, 부모-자녀 놀이프로그램, 양육상담, 부모교육, 긴급돌봄 정보, 가족체험, 발달정보, 또래만남, 기타\n\n[아동] 방학특강, 과학·창의체험, 놀이·체육, 독서·학습, 문화체험, 정서지원, 또래관계, 안전한 돌봄·놀이공간, 신체활동, 가족활동, 기타\n\n[청소년] 진로체험, 문화·예술, 자원봉사, 친구모임, 마음상담, 저녁·주말 활동, 공부공간, 미디어·디지털 활동, 운동(체육활동), 환경프로그램, 기타\n\n[청년] 1인가구 모임, 마음건강, 취업·진로, 주거정보, 여가문화, 자원봉사, 지역살이 정보, 저녁시간 프로그램, 기타\n\n[중장년] 관계모임, 건강관리, 일자리·재취업, 고립예방, 가족돌봄 정보, 정서지원, 취미문화, 동네활동, 기타\n\n[노년] 식생활지원, 안부확인·말벗, 건강관리, 이동지원·병원동행, 경로식당·무료급식, 돌봄정보·복지서비스 정보 제공, 평생교육·생활교육, 문화여가·여가활동, 자원봉사·재능나눔, 주민모임·자조모임·공동체활동, 이웃살피미·사회참여, 일자리·취업지원, 안전확인, 정서지원, 고립예방, 기타',
+        type: QUESTION_TYPES.LONG_TEXT,
+        required: true,
+        placeholder: '세대명과 필요한 지원을 최대 2개까지 적어주세요.',
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(47, '위에서 선택한 지원이 필요한 가장 큰 이유는 무엇입니까?', {
+        type: QUESTION_TYPES.SINGLE_CHOICE,
+        options: ['비용 부담', '정보 부족', '가까운 곳에 없음', '같이 갈 사람 없음', '시간대 안 맞음', '건강·이동 어려움', '관심 프로그램 부족', '기타'],
+        allowOther: true,
+        required: true,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(48, '복지관 이용 시, 선호하는 요일과 시간대는 언제입니까?', {
+        description: '선호 요일과 시간대를 함께 선택해주세요.',
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        options: ['평일(월~금)', '토요일', '오전(09:00~12:00)', '오후(13:00~18:00)', '야간1(18:00~20:00)', '야간2(20:00~21:00)'],
+        required: true,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(49, '우리 동네에서 가장 불편하거나 개선이 필요한 점은 무엇입니까? 2개까지 선택', {
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        options: ['거리·교통', '주거환경', '안전·치안', '생활정보 부족', '이웃관계 부족', '아이·청소년 공간 부족', '어르신 돌봄 부족', '문화·여가 부족', '재개발·상권변화로 인한 불편', '기타'],
+        allowOther: true,
+        required: true,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(50, '영등포 지역 또는 우리 동네가 더 살기 좋은 마을이 되기 위해 가장 필요하다고 생각하는 것은 무엇입니까?', {
+        type: QUESTION_TYPES.LONG_TEXT,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(51, '복지관에서 새롭게 운영되었으면 하는 프로그램이나 공간이 있다면 무엇입니까?', {
+        type: QUESTION_TYPES.LONG_TEXT,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(52, '복지관이 주민과 함께 만들어가면 좋을 활동이나 모임은 무엇입니까?', {
+        type: QUESTION_TYPES.LONG_TEXT,
+        sectionKey: 'life_cycle_needs',
+      }),
+      createNeedsQuestion(53, '영중종합사회복지관에 바라는 점은 무엇입니까?', {
+        type: QUESTION_TYPES.LONG_TEXT,
+        sectionKey: 'life_cycle_needs',
+      }),
     ],
   },
 ];
