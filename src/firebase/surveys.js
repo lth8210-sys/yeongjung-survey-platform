@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   Timestamp,
   runTransaction,
@@ -1631,12 +1632,16 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   if (userAccess.role === USER_ROLES.CREATOR && (userAccess.uid || normalizedEmail)) {
     try {
       const snapshot = await getDocs(surveysCollection);
-      const ownedSurveys = snapshot.docs
+      const visibleSurveys = snapshot.docs
         .map(mapSurveyDoc)
-        .filter((survey) => isSurveyOwnedByUser(survey, userAccess));
+        .filter(
+          (survey) =>
+            isSurveyOwnedByUser(survey, userAccess) ||
+            normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
+        );
 
       return filterDeletedSurveys(
-        sortSurveysByCreatedAtDesc(ownedSurveys),
+        sortSurveysByCreatedAtDesc(visibleSurveys),
         options.includeDeleted,
       );
     } catch (error) {
@@ -1718,6 +1723,59 @@ export async function getPublicSurvey(surveyId) {
   }
 
   return survey;
+}
+
+export function subscribePublicSurvey(surveyId, onNext, onError) {
+  ensureFirestoreReady();
+
+  if (!surveyId) {
+    onNext?.(null);
+    return () => {};
+  }
+
+  let sequence = 0;
+
+  return onSnapshot(
+    doc(db, 'surveys', surveyId),
+    async (snapshot) => {
+      const currentSequence = sequence + 1;
+      sequence = currentSequence;
+
+      try {
+        if (!snapshot.exists()) {
+          onNext?.(null);
+          return;
+        }
+
+        const survey = await hydrateSurveyQuotaData(mapSurveyDoc(snapshot));
+
+        if (currentSequence !== sequence) {
+          return;
+        }
+
+        const publicState = getPublicSurveyState(survey);
+
+        if (
+          publicState.key !== 'open' &&
+          publicState.key !== 'closed' &&
+          publicState.key !== 'scheduled'
+        ) {
+          const error = new Error(getDraftSurveyMessage(survey.formType));
+          error.code = 'permission-denied';
+          onError?.(error);
+          return;
+        }
+
+        onNext?.(survey);
+      } catch (error) {
+        onError?.(error);
+      }
+    },
+    (error) => {
+      logFirestoreReadDenied(`surveys/${surveyId}`, error);
+      onError?.(error);
+    },
+  );
 }
 
 export async function getManageSurvey(surveyId, userAccess = {}) {

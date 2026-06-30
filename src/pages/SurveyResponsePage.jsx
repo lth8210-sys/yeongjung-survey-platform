@@ -9,13 +9,13 @@ import {
   getDraftSurveyMessage,
   getPublicSurveyState,
   getQuestionOptionItems,
-  getPublicSurvey,
   getScaleQuestionConfig,
   getQuotaSummary,
   getReceptionPeriodText,
   buildRegionAgeQuotaDashboard,
   resolveRegionAgeQuota,
   isApplicationFormType,
+  subscribePublicSurvey,
   submitSurveyResponse,
 } from '../firebase/surveys';
 import { OTHER_OPTION_VALUE, QUESTION_TYPES } from '../firebase/surveyConstants';
@@ -64,8 +64,19 @@ const responseChoiceTextStyle = {
   lineHeight: 1.5,
 };
 
+const OTHER_OPTION_LABEL = '기타';
+
 function getNormalizedQuestionType(question = {}) {
   return normalizeQuestionType(question?.type);
+}
+
+function isOtherOptionValue(value) {
+  return value === OTHER_OPTION_VALUE || String(value ?? '').trim() === OTHER_OPTION_LABEL;
+}
+
+function formatOtherAnswer(value) {
+  const normalizedValue = String(value ?? '').trim();
+  return normalizedValue ? `${OTHER_OPTION_LABEL}: ${normalizedValue}` : OTHER_OPTION_LABEL;
 }
 
 function SurveyTableBlocks({ tableBlocks = [] }) {
@@ -266,30 +277,43 @@ function SurveyResponsePage() {
       return;
     }
 
-    async function loadSurvey() {
-      try {
-        const result = await getPublicSurvey(surveyId);
+    const unsubscribe = subscribePublicSurvey(
+      surveyId,
+      (result) => {
         setSurvey(result);
 
-        if (getPublicSurveyState(result).key === 'draft') {
+        const nextPublicState = getPublicSurveyState(result);
+
+        if (nextPublicState.key === 'draft') {
           setMessage(getDraftSurveyMessage(result?.formType));
-        } else if (getPublicSurveyState(result).key === 'closed') {
+        } else if (nextPublicState.key === 'closed') {
           setMessage(getClosedSurveyMessage(result?.formType));
-        } else if (getPublicSurveyState(result).key === 'scheduled') {
-          setMessage(getPublicSurveyState(result).message);
+        } else if (nextPublicState.key === 'scheduled') {
+          setMessage(nextPublicState.message);
+        } else {
+          setMessage((current) =>
+            current === getDraftSurveyMessage(result?.formType) ||
+            current === getClosedSurveyMessage(result?.formType) ||
+            current === nextPublicState.message
+              ? ''
+              : current,
+          );
         }
-      } catch (error) {
+
+        setLoading(false);
+      },
+      (error) => {
         if (error?.code === 'permission-denied') {
           setMessage(getDraftSurveyMessage());
         } else {
           setMessage(error.message || '설문 정보를 불러오지 못했습니다.');
         }
-      } finally {
-        setLoading(false);
-      }
-    }
 
-    loadSurvey();
+        setLoading(false);
+      },
+    );
+
+    return unsubscribe;
   }, [firebaseStatusMessage, isFirebaseConfigured, surveyId]);
 
   useEffect(() => {
@@ -400,10 +424,10 @@ function SurveyResponsePage() {
 
     if (normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE) {
       const selectedValues = Array.isArray(rawAnswer) ? rawAnswer : [];
-      const valuesWithoutOther = selectedValues.filter((value) => value !== OTHER_OPTION_VALUE);
+      const valuesWithoutOther = selectedValues.filter((value) => !isOtherOptionValue(value));
 
-      if (selectedValues.includes(OTHER_OPTION_VALUE) && otherValue) {
-        return [...valuesWithoutOther, otherValue];
+      if (selectedValues.some((selectedValue) => isOtherOptionValue(selectedValue))) {
+        return [...valuesWithoutOther, formatOtherAnswer(otherValue)];
       }
 
       return valuesWithoutOther;
@@ -412,12 +436,33 @@ function SurveyResponsePage() {
     if (
       (normalizedType === QUESTION_TYPES.SINGLE_CHOICE ||
         normalizedType === QUESTION_TYPES.DROPDOWN) &&
-      rawAnswer === OTHER_OPTION_VALUE
+      isOtherOptionValue(rawAnswer)
     ) {
-      return otherValue;
+      return formatOtherAnswer(otherValue);
     }
 
     return rawAnswer ?? '';
+  };
+
+  const getBranchAnswer = (question, index) => {
+    const questionKey = getQuestionKey(question, index);
+    const normalizedType = getNormalizedQuestionType(question);
+    const rawAnswer = answers[questionKey];
+
+    if (normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE) {
+      return Array.isArray(rawAnswer)
+        ? rawAnswer.map((value) => (isOtherOptionValue(value) ? OTHER_OPTION_LABEL : value))
+        : [];
+    }
+
+    if (
+      normalizedType === QUESTION_TYPES.SINGLE_CHOICE ||
+      normalizedType === QUESTION_TYPES.DROPDOWN
+    ) {
+      return isOtherOptionValue(rawAnswer) ? OTHER_OPTION_LABEL : rawAnswer ?? '';
+    }
+
+    return resolveAnswer(question, index);
   };
 
   const resolvedAnswersByQuestionId = useMemo(() => {
@@ -427,6 +472,15 @@ function SurveyResponsePage() {
 
     return Object.fromEntries(
       survey.questions.map((question, index) => [getQuestionKey(question, index), resolveAnswer(question, index)]),
+    );
+  }, [answers, otherInputs, survey]);
+  const branchAnswersByQuestionId = useMemo(() => {
+    if (!survey?.questions?.length) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      survey.questions.map((question, index) => [getQuestionKey(question, index), getBranchAnswer(question, index)]),
     );
   }, [answers, otherInputs, survey]);
   const quotaInput = useMemo(() => {
@@ -471,8 +525,8 @@ function SurveyResponsePage() {
     [survey],
   );
   const visibleFlow = useMemo(
-    () => buildVisibleQuestionFlow({ survey, answers: resolvedAnswersByQuestionId }),
-    [resolvedAnswersByQuestionId, survey],
+    () => buildVisibleQuestionFlow({ survey, answers: branchAnswersByQuestionId }),
+    [branchAnswersByQuestionId, survey],
   );
   const activeQuestions = visibleFlow.visibleQuestions ?? [];
   const isRenderableQuestion = useCallback(
@@ -502,40 +556,14 @@ function SurveyResponsePage() {
   );
   const visibleSections = visibleFlow.visibleSections ?? [];
   const flowGroupedSections = visibleFlow.groupedSections ?? [];
-  const questionById = useMemo(
-    () => new Map((normalizedSurveyStructure.questions ?? []).map((question) => [question.id, question])),
-    [normalizedSurveyStructure.questions],
-  );
   const groupedSections = useMemo(() => {
-    if (responseMode !== 'paged') {
-      return flowGroupedSections;
-    }
+    if (responseMode !== 'paged') return flowGroupedSections;
 
-    const sectionQuestionMap = visibleFlow.sectionToQuestionIdsMap;
-
-    if (!sectionQuestionMap || visibleSections.length === 0) {
-      return flowGroupedSections;
-    }
-
-    const sectionsByWholeOrder = visibleSections.map((section) => {
-      const sectionQuestions = (sectionQuestionMap.get(section.id) ?? [])
-        .map((questionId) => questionById.get(questionId))
-        .filter(Boolean);
-
-      return {
-        ...section,
-        questions: sectionQuestions,
-      };
-    }).filter((section) => section.questions.length > 0);
-
-    return sectionsByWholeOrder.length > 0 ? sectionsByWholeOrder : flowGroupedSections;
-  }, [
-    flowGroupedSections,
-    questionById,
-    responseMode,
-    visibleFlow.sectionToQuestionIdsMap,
-    visibleSections,
-  ]);
+    return flowGroupedSections.map((section) => ({
+      ...section,
+      questions: (section.questions ?? []).filter(Boolean),
+    })).filter((section) => section.questions.length > 0);
+  }, [flowGroupedSections, responseMode]);
   const currentSection = responseMode === 'paged'
     ? groupedSections[Math.min(currentSectionIndex, Math.max(groupedSections.length - 1, 0))]
     : null;
@@ -761,7 +789,6 @@ function SurveyResponsePage() {
     groupedSections,
     isLastReachableSection,
     nextQuestionSectionIndex,
-    normalizedSurveyStructure.questions,
     renderedQuestionIds,
     submitted,
     survey,
@@ -1072,6 +1099,20 @@ function SurveyResponsePage() {
     return blocksFromDescription;
   };
 
+  const isOtherSelected = (question, questionKey) => {
+    const normalizedType = getNormalizedQuestionType(question);
+    const rawAnswer = answers[questionKey];
+
+    if (normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE) {
+      return Array.isArray(rawAnswer) && rawAnswer.some((value) => isOtherOptionValue(value));
+    }
+
+    return (
+      normalizedType === QUESTION_TYPES.SINGLE_CHOICE ||
+      normalizedType === QUESTION_TYPES.DROPDOWN
+    ) && isOtherOptionValue(rawAnswer);
+  };
+
   const validateAnswers = (questionsToValidate = responseQuestions) => {
     const nextErrors = {};
 
@@ -1085,6 +1126,11 @@ function SurveyResponsePage() {
       const questionIndex = survey.questions.findIndex((item) => item.id === question.id);
       const resolvedAnswer = resolveAnswer(question, questionIndex);
       const questionKey = getQuestionKey(question, questionIndex);
+
+      if (isOtherSelected(question, questionKey) && !String(otherInputs[questionKey] ?? '').trim()) {
+        nextErrors[questionKey] = '기타 내용을 입력해주세요.';
+        return;
+      }
 
       if (question.required && isAnswerEmpty(question, resolvedAnswer)) {
         nextErrors[questionKey] = '필수 응답 항목입니다.';
@@ -1132,8 +1178,10 @@ function SurveyResponsePage() {
 
       const questionIndex = survey.questions.findIndex((item) => item.id === question.id);
       const resolvedAnswer = resolveAnswer(question, questionIndex);
+      const questionKey = getQuestionKey(question, questionIndex);
 
       return (
+        (isOtherSelected(question, questionKey) && !String(otherInputs[questionKey] ?? '').trim()) ||
         (question.required && isAnswerEmpty(question, resolvedAnswer)) ||
         (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX && resolvedAnswer !== true) ||
         (question.meta?.consentApproval && resolvedAnswer !== true && resolvedAnswer !== '동의합니다')
@@ -1144,7 +1192,7 @@ function SurveyResponsePage() {
   };
 
   const renderOtherInput = (question, index, shouldShow) => {
-    if (!question.allowOther || !shouldShow) {
+    if (!shouldShow) {
       return null;
     }
 
@@ -1165,6 +1213,12 @@ function SurveyResponsePage() {
     const normalizedType = getNormalizedQuestionType(question);
     const value = answers[questionKey];
     const optionItems = getQuestionOptionItems(question, survey?.optionQuotaCounts);
+    const hasConfiguredOtherOption = optionItems.some((option) => isOtherOptionValue(option.value));
+    const shouldRenderSyntheticOtherOption = Boolean(question.allowOther) && !hasConfiguredOtherOption;
+    const otherSelected =
+      normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE
+        ? Array.isArray(value) && value.some((selectedValue) => isOtherOptionValue(selectedValue))
+        : isOtherOptionValue(value);
     const legacyConsentQuestion = Boolean(question.meta?.consentApproval);
 
     if (normalizedType === QUESTION_TYPES.DESCRIPTION_BLOCK) {
@@ -1312,7 +1366,7 @@ function SurveyResponsePage() {
                   </span>
                 </label>
               ))}
-              {question.allowOther && (
+              {shouldRenderSyntheticOtherOption && (
                 <label
                   className="response-choice-item"
                   key={`${survey.id}-${questionKey}-other`}
@@ -1330,7 +1384,7 @@ function SurveyResponsePage() {
                 </label>
               )}
             </div>
-            {renderOtherInput(question, index, value === OTHER_OPTION_VALUE)}
+            {renderOtherInput(question, index, otherSelected)}
           </>
         );
       case QUESTION_TYPES.MULTIPLE_CHOICE:
@@ -1366,7 +1420,7 @@ function SurveyResponsePage() {
                   </label>
                 );
               })}
-              {question.allowOther && (
+              {shouldRenderSyntheticOtherOption && (
                 <label
                   className="response-choice-item"
                   key={`${survey.id}-${questionKey}-other`}
@@ -1385,11 +1439,7 @@ function SurveyResponsePage() {
                 </label>
               )}
             </div>
-            {renderOtherInput(
-              question,
-              index,
-              Array.isArray(value) ? value.includes(OTHER_OPTION_VALUE) : false,
-            )}
+            {renderOtherInput(question, index, otherSelected)}
           </>
         );
       case QUESTION_TYPES.DROPDOWN:
@@ -1415,9 +1465,9 @@ function SurveyResponsePage() {
                       : ''}
                 </option>
               ))}
-              {question.allowOther && <option value={OTHER_OPTION_VALUE}>기타</option>}
+              {shouldRenderSyntheticOtherOption && <option value={OTHER_OPTION_VALUE}>기타</option>}
             </select>
-            {renderOtherInput(question, index, value === OTHER_OPTION_VALUE)}
+            {renderOtherInput(question, index, otherSelected)}
           </>
         );
       case QUESTION_TYPES.APPLICATION_SLOT_CHOICE:
@@ -1695,9 +1745,7 @@ function SurveyResponsePage() {
       };
     });
     const payloadVisibleQuestionIds =
-      responseMode === 'paged'
-        ? responseQuestions.map((question) => question.id)
-        : visibleFlow.visibleQuestionIds;
+      visibleFlow.visibleQuestionIds;
     const clientSubmitId = getCurrentClientSubmitId();
     const payload = {
       surveyId: survey.id,

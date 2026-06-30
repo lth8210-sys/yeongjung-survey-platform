@@ -1882,9 +1882,10 @@ function SurveyBuilderPage() {
 
       {isEditMode && existingResponseCount > 0 && (
         <div className="inline-note">
-          이미 {existingResponseCount}건의 응답이 있는 설문입니다. 질문 제목이나 보기 문구를 수정하면
-          기존 응답 해석이 달라질 수 있습니다. 질문 ID는 유지되지만, 질문 삭제나 타입 변경은
-          신중히 진행해주세요.
+          이미 {existingResponseCount}건의 응답이 있는 설문입니다. 문항 수정 시 기존 응답 분석에
+          영향을 줄 수 있습니다. 분기, 설명, 오타 수정은 가능하지만 선택지 삭제, 문항 삭제,
+          필수 여부 변경, 분기 변경은 진행 중인 응답 흐름과 집계 해석이 달라질 수 있어
+          신중히 진행해주세요. 저장한 수정사항은 응답자 화면에 바로 반영됩니다.
         </div>
       )}
 
