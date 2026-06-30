@@ -84,14 +84,18 @@ const SHARE_TYPES = {
   PROGRESS: 'progress',
   SHORTAGE: 'shortage',
   SUMMARY: 'summary',
+  TEAM: 'team',
+  PROMOTION: 'promotion',
   REPORT: 'report',
 };
 
 const SHARE_TYPE_LABELS = {
   [SHARE_TYPES.PROGRESS]: '진행현황 공유',
-  [SHARE_TYPES.SHORTAGE]: '부족표본 공유',
   [SHARE_TYPES.SUMMARY]: '결과요약 공유',
-  [SHARE_TYPES.REPORT]: '보고서 공유용 요약',
+  [SHARE_TYPES.TEAM]: '팀 공유',
+  [SHARE_TYPES.PROMOTION]: '홍보용 공유',
+  [SHARE_TYPES.REPORT]: '보고서 요약',
+  [SHARE_TYPES.SHORTAGE]: '부족표본 공유',
 };
 
 const SHARE_TEMPLATE_TYPES = {
@@ -111,10 +115,17 @@ const SHARE_COPY_TEMPLATES = {
     shortageEmptyText: '부족한 항목이 없습니다.',
     shortageCta: '필요한 대상에게 공유해 주세요.',
     countLabel: '응답수',
+    actionNoun: '응답',
+    participantNoun: '참여',
+    askVerb: '참여',
     totalCountLabel: '총 응답수',
     resultEmptyText: '주요 객관식/평균 문항 집계가 아직 없습니다.',
     textResponseNote: '서술형 의견은 결과보고서 참고',
     reportReadyText: '결과보고서가 생성되었습니다.',
+    teamRequestText: '아직 참여하지 않은 대상자가 있다면 조사기간 내 참여를 부탁드립니다.',
+    promotionLeadText: '설문에 참여해주세요.',
+    promotionTimeText: '3분 정도 소요됩니다.',
+    promotionClosingText: '많은 참여 부탁드립니다.',
     resultOrder: 'choice-first',
   },
   [SHARE_TEMPLATE_TYPES.SATISFACTION]: {
@@ -126,10 +137,17 @@ const SHARE_COPY_TEMPLATES = {
     shortageEmptyText: '부족한 항목이 없습니다.',
     shortageCta: '필요한 대상에게 공유해 주세요.',
     countLabel: '응답수',
+    actionNoun: '응답',
+    participantNoun: '참여',
+    askVerb: '참여',
     totalCountLabel: '총 응답수',
     resultEmptyText: '만족도 평균 또는 주요 응답 집계가 아직 없습니다.',
     textResponseNote: '서술형 의견은 결과보고서 참고',
     reportReadyText: '만족도조사 결과보고서가 생성되었습니다.',
+    teamRequestText: '아직 참여하지 않은 이용자가 있다면 조사기간 내 참여를 부탁드립니다.',
+    promotionLeadText: '만족도 조사에 참여해주세요.',
+    promotionTimeText: '3분 정도 소요됩니다.',
+    promotionClosingText: '많은 참여 부탁드립니다.',
     resultOrder: 'average-first',
   },
   [SHARE_TEMPLATE_TYPES.NEEDS]: {
@@ -141,10 +159,17 @@ const SHARE_COPY_TEMPLATES = {
     shortageEmptyText: '부족한 할당표본 셀이 없습니다.',
     shortageCta: '부족 권역·연령대 중심으로 적극 홍보 부탁드립니다.',
     countLabel: '응답수',
+    actionNoun: '응답',
+    participantNoun: '참여',
+    askVerb: '참여',
     totalCountLabel: '총 응답수',
     resultEmptyText: '주요 욕구 문항 집계가 아직 없습니다.',
     textResponseNote: '서술형 의견은 결과보고서 참고',
     reportReadyText: '욕구조사 결과보고서가 생성되었습니다.',
+    teamRequestText: '아직 참여하지 않은 지역주민이 있다면 조사기간 내 참여를 부탁드립니다.',
+    promotionLeadText: '지역주민 욕구조사에 참여해주세요.',
+    promotionTimeText: '5분 정도 소요됩니다.',
+    promotionClosingText: '많은 참여 부탁드립니다.',
     resultOrder: 'choice-first',
   },
   [SHARE_TEMPLATE_TYPES.APPLICATION]: {
@@ -156,10 +181,17 @@ const SHARE_COPY_TEMPLATES = {
     shortageEmptyText: '부족한 정원 항목이 없습니다.',
     shortageCta: '추가 모집이 필요한 대상에게 공유해 주세요.',
     countLabel: '신청수',
+    actionNoun: '신청',
+    participantNoun: '신청',
+    askVerb: '신청',
     totalCountLabel: '총 신청수',
     resultEmptyText: '주요 신청 항목 집계가 아직 없습니다.',
     textResponseNote: '상세 신청 내용은 결과보고서 참고',
     reportReadyText: '신청 결과 요약이 생성되었습니다.',
+    teamRequestText: '신청이 필요한 대상자가 있다면 기간 내 신청 안내를 부탁드립니다.',
+    promotionLeadText: '신청을 받고 있습니다.',
+    promotionTimeText: '간단한 정보 입력 후 신청할 수 있습니다.',
+    promotionClosingText: '많은 신청 부탁드립니다.',
     resultOrder: 'choice-first',
   },
 };
@@ -219,22 +251,78 @@ function buildAdminUrl(path) {
   return `${window.location.origin}${path}`;
 }
 
+function getPositiveNumber(value) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : 0;
+}
+
 function getShareTarget(survey, quotaSummary, quotaDashboard) {
-  if (quotaDashboard?.targetTotal > 0) {
+  const current = Number(quotaSummary?.responseCount ?? survey?.responseCount ?? 0);
+  const quotaEnabled = Boolean(survey?.quotaConfig?.enabled);
+
+  if (quotaEnabled && quotaDashboard?.targetTotal > 0) {
     return {
+      hasTarget: true,
+      type: 'quota',
       current: quotaDashboard.currentTotal,
       target: quotaDashboard.targetTotal,
       percent: quotaDashboard.percent,
     };
   }
 
-  const current = Number(quotaSummary?.responseCount ?? survey?.responseCount ?? 0);
-  const target = Number(quotaSummary?.maxResponses ?? survey?.maxResponses ?? 0);
+  const target = getPositiveNumber(survey?.maxResponses ?? quotaSummary?.maxResponses);
   return {
+    hasTarget: target > 0,
+    type: target > 0 ? 'maxResponses' : 'unlimited',
     current,
     target,
     percent: target > 0 ? Math.round((current / target) * 100) : 0,
   };
+}
+
+function getShareRemainder(target) {
+  return target.hasTarget ? Math.max(0, target.target - target.current) : null;
+}
+
+function formatShareCount(template, target, responseCount) {
+  if (!target.hasTarget) {
+    return `${template.countLabel}: ${responseCount}명`;
+  }
+
+  if (template.actionNoun === '신청') {
+    return `신청: ${target.current} / ${target.target}명`;
+  }
+
+  return `${template.countLabel}: ${target.current} / ${target.target}`;
+}
+
+function formatShareLimitLine(template, target) {
+  if (!target.hasTarget) {
+    return '정원: 제한 없음';
+  }
+
+  const remainder = getShareRemainder(target);
+
+  if (template.actionNoun === '신청') {
+    return `잔여: ${remainder}명`;
+  }
+
+  return `정원: 최대 ${target.target}명`;
+}
+
+function getAverageOverview(analytics) {
+  const rows = (analytics?.topRows ?? []).filter((row) => row.average !== null);
+
+  if (rows.length === 0) {
+    return '';
+  }
+
+  const firstMax = rows[0]?.max;
+  const sameMax = rows.every((row) => row.max === firstMax);
+  const average = rows.reduce((sum, row) => sum + row.average, 0) / rows.length;
+  return sameMax
+    ? `평균 만족도: ${formatAverage(average)} / ${firstMax}`
+    : `평균 만족도: ${formatAverage(average)}`;
 }
 
 function getTopChoiceSummaries(survey, responses, limit = 3) {
@@ -292,8 +380,12 @@ function buildShareText({
 }) {
   const title = survey?.title || '제목 없는 설문';
   const shareTemplate = getShareCopyTemplate(survey, analytics);
+  const shareTemplateType = getShareTemplateType(survey, analytics);
   const responseCount = Number(quotaSummary?.responseCount ?? responses.length ?? 0);
   const target = getShareTarget(survey, quotaSummary, quotaDashboard);
+  const countLine = formatShareCount(shareTemplate, target, responseCount);
+  const limitLine = formatShareLimitLine(shareTemplate, target);
+  const averageOverview = getAverageOverview(analytics);
 
   if (type === SHARE_TYPES.SHORTAGE) {
     const shortageLines = (quotaDashboard?.shortageTop ?? [])
@@ -306,7 +398,9 @@ function buildShareText({
       shareTemplate.shortageTitle,
       '',
       `설문명: ${title}`,
-      `전체 ${shareTemplate.countLabel.replace(/수$/, '')}: ${target.current} / ${target.target}`,
+      '현재 확보 현황',
+      countLine,
+      target.hasTarget ? `진행률: ${target.percent}%` : limitLine,
       '',
       shareTemplate.shortageHeading,
       ...(shortageLines.length > 0 ? shortageLines : [shareTemplate.shortageEmptyText]),
@@ -336,14 +430,35 @@ function buildShareText({
         ? [...averageSummaries, ...choiceSummaries]
         : [...choiceSummaries, ...averageSummaries];
     const resultLines = prioritizedRows.slice(0, 5);
+    const summaryHeaderLines =
+      shareTemplate.resultOrder === 'average-first'
+        ? [
+            averageOverview || '평균 만족도: 집계 준비 중',
+            `${shareTemplate.totalCountLabel}: ${responseCount}명`,
+          ]
+        : shareTemplate.actionNoun === '신청'
+          ? [
+              `${shareTemplate.totalCountLabel}: ${responseCount}명`,
+              limitLine,
+            ]
+          : shareTemplateType === SHARE_TEMPLATE_TYPES.NEEDS
+            ? [
+                `${shareTemplate.totalCountLabel}: ${responseCount}명`,
+                target.hasTarget ? `진행률: ${target.percent}%` : null,
+              ].filter(Boolean)
+            : [`${shareTemplate.totalCountLabel}: ${responseCount}명`];
 
     return [
       shareTemplate.summaryTitle,
       '',
       `설문명: ${title}`,
-      `${shareTemplate.totalCountLabel}: ${responseCount}명`,
+      ...summaryHeaderLines,
       '',
-      '주요 결과:',
+      shareTemplateType === SHARE_TEMPLATE_TYPES.NEEDS
+        ? '주요 욕구:'
+        : shareTemplate.actionNoun === '신청'
+          ? '대표 신청 항목:'
+          : '대표 결과:',
       ...(resultLines.length > 0
         ? resultLines.map((line) => `- ${line}`)
         : [`- ${shareTemplate.resultEmptyText}`]),
@@ -353,28 +468,57 @@ function buildShareText({
 
   if (type === SHARE_TYPES.REPORT) {
     return [
-      shareTemplate.reportTitle,
-      '',
-      `설문명: ${title}`,
-      `${shareTemplate.countLabel}: ${responseCount}명`,
-      shareTemplate.reportReadyText,
-      '',
-      '보고서 열기:',
-      reportUrl || responseUrl,
+      `${shareTemplate.reportTitle}: ${title}은 현재 ${responseCount}명의 ${shareTemplate.actionNoun} 데이터가 집계되었습니다. 주요 결과와 상세 의견은 결과보고서에서 확인할 수 있습니다. 관리자 결과 화면: ${reportUrl || responseUrl}`,
     ].join('\n');
   }
 
-  const targetText = target.target > 0 ? `${target.current} / ${target.target}` : `${responseCount}명`;
-  const percentText = target.target > 0 ? `${target.percent}%` : '-';
+  if (type === SHARE_TYPES.TEAM) {
+    const targetStatus = target.hasTarget
+      ? `현재 ${target.current} / ${target.target}명이 ${shareTemplate.participantNoun}했습니다.`
+      : `현재 ${responseCount}명이 ${shareTemplate.participantNoun}했습니다.`;
+
+    return [
+      `[${title}]`,
+      '',
+      targetStatus,
+      target.hasTarget && shareTemplate.actionNoun === '신청' ? `잔여 ${getShareRemainder(target)}명입니다.` : null,
+      '',
+      shareTemplate.teamRequestText,
+      '',
+      '감사합니다.',
+    ].filter(Boolean).join('\n');
+  }
+
+  if (type === SHARE_TYPES.PROMOTION) {
+    return [
+      shareTemplate.actionNoun === '신청'
+        ? `${title} ${shareTemplate.promotionLeadText}`
+        : `${title}에 ${shareTemplate.askVerb}해주세요.`,
+      '',
+      shareTemplate.promotionTimeText,
+      '',
+      shareTemplate.promotionClosingText,
+    ].join('\n');
+  }
+
+  const progressLines =
+    shareTemplate.actionNoun === '신청'
+      ? [
+          countLine,
+          target.hasTarget ? `잔여 ${getShareRemainder(target)}명` : '정원: 제한 없음',
+        ]
+      : [
+          countLine,
+          target.hasTarget && target.type === 'quota' ? `진행률: ${target.percent}%` : limitLine,
+        ];
 
   return [
     shareTemplate.progressTitle,
     '',
     `설문명: ${title}`,
-    `${shareTemplate.countLabel}: ${targetText}`,
-    `진행률: ${percentText}`,
+    ...progressLines,
     '',
-    '응답결과 보기:',
+    '관리자 결과 화면:',
     responseUrl,
   ].join('\n');
 }
@@ -1488,9 +1632,11 @@ function SurveyResponsesAdminPage() {
     () =>
       [
         SHARE_TYPES.PROGRESS,
-        quotaDashboardEnabled ? SHARE_TYPES.SHORTAGE : null,
         SHARE_TYPES.SUMMARY,
+        SHARE_TYPES.TEAM,
+        SHARE_TYPES.PROMOTION,
         SHARE_TYPES.REPORT,
+        quotaDashboardEnabled ? SHARE_TYPES.SHORTAGE : null,
       ].filter(Boolean),
     [quotaDashboardEnabled],
   );
@@ -1707,11 +1853,11 @@ function SurveyResponsesAdminPage() {
         <div>
           <strong>공유 문구</strong>
           <p className="meta-description">
-            진행현황, 부족표본, 결과요약을 복사해 Google Chat, 이메일, 카카오톡 등에 붙여넣을 수 있습니다.
+            진행현황, 결과요약, 팀 공유, 홍보용 문구를 복사해 Google Chat, 이메일, 카카오톡 등에 붙여넣을 수 있습니다.
           </p>
         </div>
         <button className="secondary-button" onClick={handleOpenShareModal} type="button">
-          공유 문구 복사
+          공유하기
         </button>
       </div>
 
@@ -2599,7 +2745,7 @@ function SurveyResponsesAdminPage() {
           <div aria-modal="true" className="modal-panel share-copy-modal" role="dialog">
             <div className="report-settings-header">
               <div>
-                <h2>공유 문구 복사</h2>
+                <h2>공유하기</h2>
                 <p>자동 생성된 문구를 필요에 맞게 수정한 뒤 복사할 수 있습니다.</p>
               </div>
               <button className="secondary-button" onClick={() => setShareModalOpen(false)} type="button">
