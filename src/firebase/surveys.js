@@ -3071,6 +3071,10 @@ export async function fetchResponsesForSurvey(survey, userAccess = {}, options =
       return directPage;
     }
 
+    if (survey.id && !isDeletedSurvey(survey)) {
+      return directPage;
+    }
+
     return fetchResponsesBySurveyTitle(survey.title ?? '', {
       ...options,
       lastDoc: null,
@@ -3116,7 +3120,7 @@ export async function fetchResponsesForSurvey(survey, userAccess = {}, options =
 
   const directResponses = await fetchResponsesBySurveyId(survey.id);
 
-  if (directResponses.length > 0) {
+  if (directResponses.length > 0 || !isDeletedSurvey(survey)) {
     return directResponses;
   }
 

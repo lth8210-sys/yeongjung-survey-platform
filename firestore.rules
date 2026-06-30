@@ -258,8 +258,13 @@ service cloud.firestore {
       );
     }
 
-    function canListManagedSurveys() {
-      return isAtLeastAdmin() || isCreator();
+    function canListManagedSurveys(data) {
+      return isAtLeastAdmin() ||
+        isCreator() ||
+        (
+          currentStatus() == 'active' &&
+          isOrganizationVisibleSurvey(data)
+        );
     }
 
     function canEditManagedSurvey(data) {
@@ -549,7 +554,7 @@ service cloud.firestore {
 
     match /surveys/{surveyId} {
       allow get: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data);
-      allow list: if canListManagedSurveys();
+      allow list: if canListManagedSurveys(resource.data);
       allow create: if validManagedSurveyCreate();
       allow delete: if canEditManagedSurvey(resource.data);
       allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();

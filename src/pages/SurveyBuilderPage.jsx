@@ -2288,10 +2288,11 @@ function SurveyBuilderPage() {
                   <label className="checkbox-field">
                     <input
                       checked={adminNotificationEnabled}
+                      disabled
                       onChange={(event) => setAdminNotificationEnabled(event.target.checked)}
                       type="checkbox"
                     />
-                    <span>관리자 알림</span>
+                    <span>관리자 알림(준비 중)</span>
                   </label>
 
                   <label className="checkbox-field">
