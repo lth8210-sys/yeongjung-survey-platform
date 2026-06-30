@@ -67,7 +67,7 @@ service cloud.firestore {
           ? ''
           : hasUserDoc()
             ? normalizeStoredUserStatus(userDoc().data)
-            : '';
+            : 'active';
     }
 
     function normalizeStoredRole(role) {

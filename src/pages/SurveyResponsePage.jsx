@@ -1946,8 +1946,12 @@ function SurveyResponsePage() {
           quotaConfigPath: `surveys/${survey.id}/quotaConfig/main`,
           quotaCountsPath: `surveys/${survey.id}/quotaCounts/main`,
           surveyStatus: survey.status,
+          storedStatus: survey.storedStatus,
+          responseCount: survey.responseCount,
+          visibility: survey.visibility,
           publicState: publicState.key,
           quotaEnabled: Boolean(survey.quotaConfig?.enabled),
+          regionAgeQuotaEnabled: Boolean(survey?.quotaConfig?.enabled),
           code: error?.code ?? '',
           message: error?.message ?? '',
         });
