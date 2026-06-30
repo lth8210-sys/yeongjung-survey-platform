@@ -610,12 +610,88 @@ export function normalizeQuotaCounts(counts = {}, config = {}) {
   };
 }
 
+export function normalizeQuotaAreaValue(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/[·ㆍ・･∙⋅•]/g, '.')
+    .replace(/\s+/g, '')
+    .replace(/[.。．,，、/\\-]+/g, '')
+    .toLowerCase();
+}
+
+function normalizeQuotaAreaComparable(value) {
+  return normalizeQuotaAreaValue(value).replace(/가$/, '');
+}
+
+function getRegionAreaAliases(areas = []) {
+  const aliases = new Set();
+  const normalizedAreas = areas.map((area) => normalizeQuotaAreaValue(area)).filter(Boolean);
+
+  normalizedAreas.forEach((area) => {
+    aliases.add(area);
+    aliases.add(normalizeQuotaAreaComparable(area));
+  });
+
+  const groupedByPrefixSuffix = normalizedAreas.reduce((result, area) => {
+    const match = area.match(/^(.+?)(\d+)가$/);
+
+    if (!match) {
+      return result;
+    }
+
+    const [, prefix, numberText] = match;
+    const key = `${prefix}::가`;
+    result[key] = result[key] ?? { prefix, suffix: '가', numbers: [] };
+    result[key].numbers.push(numberText);
+    return result;
+  }, {});
+
+  Object.values(groupedByPrefixSuffix).forEach((group) => {
+    if (group.numbers.length < 2) {
+      return;
+    }
+
+    const combined = `${group.prefix}${group.numbers.join('')}${group.suffix}`;
+    aliases.add(combined);
+    aliases.add(normalizeQuotaAreaComparable(combined));
+  });
+
+  return aliases;
+}
+
+function findQuotaRegionByArea(regions = [], area = '') {
+  const normalizedArea = normalizeQuotaAreaValue(area);
+  const comparableArea = normalizeQuotaAreaComparable(area);
+
+  return regions.find((region) => {
+    const aliases = getRegionAreaAliases(region.areas);
+    return aliases.has(normalizedArea) || aliases.has(comparableArea);
+  }) ?? null;
+}
+
+export function buildQuotaAreaMappingDebugRows(config = {}, areaValues = []) {
+  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
+
+  return areaValues.map((areaValue) => {
+    const region = findQuotaRegionByArea(normalizedConfig.regions, areaValue);
+
+    return {
+      rawArea: areaValue,
+      normalizedArea: normalizeQuotaAreaValue(areaValue),
+      mapped: Boolean(region),
+      regionId: region?.id ?? '',
+      regionLabel: region?.label ?? '',
+    };
+  });
+}
+
 export function resolveRegionAgeQuota(input = {}, config = {}) {
   const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
   const area = String(input.area ?? '').trim();
+  const normalizedArea = normalizeQuotaAreaValue(area);
   const birthYear = Number(input.birthYear);
   const age = Number.isFinite(birthYear) ? normalizedConfig.baseYear - Math.floor(birthYear) : null;
-  const region = normalizedConfig.regions.find((item) => item.areas.includes(area)) ?? null;
+  const region = findQuotaRegionByArea(normalizedConfig.regions, area);
   const ageGroup = Number.isFinite(age)
     ? normalizedConfig.ageGroups.find((group) =>
         age >= group.minAge && (group.maxAge === null || age <= group.maxAge),
@@ -626,6 +702,7 @@ export function resolveRegionAgeQuota(input = {}, config = {}) {
     return {
       valid: false,
       area,
+      normalizedArea,
       birthYear: Number.isFinite(birthYear) ? Math.floor(birthYear) : null,
       age,
       region,
@@ -636,6 +713,7 @@ export function resolveRegionAgeQuota(input = {}, config = {}) {
   return {
     valid: true,
     area,
+    normalizedArea,
     birthYear: Math.floor(birthYear),
     age,
     region,

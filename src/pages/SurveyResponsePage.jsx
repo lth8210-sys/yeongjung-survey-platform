@@ -594,6 +594,21 @@ function SurveyResponsePage() {
         (survey?.quotaConfig?.closeMode === 'admin_only' && !['admin', 'super_admin'].includes(role))),
   );
   const quotaGateBlocked = selectedQuotaClosed;
+  const logQuotaPrecheckFailure = (source) => {
+    if (!regionAgeQuotaEnabled || resolvedQuota.valid) {
+      return;
+    }
+
+    console.warn('[SurveyResponsePage] quota precheck failed', {
+      source,
+      rawArea: quotaInput.area,
+      normalizedArea: resolvedQuota.normalizedArea ?? '',
+      regionMappingFailed: Boolean(quotaInput.area) && !resolvedQuota.region,
+      rawBirthYear: quotaInput.birthYear,
+      birthYearInvalid: !resolvedQuota.birthYear,
+      surveyId: survey?.id ?? '',
+    });
+  };
 
   const responseMode = useMemo(() => getResponseMode(survey), [survey]);
   const normalizedSurveyStructure = useMemo(
@@ -1643,6 +1658,7 @@ function SurveyResponsePage() {
       currentSectionQuestions.some((question) => getQuotaField(question) === 'area' || getQuotaField(question) === 'birthYear')
     ) {
       if (!resolvedQuota.valid) {
+        logQuotaPrecheckFailure('next-section');
         setMessage('Q1 거주지역과 Q4 출생연도를 확인해주세요.');
         return;
       }
@@ -1800,6 +1816,7 @@ function SurveyResponsePage() {
 
     if (regionAgeQuotaEnabled) {
       if (!resolvedQuota.valid) {
+        logQuotaPrecheckFailure('submit');
         setMessage('출생년도와 거주지역을 먼저 확인해주세요.');
         setSubmitting(false);
         submitLockedRef.current = false;
