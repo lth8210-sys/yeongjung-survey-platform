@@ -659,8 +659,18 @@ button:disabled {
 }
 
 .survey-card {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  min-height: 320px;
+}
+
+.survey-card h2 {
+  overflow-wrap: anywhere;
+}
+
+.survey-card .card-actions {
+  margin-top: auto;
 }
 
 .card-actions {
@@ -2776,7 +2786,12 @@ button:disabled {
   }
 
   .scale-choice-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(5, minmax(44px, 1fr));
+    gap: 8px;
+  }
+
+  .scale-choice-list {
+    gap: 10px;
   }
 
   .response-progress-panel {

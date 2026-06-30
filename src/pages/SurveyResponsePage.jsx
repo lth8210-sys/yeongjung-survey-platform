@@ -79,6 +79,65 @@ function formatOtherAnswer(value) {
   return normalizedValue ? `${OTHER_OPTION_LABEL}: ${normalizedValue}` : OTHER_OPTION_LABEL;
 }
 
+function normalizeSearchText(value) {
+  return String(value ?? '').replace(/\s+/g, '').toLowerCase();
+}
+
+function getQuotaField(question = {}) {
+  const explicitField = question?.meta?.quotaField;
+
+  if (explicitField === 'area' || explicitField === 'birthYear') {
+    return explicitField;
+  }
+
+  const searchableText = normalizeSearchText([
+    question.title,
+    question.label,
+    question.description,
+  ].filter(Boolean).join(' '));
+
+  if (searchableText.includes('거주지역')) {
+    return 'area';
+  }
+
+  if (searchableText.includes('출생연도') || searchableText.includes('출생년도')) {
+    return 'birthYear';
+  }
+
+  return '';
+}
+
+function getMaxSelections(question = {}) {
+  const candidates = [
+    question.maxSelections,
+    question.settings?.maxSelections,
+    question.validation?.maxSelections,
+    question.validation?.max,
+    question.meta?.maxSelections,
+  ];
+  const configuredValue = candidates.find((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+
+  if (configuredValue !== undefined) {
+    return Math.floor(Number(configuredValue));
+  }
+
+  const searchableText = [
+    question.title,
+    question.label,
+    question.description,
+    question.helpText,
+    ...(Array.isArray(question.options) ? question.options : []),
+  ].filter(Boolean).join(' ');
+  const match = searchableText.match(/최대\s*(\d+)\s*개/);
+
+  return match ? Math.floor(Number(match[1])) : null;
+}
+
+function sanitizeFirestoreDocumentSegment(value) {
+  const sanitizedValue = String(value ?? '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
+  return sanitizedValue || 'doc';
+}
+
 function SurveyTableBlocks({ tableBlocks = [] }) {
   const visibleBlocks = Array.isArray(tableBlocks)
     ? tableBlocks.filter((block) => Array.isArray(block?.columns) && Array.isArray(block?.rows))
@@ -368,6 +427,23 @@ function SurveyResponsePage() {
 
   const handleMultipleChoiceChange = (questionKey, option, checked) => {
     setLastQuestionId(questionKey);
+    const targetQuestion = (survey?.questions ?? []).find((question, index) => getQuestionKey(question, index) === questionKey);
+    const maxSelections = targetQuestion ? getMaxSelections(targetQuestion) : null;
+    const currentValues = Array.isArray(answers[questionKey]) ? answers[questionKey] : [];
+    const wouldExceedMax =
+      checked &&
+      maxSelections &&
+      !currentValues.includes(option) &&
+      currentValues.length + 1 > maxSelections;
+
+    if (wouldExceedMax) {
+      setFieldErrors((current) => ({
+        ...current,
+        [questionKey]: `최대 ${maxSelections}개까지 선택할 수 있습니다.`,
+      }));
+      return;
+    }
+
     setAnswers((current) => {
       const currentValues = Array.isArray(current[questionKey]) ? current[questionKey] : [];
       const nextValues = checked
@@ -490,7 +566,7 @@ function SurveyResponsePage() {
     };
 
     (survey?.questions ?? []).forEach((question, index) => {
-      const quotaField = question?.meta?.quotaField;
+      const quotaField = getQuotaField(question);
 
       if (quotaField !== 'area' && quotaField !== 'birthYear') {
         return;
@@ -1126,9 +1202,19 @@ function SurveyResponsePage() {
       const questionIndex = survey.questions.findIndex((item) => item.id === question.id);
       const resolvedAnswer = resolveAnswer(question, questionIndex);
       const questionKey = getQuestionKey(question, questionIndex);
+      const maxSelections = normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE ? getMaxSelections(question) : null;
 
       if (isOtherSelected(question, questionKey) && !String(otherInputs[questionKey] ?? '').trim()) {
         nextErrors[questionKey] = '기타 내용을 입력해주세요.';
+        return;
+      }
+
+      if (
+        maxSelections &&
+        Array.isArray(answers[questionKey]) &&
+        answers[questionKey].length > maxSelections
+      ) {
+        nextErrors[questionKey] = `최대 ${maxSelections}개까지 선택할 수 있습니다.`;
         return;
       }
 
@@ -1179,9 +1265,11 @@ function SurveyResponsePage() {
       const questionIndex = survey.questions.findIndex((item) => item.id === question.id);
       const resolvedAnswer = resolveAnswer(question, questionIndex);
       const questionKey = getQuestionKey(question, questionIndex);
+      const maxSelections = normalizedType === QUESTION_TYPES.MULTIPLE_CHOICE ? getMaxSelections(question) : null;
 
       return (
         (isOtherSelected(question, questionKey) && !String(otherInputs[questionKey] ?? '').trim()) ||
+        (maxSelections && Array.isArray(answers[questionKey]) && answers[questionKey].length > maxSelections) ||
         (question.required && isAnswerEmpty(question, resolvedAnswer)) ||
         (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX && resolvedAnswer !== true) ||
         (question.meta?.consentApproval && resolvedAnswer !== true && resolvedAnswer !== '동의합니다')
@@ -1552,7 +1640,7 @@ function SurveyResponsePage() {
 
     if (
       regionAgeQuotaEnabled &&
-      currentSectionQuestions.some((question) => question.meta?.quotaField === 'area' || question.meta?.quotaField === 'birthYear')
+      currentSectionQuestions.some((question) => getQuotaField(question) === 'area' || getQuotaField(question) === 'birthYear')
     ) {
       if (!resolvedQuota.valid) {
         setMessage('Q1 거주지역과 Q4 출생연도를 확인해주세요.');
@@ -1827,6 +1915,26 @@ function SurveyResponsePage() {
       setLastQuestionId('');
       setAutosaveState({ status: 'idle', savedAt: null });
     } catch (error) {
+      if (
+        error?.code === 'permission-denied' ||
+        String(error?.message ?? '').includes('Missing or insufficient permissions')
+      ) {
+        const safeSurveyId = sanitizeFirestoreDocumentSegment(survey.id);
+        const safeClientSubmitId = sanitizeFirestoreDocumentSegment(clientSubmitId);
+
+        console.error('[SurveyResponsePage] submit permission-denied', {
+          surveyPath: `surveys/${survey.id}`,
+          responsePath: `responses/${safeSurveyId}__${safeClientSubmitId}`,
+          clientSubmitLockPath: `surveys/${survey.id}/clientSubmitLocks/${safeClientSubmitId}`,
+          quotaConfigPath: `surveys/${survey.id}/quotaConfig/main`,
+          quotaCountsPath: `surveys/${survey.id}/quotaCounts/main`,
+          surveyStatus: survey.status,
+          publicState: publicState.key,
+          quotaEnabled: Boolean(survey.quotaConfig?.enabled),
+          code: error?.code ?? '',
+          message: error?.message ?? '',
+        });
+      }
       setMessage(getSubmitErrorMessage(error));
       setSubmitting(false);
       submitLockedRef.current = false;

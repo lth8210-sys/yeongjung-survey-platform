@@ -1639,6 +1639,28 @@ function isSurveyOwnedByUser(survey = {}, userAccess = {}) {
   );
 }
 
+function mergeUniqueSurveys(...surveyLists) {
+  const surveyById = new Map();
+
+  surveyLists.flat().filter(Boolean).forEach((survey) => {
+    if (!surveyById.has(survey.id)) {
+      surveyById.set(survey.id, survey);
+    }
+  });
+
+  return [...surveyById.values()];
+}
+
+async function fetchSurveysByConstraint(pathLabel, ...constraints) {
+  try {
+    const snapshot = await getDocs(query(surveysCollection, ...constraints));
+    return snapshot.docs.map(mapSurveyDoc);
+  } catch (error) {
+    logFirestoreReadDenied(pathLabel, error);
+    throw error;
+  }
+}
+
 export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   ensureFirestoreReady();
 
@@ -1649,24 +1671,48 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
 
   if (userAccess.role === USER_ROLES.CREATOR && (userAccess.uid || normalizedEmail)) {
-    try {
-      const snapshot = await getDocs(surveysCollection);
-      const visibleSurveys = snapshot.docs
-        .map(mapSurveyDoc)
-        .filter(
-          (survey) =>
-            isSurveyOwnedByUser(survey, userAccess) ||
-            normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
-        );
+    const queryTasks = [
+      fetchSurveysByConstraint('surveys?visibility==organization', where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION)),
+    ];
 
-      return filterDeletedSurveys(
-        sortSurveysByCreatedAtDesc(visibleSurveys),
-        options.includeDeleted,
+    if (userAccess.uid) {
+      queryTasks.push(
+        fetchSurveysByConstraint('surveys?ownerUid==currentUser', where('ownerUid', '==', userAccess.uid)),
+        fetchSurveysByConstraint('surveys?createdByUid==currentUser', where('createdByUid', '==', userAccess.uid)),
+        fetchSurveysByConstraint('surveys?ownerId==currentUser', where('ownerId', '==', userAccess.uid)),
+        fetchSurveysByConstraint('surveys?userId==currentUser', where('userId', '==', userAccess.uid)),
+        fetchSurveysByConstraint('surveys?createdBy.uid==currentUser', where('createdBy.uid', '==', userAccess.uid)),
       );
-    } catch (error) {
-      logFirestoreReadDenied('surveys', error);
-      throw error;
     }
+
+    if (normalizedEmail) {
+      queryTasks.push(
+        fetchSurveysByConstraint('surveys?ownerEmail==currentUser', where('ownerEmail', '==', normalizedEmail)),
+        fetchSurveysByConstraint('surveys?createdByEmail==currentUser', where('createdByEmail', '==', normalizedEmail)),
+        fetchSurveysByConstraint('surveys?createdBy.email==currentUser', where('createdBy.email', '==', normalizedEmail)),
+      );
+    }
+
+    const settledResults = await Promise.allSettled(queryTasks);
+    const rejectedResults = settledResults.filter((result) => result.status === 'rejected');
+    const results = settledResults
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value);
+
+    if (results.length === 0 && rejectedResults.length > 0) {
+      throw rejectedResults[0].reason;
+    }
+
+    const visibleSurveys = mergeUniqueSurveys(...results).filter(
+      (survey) =>
+        isSurveyOwnedByUser(survey, userAccess) ||
+        normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
+    );
+
+    return filterDeletedSurveys(
+      sortSurveysByCreatedAtDesc(visibleSurveys),
+      options.includeDeleted,
+    );
   }
 
   if (userAccess.role) {
