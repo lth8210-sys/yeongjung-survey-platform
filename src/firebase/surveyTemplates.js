@@ -22,6 +22,25 @@ import { createQuestionId, createSectionId } from './surveyNormalize';
 
 const surveyTemplatesCollection = db ? collection(db, 'survey_templates') : null;
 
+function isPermissionDeniedError(error) {
+  return (
+    error?.code === 'permission-denied' ||
+    String(error?.message ?? '').includes('Missing or insufficient permissions')
+  );
+}
+
+function logFirestoreReadDenied(path, error) {
+  if (!isPermissionDeniedError(error)) {
+    return;
+  }
+
+  console.error('[Firestore permission-denied]', {
+    path,
+    code: error?.code ?? '',
+    message: error?.message ?? '',
+  });
+}
+
 export const SURVEY_TEMPLATE_CATEGORIES = [
   '만족도 조사',
   '욕구 조사',
@@ -169,9 +188,19 @@ export function instantiateSurveyTemplate(template = {}) {
 
 export async function fetchSurveyTemplates({ includeInactive = false } = {}) {
   ensureFirestoreReady();
-  const snapshot = includeInactive
-    ? await getDocs(surveyTemplatesCollection)
-    : await getDocs(query(surveyTemplatesCollection, where('active', '==', true)));
+  let snapshot;
+
+  try {
+    snapshot = includeInactive
+      ? await getDocs(surveyTemplatesCollection)
+      : await getDocs(query(surveyTemplatesCollection, where('active', '==', true)));
+  } catch (error) {
+    logFirestoreReadDenied(
+      includeInactive ? 'survey_templates' : 'survey_templates?active==true',
+      error,
+    );
+    throw error;
+  }
 
   return snapshot.docs
     .map(mapTemplateDoc)
@@ -184,7 +213,15 @@ export async function fetchSurveyTemplateById(templateId) {
   const normalizedTemplateId = String(templateId ?? '').trim();
   if (!normalizedTemplateId) return null;
 
-  const snapshot = await getDoc(doc(surveyTemplatesCollection, normalizedTemplateId));
+  let snapshot;
+
+  try {
+    snapshot = await getDoc(doc(surveyTemplatesCollection, normalizedTemplateId));
+  } catch (error) {
+    logFirestoreReadDenied(`survey_templates/${normalizedTemplateId}`, error);
+    throw error;
+  }
+
   return snapshot.exists() ? mapTemplateDoc(snapshot) : null;
 }
 

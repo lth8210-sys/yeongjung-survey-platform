@@ -347,6 +347,7 @@ function SurveyResponsesAdminPage() {
   const [allResponses, setAllResponses] = useState([]);
   const [analyticsStatus, setAnalyticsStatus] = useState('loading');
   const [freeTextExpanded, setFreeTextExpanded] = useState(false);
+  const [showAllQuotaShortages, setShowAllQuotaShortages] = useState(false);
   const [statisticsExcelLoading, setStatisticsExcelLoading] = useState(false);
   const [statisticsExcelMessage, setStatisticsExcelMessage] = useState('');
   const [reportSettingsOpen, setReportSettingsOpen] = useState(false);
@@ -1442,11 +1443,31 @@ function SurveyResponsesAdminPage() {
 
           {regionAgeQuotaDashboard.shortageTop.length > 0 && (
             <div className="option-status-list">
-              {regionAgeQuotaDashboard.shortageTop.map((cell, index) => (
+              <div className="builder-header-row">
+                <div>
+                  <h3>부족 표본 TOP 5</h3>
+                  <p className="meta-description">
+                    부족 인원 많은 순, 달성률 낮은 순, 권역/연령 순으로 정렬합니다.
+                  </p>
+                </div>
+                {regionAgeQuotaDashboard.shortageCells.length > regionAgeQuotaDashboard.shortageTop.length && (
+                  <button
+                    className="secondary-button"
+                    onClick={() => setShowAllQuotaShortages((current) => !current)}
+                    type="button"
+                  >
+                    {showAllQuotaShortages ? 'TOP 5만 보기' : '전체 부족 현황 보기'}
+                  </button>
+                )}
+              </div>
+              {(showAllQuotaShortages
+                ? regionAgeQuotaDashboard.shortageCells
+                : regionAgeQuotaDashboard.shortageTop
+              ).map((cell, index) => (
                 <div className="inline-note" key={`shortage-${cell.regionId}-${cell.ageGroupId}`}>
                   <strong>{index + 1}. {cell.regionLabel} {cell.ageGroupLabel}</strong>
                   {' '}
-                  {cell.shortage}명 부족
+                  {cell.shortage}명 부족 ({cell.current}/{cell.target})
                 </div>
               ))}
             </div>

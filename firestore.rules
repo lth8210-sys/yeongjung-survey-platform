@@ -106,24 +106,52 @@ service cloud.firestore {
                 : status;
     }
 
+    function hasActiveStatusFlag(data) {
+      return (
+        data.keys().hasAny(['status']) &&
+        normalizeStoredStatus(data.status) == 'active'
+      ) || (
+        data.keys().hasAny(['isActive']) &&
+        data.isActive == true
+      ) || (
+        data.keys().hasAny(['active']) &&
+        data.active == true
+      ) || (
+        data.keys().hasAny(['is_active']) &&
+        data.is_active == true
+      );
+    }
+
     function normalizeStoredUserStatus(data) {
-      return data.status != null
-        ? normalizeStoredStatus(data.status)
-        : data.isActive is bool
-          ? (data.isActive ? 'active' : 'inactive')
-          : data.active is bool
-            ? (data.active ? 'active' : 'inactive')
-            : data.is_active is bool
-              ? (data.is_active ? 'active' : 'inactive')
-              : 'active';
+      return hasActiveStatusFlag(data)
+        ? 'active'
+        : data.keys().hasAny(['status'])
+          ? normalizeStoredStatus(data.status)
+          : data.keys().hasAny(['isActive']) && data.isActive is bool
+            ? (data.isActive ? 'active' : 'inactive')
+            : data.keys().hasAny(['active']) && data.active is bool
+              ? (data.active ? 'active' : 'inactive')
+              : data.keys().hasAny(['is_active']) && data.is_active is bool
+                ? (data.is_active ? 'active' : 'inactive')
+                : 'active';
     }
 
     function isAtLeastAdmin() {
       return currentStatus() == 'active' && currentRole() in ['super_admin', 'admin'];
     }
 
+    // TODO: users/{uid} 기반 role/status 평가 안정화 후 임시 제작자 이메일 allowlist를 제거한다.
+    function isCreatorEmail() {
+      return isSignedIn() && userEmail() in [
+        "levelup@yeongjung.or.kr"
+      ];
+    }
+
     function isCreator() {
-      return currentStatus() == 'active' && currentRole() == 'creator';
+      return isCreatorEmail() || (
+        currentStatus() == 'active' &&
+        currentRole() == 'creator'
+      );
     }
 
     function isViewer() {
@@ -230,6 +258,10 @@ service cloud.firestore {
       );
     }
 
+    function canListManagedSurveys() {
+      return isAtLeastAdmin() || isCreator();
+    }
+
     function canEditManagedSurvey(data) {
       return isInternalUser() && (
         isAtLeastAdmin() ||
@@ -244,6 +276,147 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         isSurveyOwner(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
       );
+    }
+
+    function canReadManagedReport(reportId, data) {
+      return isAtLeastAdmin() || (
+        isCreator() &&
+        reportId is string &&
+        exists(/databases/$(database)/documents/surveys/$(reportId)) &&
+        isSurveyOwner(get(/databases/$(database)/documents/surveys/$(reportId)).data)
+      ) || (
+        (
+          data.keys().hasAny(["surveyId"]) &&
+          data.surveyId is string &&
+          exists(/databases/$(database)/documents/surveys/$(data.surveyId)) &&
+          canReadReportForSurvey(data.surveyId)
+        )
+      );
+    }
+
+    function canReadReportForSurvey(surveyId) {
+      return surveyId is string &&
+        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+        (
+          (
+            isCreator() &&
+            isSurveyOwner(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
+          ) ||
+          (
+            currentStatus() == 'active' &&
+            isOrganizationVisibleSurvey(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
+          )
+        );
+    }
+
+    function canListManagedReports() {
+      return isAtLeastAdmin() || isCreator();
+    }
+
+    function validReportCreate() {
+      return canManageReportForSurvey(request.resource.data.surveyId) &&
+        request.resource.data.keys().hasOnly([
+          "surveyId",
+          "title",
+          "periodStart",
+          "periodEnd",
+          "period",
+          "target",
+          "department",
+          "author",
+          "reportDate",
+          "sections",
+          "status",
+          "copiedFromReportId",
+          "deleted",
+          "deletedAt",
+          "deletedBy",
+          "createdBy",
+          "updatedBy",
+          "createdAt",
+          "updatedAt"
+        ]) &&
+        request.resource.data.surveyId is string &&
+        request.resource.data.title is string &&
+        request.resource.data.periodStart is string &&
+        request.resource.data.periodEnd is string &&
+        request.resource.data.period is string &&
+        request.resource.data.target is string &&
+        request.resource.data.department is string &&
+        request.resource.data.author is string &&
+        request.resource.data.reportDate is string &&
+        request.resource.data.sections is map &&
+        request.resource.data.status in ["draft", "final"] &&
+        request.resource.data.deleted is bool &&
+        request.resource.data.updatedBy is map &&
+        request.resource.data.updatedAt == request.time &&
+        (
+          !request.resource.data.keys().hasAny(["copiedFromReportId"]) ||
+          request.resource.data.copiedFromReportId is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["deletedAt"]) ||
+          request.resource.data.deletedAt == null ||
+          request.resource.data.deletedAt == request.time
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["deletedBy"]) ||
+          request.resource.data.deletedBy is map
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["createdBy"]) ||
+          request.resource.data.createdBy is map
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["createdAt"]) ||
+          request.resource.data.createdAt == request.time
+        );
+    }
+
+    function validReportUpdate() {
+      let changedKeys = request.resource.data.diff(resource.data).changedKeys();
+
+      return resource.data.keys().hasAny(["surveyId"]) &&
+        request.resource.data.surveyId == resource.data.surveyId &&
+        canManageReportForSurvey(resource.data.surveyId) &&
+        changedKeys.hasOnly([
+          "title",
+          "periodStart",
+          "periodEnd",
+          "period",
+          "target",
+          "department",
+          "author",
+          "reportDate",
+          "sections",
+          "status",
+          "deleted",
+          "deletedAt",
+          "deletedBy",
+          "updatedBy",
+          "updatedAt"
+        ]) &&
+        request.resource.data.title is string &&
+        request.resource.data.periodStart is string &&
+        request.resource.data.periodEnd is string &&
+        request.resource.data.period is string &&
+        request.resource.data.target is string &&
+        request.resource.data.department is string &&
+        request.resource.data.author is string &&
+        request.resource.data.reportDate is string &&
+        request.resource.data.sections is map &&
+        request.resource.data.status in ["draft", "final"] &&
+        request.resource.data.deleted is bool &&
+        request.resource.data.updatedBy is map &&
+        request.resource.data.updatedAt == request.time &&
+        (
+          !changedKeys.hasAny(["deletedAt"]) ||
+          request.resource.data.deletedAt == request.time
+        ) &&
+        (
+          !changedKeys.hasAny(["deletedBy"]) ||
+          request.resource.data.deletedBy is map
+        );
     }
 
     function canReadManagedResponse(data) {
@@ -375,7 +548,8 @@ service cloud.firestore {
     }
 
     match /surveys/{surveyId} {
-      allow read: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data);
+      allow get: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data);
+      allow list: if canListManagedSurveys();
       allow create: if validManagedSurveyCreate();
       allow delete: if canEditManagedSurvey(resource.data);
       allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
@@ -464,79 +638,16 @@ service cloud.firestore {
     }
 
     match /survey_reports/{reportId} {
-      // 관리자는 레거시 문서의 surveyId/deleted 필드 유무와 관계없이 전체 목록 조회 가능.
-      // 제작자는 surveyId 조건이 있는 본인 소유 설문 보고서만 조회 가능.
-      allow get, list: if isAtLeastAdmin() ||
-        (
-          resource.data.keys().hasAny(["surveyId"]) &&
-          canManageReportForSurvey(resource.data.surveyId)
-        );
-      allow create, update: if canManageReportForSurvey(request.resource.data.surveyId) &&
-        request.resource.data.keys().hasOnly([
-          "surveyId",
-          "title",
-          "periodStart",
-          "periodEnd",
-          "period",
-          "target",
-          "department",
-          "author",
-          "reportDate",
-          "sections",
-          "status",
-          "copiedFromReportId",
-          "deleted",
-          "deletedAt",
-          "deletedBy",
-          "createdBy",
-          "updatedBy",
-          "createdAt",
-          "updatedAt"
-        ]) &&
-        request.resource.data.title is string &&
-        request.resource.data.periodStart is string &&
-        request.resource.data.periodEnd is string &&
-        request.resource.data.period is string &&
-        request.resource.data.target is string &&
-        request.resource.data.department is string &&
-        request.resource.data.author is string &&
-        request.resource.data.reportDate is string &&
-        request.resource.data.sections is map &&
-        request.resource.data.status in ["draft", "final"] &&
-        request.resource.data.deleted is bool &&
-        request.resource.data.updatedBy is map &&
-        request.resource.data.updatedAt == request.time &&
-        (
-          !request.resource.data.keys().hasAny(["copiedFromReportId"]) ||
-          request.resource.data.copiedFromReportId is string
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["deletedAt"]) ||
-          request.resource.data.deletedAt == null ||
-          request.resource.data.deletedAt == request.time ||
-          request.resource.data.deletedAt == resource.data.deletedAt
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["deletedBy"]) ||
-          request.resource.data.deletedBy is map
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["createdBy"]) ||
-          request.resource.data.createdBy is map
-        ) &&
-        (
-          !request.resource.data.keys().hasAny(["createdAt"]) ||
-          request.resource.data.createdAt == request.time ||
-          request.resource.data.createdAt == resource.data.createdAt
-        );
+      allow get: if canReadManagedReport(reportId, resource.data);
+      allow list: if canListManagedReports();
+      allow create: if validReportCreate();
+      allow update: if validReportUpdate();
       allow delete: if false;
     }
 
     match /survey_templates/{templateId} {
-      allow get, list: if isAtLeastAdmin() || (
-        isCreator() &&
-        resource.data.active == true
-      );
+      allow get: if isAtLeastAdmin() || isCreator();
+      allow list: if isAtLeastAdmin() || isCreator();
       allow create: if (isAtLeastAdmin() || isCreator()) &&
         request.resource.data.keys().hasOnly([
           "name",

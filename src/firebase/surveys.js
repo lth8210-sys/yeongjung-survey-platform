@@ -4,7 +4,6 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  getDocFromServer,
   getDocs,
   limit,
   orderBy,
@@ -103,6 +102,25 @@ const surveyReportsCollection = db ? collection(db, 'survey_reports') : null;
 const warnedAuditLogFailures = new Set();
 
 const LEGACY_PUBLISHED_STATUSES = ['active'];
+
+function isPermissionDeniedError(error) {
+  return (
+    error?.code === 'permission-denied' ||
+    String(error?.message ?? '').includes('Missing or insufficient permissions')
+  );
+}
+
+function logFirestoreReadDenied(path, error) {
+  if (!isPermissionDeniedError(error)) {
+    return;
+  }
+
+  console.error('[Firestore permission-denied]', {
+    path,
+    code: error?.code ?? '',
+    message: error?.message ?? '',
+  });
+}
 
 export const QUOTA_CLOSE_MODES = {
   BLOCK: 'block',
@@ -610,6 +628,8 @@ export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
   const normalizedCounts = normalizeQuotaCounts(counts, normalizedConfig);
   const rows = normalizedConfig.regions.map((region) => {
     const cells = normalizedConfig.ageGroups.map((ageGroup) => {
+      const regionIndex = normalizedConfig.regions.findIndex((item) => item.id === region.id);
+      const ageGroupIndex = normalizedConfig.ageGroups.findIndex((item) => item.id === ageGroup.id);
       const target = normalizeQuotaNumber(normalizedConfig.matrix?.[region.id]?.[ageGroup.id], 0);
       const current = normalizeQuotaNumber(normalizedCounts.cells?.[region.id]?.[ageGroup.id], 0);
       const percent = target > 0 ? Math.round((current / target) * 100) : 0;
@@ -626,8 +646,10 @@ export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
       return {
         regionId: region.id,
         regionLabel: region.label,
+        regionIndex,
         ageGroupId: ageGroup.id,
         ageGroupLabel: ageGroup.label,
+        ageGroupIndex,
         current,
         target,
         percent,
@@ -657,6 +679,23 @@ export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
   const targetTotal = rows.reduce((sum, row) => sum + row.targetTotal, 0);
   const currentTotal = normalizedCounts.total || rows.reduce((sum, row) => sum + row.currentTotal, 0);
   const allCells = rows.flatMap((row) => row.cells);
+  const shortageCells = allCells
+    .filter((cell) => cell.shortage > 0)
+    .sort((first, second) => {
+      if (second.shortage !== first.shortage) {
+        return second.shortage - first.shortage;
+      }
+
+      if (first.percent !== second.percent) {
+        return first.percent - second.percent;
+      }
+
+      if (first.regionIndex !== second.regionIndex) {
+        return first.regionIndex - second.regionIndex;
+      }
+
+      return first.ageGroupIndex - second.ageGroupIndex;
+    });
 
   return {
     config: normalizedConfig,
@@ -668,10 +707,8 @@ export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
     percent: targetTotal > 0 ? Math.round((currentTotal / targetTotal) * 100) : 0,
     overQuotaCount: allCells.reduce((sum, cell) => sum + Math.max(0, cell.current - cell.target), 0),
     closedCellCount: allCells.filter((cell) => cell.target > 0 && cell.current >= cell.target).length,
-    shortageTop: allCells
-      .filter((cell) => cell.shortage > 0)
-      .sort((first, second) => second.shortage - first.shortage)
-      .slice(0, 5),
+    shortageCells,
+    shortageTop: shortageCells.slice(0, 5),
   };
 }
 
@@ -1297,7 +1334,14 @@ export function sanitizeSurveySections(sections = [], questions = []) {
 
 async function waitForSurveyDocument(surveyId, maxAttempts = 6, delayMs = 250) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const snapshot = await getDoc(doc(db, 'surveys', surveyId));
+    let snapshot;
+
+    try {
+      snapshot = await getDoc(doc(db, 'surveys', surveyId));
+    } catch (error) {
+      logFirestoreReadDenied(`surveys/${surveyId}`, error);
+      throw error;
+    }
 
     if (snapshot.exists()) {
       return mapSurveyDoc(snapshot);
@@ -1362,8 +1406,14 @@ async function fetchSurveyQuotaData(surveyId) {
   }
 
   const [configSnapshot, countsSnapshot] = await Promise.all([
-    getDoc(doc(db, 'surveys', surveyId, 'quotaConfig', 'main')),
-    getDoc(doc(db, 'surveys', surveyId, 'quotaCounts', 'main')),
+    getDoc(doc(db, 'surveys', surveyId, 'quotaConfig', 'main')).catch((error) => {
+      logFirestoreReadDenied(`surveys/${surveyId}/quotaConfig/main`, error);
+      throw error;
+    }),
+    getDoc(doc(db, 'surveys', surveyId, 'quotaCounts', 'main')).catch((error) => {
+      logFirestoreReadDenied(`surveys/${surveyId}/quotaCounts/main`, error);
+      throw error;
+    }),
   ]);
   const quotaConfig = normalizeRegionAgeQuotaConfig(
     configSnapshot.exists()
@@ -1550,183 +1600,68 @@ export async function fetchAdminSurveys(options = {}) {
   );
 }
 
+function isSurveyOwnedByUser(survey = {}, userAccess = {}) {
+  const uid = String(userAccess.uid ?? '').trim();
+  const email = String(userAccess.email ?? '').trim().toLowerCase();
+
+  return Boolean(
+    uid &&
+      (survey.ownerUid === uid ||
+        survey.createdByUid === uid ||
+        survey.ownerId === uid ||
+        survey.userId === uid ||
+        survey.createdBy?.uid === uid),
+  ) || Boolean(
+    email &&
+      (String(survey.ownerEmail ?? '').trim().toLowerCase() === email ||
+        String(survey.createdByEmail ?? '').trim().toLowerCase() === email ||
+        String(survey.createdBy?.email ?? '').trim().toLowerCase() === email),
+  );
+}
+
 export async function fetchManagedSurveys(userAccess = {}, options = {}) {
   ensureFirestoreReady();
-  const rawEmail = String(userAccess.email ?? '').trim();
-  const normalizedEmail = rawEmail.toLowerCase();
-
-  console.group('[fetchManagedSurveys] 진단 시작');
-  console.log('userAccess.uid:', userAccess.uid);
-  console.log('userAccess.email:', normalizedEmail);
-  console.log('userAccess.role:', userAccess.role);
-  console.log('options:', options);
-
-  // 진단: Firestore user 문서 직접 읽기 (캐시 포함)
-  if (userAccess.uid && db) {
-    try {
-      const userDocSnap = await getDoc(doc(db, 'users', userAccess.uid));
-      if (userDocSnap.exists()) {
-        const ud = userDocSnap.data();
-        console.log('Firestore user 문서 (캐시 포함):', {
-          role: ud.role, status: ud.status, isActive: ud.isActive,
-          active: ud.active, is_active: ud.is_active, email: ud.email,
-          fromCache: userDocSnap.metadata.fromCache,
-        });
-      } else {
-        console.warn('Firestore user 문서 없음 (hasUserDoc=false) → currentStatus()="" → isCreator()=false');
-      }
-    } catch (e) {
-      console.warn('user 문서 읽기 실패:', e.code, e.message);
-    }
-
-    // 진단: 서버에서 직접 읽기 (캐시 우회) - hasUserDoc()가 실제로 true인지 검증
-    try {
-      const serverSnap = await getDocFromServer(doc(db, 'users', userAccess.uid));
-      if (serverSnap.exists()) {
-        const ud = serverSnap.data();
-        console.log('[진단] user 문서 서버 직접 읽기: 존재 →', { role: ud.role, status: ud.status, email: ud.email });
-      } else {
-        console.error('[진단] user 문서 서버에 없음! → hasUserDoc()=false → isCreator()=false. 문서를 재생성해야 합니다.');
-      }
-    } catch (e) {
-      console.warn('[진단] 서버 직접 읽기 실패:', e.code, e.message);
-    }
-
-    // 진단: survey_templates LIST (isCreator() 체크가 있는 다른 컬렉션)
-    // 성공하면 isCreator()가 Firestore 규칙에서 true → 문제는 surveys 컬렉션에 한정
-    // 실패하면 isCreator()가 Firestore 규칙에서 false → 규칙 자체 문제
-    try {
-      const templatesSnap = await getDocs(query(collection(db, 'survey_templates'), where('active', '==', true), limit(1)));
-      console.log('[진단] survey_templates LIST (isCreator()): 성공 →', templatesSnap.size, '건');
-    } catch (e) {
-      console.warn('[진단] survey_templates LIST 실패 → isCreator()가 Firestore 규칙에서 false:', e.code, e.message);
-    }
-
-    // 진단: surveys getDoc (GET vs LIST 비교)
-    // ownerUid 쿼리로 먼저 ID 확보 불가 → 대신 org 쿼리를 limit(1)으로 먼저 테스트
-    try {
-      const orgTestSnap = await getDocs(query(surveysCollection, where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION), limit(1)));
-      console.log('[진단] org 쿼리 limit(1): 성공 →', orgTestSnap.size, '건');
-      if (orgTestSnap.size > 0) {
-        const firstId = orgTestSnap.docs[0].id;
-        // 같은 문서를 getDoc으로도 접근해서 GET vs LIST 비교
-        try {
-          await getDoc(doc(db, 'surveys', firstId));
-          console.log('[진단] surveys getDoc (canReadManagedSurvey via GET): 성공 → GET은 허용');
-        } catch (e2) {
-          console.warn('[진단] surveys getDoc 실패:', e2.code, e2.message);
-        }
-      }
-    } catch (e) {
-      console.warn('[진단] org 쿼리 limit(1) 실패:', e.code, e.message);
-    }
-  }
 
   if (canManageAllSurveys(userAccess.role)) {
-    console.log('경로: fetchAdminSurveys (admin/superadmin)');
-    console.groupEnd();
     return fetchAdminSurveys(options);
   }
 
-  if (!userAccess.role) {
-    console.warn('role 없음 → 빈 배열 반환');
-    console.groupEnd();
-    return [];
-  }
-
-  const queryLabels = ['organization'];
-  const managedQueries = [
-    getDocs(query(surveysCollection, where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION))),
-  ];
+  const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
 
   if (userAccess.role === USER_ROLES.CREATOR && (userAccess.uid || normalizedEmail)) {
-    console.log('경로: creator 전용 쿼리 추가');
-    if (userAccess.uid) {
-      queryLabels.push('ownerUid', 'createdByUid', 'ownerId', 'userId', 'createdBy.uid');
-      managedQueries.push(getDocs(query(surveysCollection, where('ownerUid', '==', userAccess.uid))));
-      managedQueries.push(getDocs(query(surveysCollection, where('createdByUid', '==', userAccess.uid))));
-      managedQueries.push(getDocs(query(surveysCollection, where('ownerId', '==', userAccess.uid))));
-      managedQueries.push(getDocs(query(surveysCollection, where('userId', '==', userAccess.uid))));
-      managedQueries.push(getDocs(query(surveysCollection, where('createdBy.uid', '==', userAccess.uid))));
-    }
+    try {
+      const snapshot = await getDocs(surveysCollection);
+      const ownedSurveys = snapshot.docs
+        .map(mapSurveyDoc)
+        .filter((survey) => isSurveyOwnedByUser(survey, userAccess));
 
-    if (normalizedEmail) {
-      const emailVariants = [...new Set([normalizedEmail, rawEmail].filter(Boolean))];
-      emailVariants.forEach((email) => {
-        queryLabels.push(`ownerEmail:${email}`);
-        managedQueries.push(getDocs(query(surveysCollection, where('ownerEmail', '==', email))));
-      });
-      emailVariants.forEach((email) => {
-        queryLabels.push(`createdByEmail:${email}`);
-        managedQueries.push(getDocs(query(surveysCollection, where('createdByEmail', '==', email))));
-      });
-      emailVariants.forEach((email) => {
-        queryLabels.push(`createdBy.email:${email}`);
-        managedQueries.push(getDocs(query(surveysCollection, where('createdBy.email', '==', email))));
-      });
+      return filterDeletedSurveys(
+        sortSurveysByCreatedAtDesc(ownedSurveys),
+        options.includeDeleted,
+      );
+    } catch (error) {
+      logFirestoreReadDenied('surveys', error);
+      throw error;
     }
-  } else {
-    console.log(`경로: role=${userAccess.role} → organization 쿼리만 실행`);
   }
 
-  const allResults = await Promise.allSettled(managedQueries);
+  if (userAccess.role) {
+    try {
+      const snapshot = await getDocs(
+        query(surveysCollection, where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION)),
+      );
 
-  console.log('--- 쿼리별 결과 ---');
-  allResults.forEach((result, index) => {
-    const label = queryLabels[index] ?? `query[${index}]`;
-    if (result.status === 'fulfilled') {
-      console.log(`  ${label}: ${result.value.docs.length}건`);
-    } else {
-      console.warn(`  ${label}: 실패 →`, result.reason?.code, result.reason?.message ?? result.reason);
+      return filterDeletedSurveys(
+        sortSurveysByCreatedAtDesc(snapshot.docs.map(mapSurveyDoc)),
+        options.includeDeleted,
+      );
+    } catch (error) {
+      logFirestoreReadDenied('surveys?visibility==organization', error);
+      throw error;
     }
-  });
-
-  const snapshots = allResults
-    .filter((result) => result.status === 'fulfilled')
-    .map((result) => result.value);
-  const mergedDocs = snapshots.flatMap((snapshot) => snapshot.docs).reduce((result, item) => {
-    result.set(item.id, item);
-    return result;
-  }, new Map());
-
-  const allMapped = [...mergedDocs.values()].map(mapSurveyDoc);
-
-  console.log(`--- 중복제거 후 총 ${allMapped.length}건 ---`);
-  if (allMapped.length > 0) {
-    console.log('문서 구조 샘플 (최대 3건):');
-    allMapped.slice(0, 3).forEach((s) => {
-      console.log({
-        id: s.id,
-        title: s.title,
-        status: s.storedStatus,
-        deleted: s.deleted,
-        permanentlyDeleted: s.permanentlyDeleted,
-        visibility: s.visibility,
-        ownerUid: s.ownerUid,
-        createdByUid: s.createdByUid,
-        ownerId: s.ownerId,
-        userId: s.userId,
-        'createdBy.uid': s.createdBy?.uid,
-        ownerEmail: s.ownerEmail,
-        createdByEmail: s.createdByEmail,
-        'createdBy.email': s.createdBy?.email,
-      });
-    });
   }
 
-  const filtered = filterDeletedSurveys(
-    sortSurveysByCreatedAtDesc(allMapped),
-    options.includeDeleted,
-  );
-
-  console.log(`filterDeletedSurveys 후: ${filtered.length}건 (includeDeleted=${options.includeDeleted})`);
-  if (allMapped.length > 0 && filtered.length < allMapped.length) {
-    const removedIds = allMapped.filter((s) => !filtered.find((f) => f.id === s.id)).map((s) => `${s.id}(deleted=${s.deleted},perm=${s.permanentlyDeleted})`);
-    console.warn('필터로 제거된 설문:', removedIds);
-  }
-
-  console.groupEnd();
-  return filtered;
+  return [];
 }
 
 export async function fetchPublishedSurveys(options = {}) {
@@ -1747,7 +1682,14 @@ export async function fetchPublishedSurveys(options = {}) {
 
 export async function fetchSurveyById(surveyId) {
   ensureFirestoreReady();
-  const snapshot = await getDoc(doc(db, 'surveys', surveyId));
+  let snapshot;
+
+  try {
+    snapshot = await getDoc(doc(db, 'surveys', surveyId));
+  } catch (error) {
+    logFirestoreReadDenied(`surveys/${surveyId}`, error);
+    throw error;
+  }
 
   if (!snapshot.exists()) {
     return null;
@@ -2140,8 +2082,19 @@ export async function changeSurveyStatus(surveyId, status) {
 
 export async function fetchResponseCountBySurveyId(surveyId) {
   ensureFirestoreReady();
-  const snapshot = await getDocs(query(responsesCollection, where('surveyId', '==', surveyId)));
-  return snapshot.size;
+
+  try {
+    const snapshot = await getDocs(query(responsesCollection, where('surveyId', '==', surveyId)));
+    return snapshot.size;
+  } catch (error) {
+    logFirestoreReadDenied(`responses?surveyId==${surveyId}`, error);
+
+    if (isPermissionDeniedError(error)) {
+      return 0;
+    }
+
+    throw error;
+  }
 }
 
 export async function deleteSurvey(surveyId, deletedBy = null) {
@@ -2725,7 +2678,14 @@ export async function fetchSurveyReport(surveyId, reportId = '') {
     return null;
   }
 
-  const snapshot = await getDoc(doc(surveyReportsCollection, normalizedReportId));
+  let snapshot;
+
+  try {
+    snapshot = await getDoc(doc(surveyReportsCollection, normalizedReportId));
+  } catch (error) {
+    logFirestoreReadDenied(`survey_reports/${normalizedReportId}`, error);
+    throw error;
+  }
 
   if (!snapshot.exists()) {
     return null;
@@ -2752,7 +2712,14 @@ export async function saveSurveyReport(surveyId, report, actor = {}, reportId = 
   }
 
   const reportRef = doc(surveyReportsCollection, normalizedReportId);
-  const currentSnapshot = await getDoc(reportRef);
+  let currentSnapshot;
+
+  try {
+    currentSnapshot = await getDoc(reportRef);
+  } catch (error) {
+    logFirestoreReadDenied(`survey_reports/${normalizedReportId}`, error);
+    throw error;
+  }
   const actorMeta = {
     uid: String(actor?.uid ?? ''),
     email: String(actor?.email ?? ''),
@@ -2780,7 +2747,12 @@ export async function saveSurveyReport(surveyId, report, actor = {}, reportId = 
     payload.createdAt = serverTimestamp();
   }
 
-  await setDoc(reportRef, payload, { merge: true });
+  try {
+    await setDoc(reportRef, payload, { merge: true });
+  } catch (error) {
+    logFirestoreReadDenied(`survey_reports/${normalizedReportId}`, error);
+    throw error;
+  }
 
   return {
     id: normalizedReportId,
@@ -2817,12 +2789,22 @@ export async function fetchManagedSurveyReports(userAccess = {}) {
   let reportDocs = [];
 
   if (canManageAllSurveys(userAccess.role)) {
-    const snapshot = await getDocs(surveyReportsCollection);
+    const snapshot = await getDocs(surveyReportsCollection).catch((error) => {
+      logFirestoreReadDenied('survey_reports', error);
+      throw error;
+    });
     reportDocs = snapshot.docs;
   } else if (userAccess.role === USER_ROLES.CREATOR) {
+    const reportQueries = surveys.map((survey) => ({
+      path: `survey_reports?surveyId==${survey.id}`,
+      read: () => getDocs(query(surveyReportsCollection, where('surveyId', '==', survey.id))),
+    }));
     const snapshots = await Promise.all(
-      surveys.map((survey) =>
-        getDocs(query(surveyReportsCollection, where('surveyId', '==', survey.id))),
+      reportQueries.map((item) =>
+        item.read().catch((error) => {
+          logFirestoreReadDenied(item.path, error);
+          throw error;
+        }),
       ),
     );
     reportDocs = snapshots.flatMap((snapshot) => snapshot.docs);
@@ -2847,7 +2829,14 @@ export async function copySurveyReport(reportId, actor = {}) {
     throw new Error('복제할 보고서 ID가 없습니다.');
   }
 
-  const sourceSnapshot = await getDoc(doc(surveyReportsCollection, normalizedReportId));
+  let sourceSnapshot;
+
+  try {
+    sourceSnapshot = await getDoc(doc(surveyReportsCollection, normalizedReportId));
+  } catch (error) {
+    logFirestoreReadDenied(`survey_reports/${normalizedReportId}`, error);
+    throw error;
+  }
   if (!sourceSnapshot.exists() || sourceSnapshot.data().deleted === true) {
     throw new Error('복제할 보고서를 찾을 수 없습니다.');
   }
@@ -2877,7 +2866,14 @@ export async function copySurveyReport(reportId, actor = {}) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  const copiedRef = await addDoc(surveyReportsCollection, payload);
+  let copiedRef;
+
+  try {
+    copiedRef = await addDoc(surveyReportsCollection, payload);
+  } catch (error) {
+    logFirestoreReadDenied('survey_reports', error);
+    throw error;
+  }
   return { id: copiedRef.id, ...payload };
 }
 
@@ -2894,18 +2890,30 @@ export async function softDeleteSurveyReport(reportId, actor = {}) {
     displayName: String(actor?.displayName ?? actor?.name ?? ''),
   };
   const reportRef = doc(surveyReportsCollection, normalizedReportId);
-  const snapshot = await getDoc(reportRef);
+  let snapshot;
+
+  try {
+    snapshot = await getDoc(reportRef);
+  } catch (error) {
+    logFirestoreReadDenied(`survey_reports/${normalizedReportId}`, error);
+    throw error;
+  }
   if (!snapshot.exists()) {
     throw new Error('삭제할 보고서를 찾을 수 없습니다.');
   }
-  await updateDoc(reportRef, {
-    status: snapshot.data().status === 'final' ? 'final' : 'draft',
-    deleted: true,
-    deletedAt: serverTimestamp(),
-    deletedBy: actorMeta,
-    updatedAt: serverTimestamp(),
-    updatedBy: actorMeta,
-  });
+  try {
+    await updateDoc(reportRef, {
+      status: snapshot.data().status === 'final' ? 'final' : 'draft',
+      deleted: true,
+      deletedAt: serverTimestamp(),
+      deletedBy: actorMeta,
+      updatedAt: serverTimestamp(),
+      updatedBy: actorMeta,
+    });
+  } catch (error) {
+    logFirestoreReadDenied(`survey_reports/${normalizedReportId}`, error);
+    throw error;
+  }
 }
 
 export async function fetchManagedRecentResponses(userAccess = {}, limitCount = 20, options = {}) {
@@ -2980,7 +2988,14 @@ export async function fetchResponsesBySurveyId(surveyId, options = {}) {
     queryConstraints.push(limit(pageSize));
   }
 
-  const snapshot = await getDocs(query(responsesCollection, ...queryConstraints));
+  let snapshot;
+
+  try {
+    snapshot = await getDocs(query(responsesCollection, ...queryConstraints));
+  } catch (error) {
+    logFirestoreReadDenied(`responses?surveyId==${surveyId}`, error);
+    throw error;
+  }
 
   if (paginated) {
     return {
@@ -3015,7 +3030,14 @@ export async function fetchResponsesBySurveyTitle(surveyTitle, options = {}) {
     queryConstraints.push(limit(pageSize));
   }
 
-  const snapshot = await getDocs(query(responsesCollection, ...queryConstraints));
+  let snapshot;
+
+  try {
+    snapshot = await getDocs(query(responsesCollection, ...queryConstraints));
+  } catch (error) {
+    logFirestoreReadDenied(`responses?surveyTitle==${surveyTitle}`, error);
+    throw error;
+  }
 
   if (paginated) {
     return {
