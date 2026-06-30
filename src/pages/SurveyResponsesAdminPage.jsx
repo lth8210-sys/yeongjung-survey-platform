@@ -94,6 +94,123 @@ const SHARE_TYPE_LABELS = {
   [SHARE_TYPES.REPORT]: '보고서 공유용 요약',
 };
 
+const SHARE_TEMPLATE_TYPES = {
+  GENERAL: 'general',
+  SATISFACTION: 'satisfaction',
+  NEEDS: 'needs',
+  APPLICATION: 'application',
+};
+
+const SHARE_COPY_TEMPLATES = {
+  [SHARE_TEMPLATE_TYPES.GENERAL]: {
+    progressTitle: '📊 영중폼 설문 진행현황',
+    summaryTitle: '📊 설문 결과 요약',
+    reportTitle: '📄 결과보고서 공유 안내',
+    shortageTitle: '⚠️ 부족 현황',
+    shortageHeading: '부족 TOP 5',
+    shortageEmptyText: '부족한 항목이 없습니다.',
+    shortageCta: '필요한 대상에게 공유해 주세요.',
+    countLabel: '응답수',
+    totalCountLabel: '총 응답수',
+    resultEmptyText: '주요 객관식/평균 문항 집계가 아직 없습니다.',
+    textResponseNote: '서술형 의견은 결과보고서 참고',
+    reportReadyText: '결과보고서가 생성되었습니다.',
+    resultOrder: 'choice-first',
+  },
+  [SHARE_TEMPLATE_TYPES.SATISFACTION]: {
+    progressTitle: '📊 영중폼 만족도조사 진행현황',
+    summaryTitle: '📊 만족도조사 결과 요약',
+    reportTitle: '📄 만족도조사 결과보고서 공유 안내',
+    shortageTitle: '⚠️ 부족 현황',
+    shortageHeading: '부족 TOP 5',
+    shortageEmptyText: '부족한 항목이 없습니다.',
+    shortageCta: '필요한 대상에게 공유해 주세요.',
+    countLabel: '응답수',
+    totalCountLabel: '총 응답수',
+    resultEmptyText: '만족도 평균 또는 주요 응답 집계가 아직 없습니다.',
+    textResponseNote: '서술형 의견은 결과보고서 참고',
+    reportReadyText: '만족도조사 결과보고서가 생성되었습니다.',
+    resultOrder: 'average-first',
+  },
+  [SHARE_TEMPLATE_TYPES.NEEDS]: {
+    progressTitle: '📊 영중폼 욕구조사 진행현황',
+    summaryTitle: '📊 욕구조사 결과 요약',
+    reportTitle: '📄 욕구조사 결과보고서 공유 안내',
+    shortageTitle: '⚠️ 할당표본 부족 현황',
+    shortageHeading: '부족표본 TOP 5',
+    shortageEmptyText: '부족한 할당표본 셀이 없습니다.',
+    shortageCta: '부족 권역·연령대 중심으로 적극 홍보 부탁드립니다.',
+    countLabel: '응답수',
+    totalCountLabel: '총 응답수',
+    resultEmptyText: '주요 욕구 문항 집계가 아직 없습니다.',
+    textResponseNote: '서술형 의견은 결과보고서 참고',
+    reportReadyText: '욕구조사 결과보고서가 생성되었습니다.',
+    resultOrder: 'choice-first',
+  },
+  [SHARE_TEMPLATE_TYPES.APPLICATION]: {
+    progressTitle: '📊 영중폼 신청 현황',
+    summaryTitle: '📊 신청 결과 요약',
+    reportTitle: '📄 신청 결과 공유 안내',
+    shortageTitle: '⚠️ 정원 부족 현황',
+    shortageHeading: '부족 TOP 5',
+    shortageEmptyText: '부족한 정원 항목이 없습니다.',
+    shortageCta: '추가 모집이 필요한 대상에게 공유해 주세요.',
+    countLabel: '신청수',
+    totalCountLabel: '총 신청수',
+    resultEmptyText: '주요 신청 항목 집계가 아직 없습니다.',
+    textResponseNote: '상세 신청 내용은 결과보고서 참고',
+    reportReadyText: '신청 결과 요약이 생성되었습니다.',
+    resultOrder: 'choice-first',
+  },
+};
+
+function includesKeyword(value, keywords) {
+  const normalizedValue = String(value ?? '').toLowerCase();
+  return keywords.some((keyword) => normalizedValue.includes(keyword));
+}
+
+function getShareTemplateType(survey, analytics) {
+  const metadataValues = [
+    survey?.surveyType,
+    survey?.surveyCategory,
+    survey?.category,
+    survey?.templateCategory,
+    survey?.templateType,
+    survey?.templateId,
+    survey?.defaultFormType,
+    survey?.title,
+    ...(Array.isArray(survey?.tags) ? survey.tags : []),
+  ];
+
+  if (
+    metadataValues.some((value) =>
+      includesKeyword(value, ['needs_survey', 'needs-survey', 'community_needs', '욕구조사', '욕구 조사']),
+    )
+  ) {
+    return SHARE_TEMPLATE_TYPES.NEEDS;
+  }
+
+  if (isApplicationFormType(survey?.formType)) {
+    return SHARE_TEMPLATE_TYPES.APPLICATION;
+  }
+
+  if (
+    metadataValues.some((value) =>
+      includesKeyword(value, ['satisfaction', '만족도', '만족도조사', '만족도 조사']),
+    ) ||
+    (analytics?.topRows ?? []).some((row) => row.average !== null)
+  ) {
+    return SHARE_TEMPLATE_TYPES.SATISFACTION;
+  }
+
+  return SHARE_TEMPLATE_TYPES.GENERAL;
+}
+
+function getShareCopyTemplate(survey, analytics) {
+  const templateType = getShareTemplateType(survey, analytics);
+  return SHARE_COPY_TEMPLATES[templateType] ?? SHARE_COPY_TEMPLATES[SHARE_TEMPLATE_TYPES.GENERAL];
+}
+
 function buildAdminUrl(path) {
   if (typeof window === 'undefined') {
     return path;
@@ -174,6 +291,7 @@ function buildShareText({
   reportUrl,
 }) {
   const title = survey?.title || '제목 없는 설문';
+  const shareTemplate = getShareCopyTemplate(survey, analytics);
   const responseCount = Number(quotaSummary?.responseCount ?? responses.length ?? 0);
   const target = getShareTarget(survey, quotaSummary, quotaDashboard);
 
@@ -185,22 +303,22 @@ function buildShareText({
       );
 
     return [
-      '⚠️ 할당표본 부족 현황',
+      shareTemplate.shortageTitle,
       '',
       `설문명: ${title}`,
-      `전체 응답: ${target.current} / ${target.target}`,
+      `전체 ${shareTemplate.countLabel.replace(/수$/, '')}: ${target.current} / ${target.target}`,
       '',
-      '부족 TOP 5',
-      ...(shortageLines.length > 0 ? shortageLines : ['부족한 quota 셀이 없습니다.']),
+      shareTemplate.shortageHeading,
+      ...(shortageLines.length > 0 ? shortageLines : [shareTemplate.shortageEmptyText]),
       '',
-      '적극 홍보 부탁드립니다.',
+      shareTemplate.shortageCta,
     ].join('\n');
   }
 
   if (type === SHARE_TYPES.SUMMARY) {
     if (responseCount === 0) {
       return [
-        '📊 설문 결과 요약',
+        shareTemplate.summaryTitle,
         '',
         `설문명: ${title}`,
         '',
@@ -213,34 +331,33 @@ function buildShareText({
       .filter((row) => row.average !== null)
       .slice(0, 3)
       .map((row) => `${row.question.title}: 평균 ${formatAverage(row.average)} / ${row.max}`);
-    const resultLines = [
-      ...choiceSummaries,
-      ...averageSummaries,
-    ].slice(0, 5);
+    const prioritizedRows =
+      shareTemplate.resultOrder === 'average-first'
+        ? [...averageSummaries, ...choiceSummaries]
+        : [...choiceSummaries, ...averageSummaries];
+    const resultLines = prioritizedRows.slice(0, 5);
 
     return [
-      '📊 설문 결과 요약',
+      shareTemplate.summaryTitle,
       '',
       `설문명: ${title}`,
-      `총 응답수: ${responseCount}명`,
+      `${shareTemplate.totalCountLabel}: ${responseCount}명`,
       '',
       '주요 결과:',
       ...(resultLines.length > 0
         ? resultLines.map((line) => `- ${line}`)
-        : ['- 주요 객관식/평균 문항 집계가 아직 없습니다.']),
-      analytics?.textResponses?.length > 0
-        ? '- 서술형 의견은 결과보고서 참고'
-        : '- 서술형 의견은 결과보고서 참고',
+        : [`- ${shareTemplate.resultEmptyText}`]),
+      `- ${shareTemplate.textResponseNote}`,
     ].join('\n');
   }
 
   if (type === SHARE_TYPES.REPORT) {
     return [
-      '📄 결과보고서 공유 안내',
+      shareTemplate.reportTitle,
       '',
       `설문명: ${title}`,
-      `응답수: ${responseCount}명`,
-      '결과보고서가 생성되었습니다.',
+      `${shareTemplate.countLabel}: ${responseCount}명`,
+      shareTemplate.reportReadyText,
       '',
       '보고서 열기:',
       reportUrl || responseUrl,
@@ -251,10 +368,10 @@ function buildShareText({
   const percentText = target.target > 0 ? `${target.percent}%` : '-';
 
   return [
-    '📊 영중폼 설문 진행현황',
+    shareTemplate.progressTitle,
     '',
     `설문명: ${title}`,
-    `응답수: ${targetText}`,
+    `${shareTemplate.countLabel}: ${targetText}`,
     `진행률: ${percentText}`,
     '',
     '응답결과 보기:',
