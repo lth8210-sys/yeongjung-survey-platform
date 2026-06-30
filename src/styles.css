@@ -1477,6 +1477,44 @@ button:disabled {
   background: #fff;
 }
 
+.quota-config-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quota-config-summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(24, 34, 47, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.quota-config-summary span {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.quota-config-summary strong {
+  color: #172033;
+  font-size: 1.08rem;
+}
+
+.quota-config-summary .quota-summary-warning {
+  border-color: rgba(190, 83, 20, 0.26);
+  background: #fff8f1;
+}
+
+.quota-region-total-cell {
+  color: #172033;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .builder-subpanel {
   padding: 18px;
   border-radius: 20px;
@@ -2641,6 +2679,10 @@ button:disabled {
   .settings-drawer .toggle-grid,
   .settings-drawer .builder-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .quota-config-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-drawer-actionbar {

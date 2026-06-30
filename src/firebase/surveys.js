@@ -477,18 +477,11 @@ export function createDefaultRegionAgeQuotaConfig(overrides = {}) {
   const totalTarget = normalizeQuotaNumber(overrides.totalTarget ?? baseConfig.totalTarget, 520);
   const regions = Array.isArray(overrides.regions) ? overrides.regions : baseConfig.regions;
   const ageGroups = Array.isArray(overrides.ageGroups) ? overrides.ageGroups : baseConfig.ageGroups;
-  const baseCellTarget =
-    regions.length && ageGroups.length ? Math.floor(totalTarget / (regions.length * ageGroups.length)) : 0;
-  let remainingTarget = totalTarget;
   const matrix = regions.reduce((result, region) => {
     const regionId = normalizeQuotaId(region.id, createLocalId('region'));
-    result[regionId] = ageGroups.reduce((ageResult, ageGroup, ageIndex) => {
+    result[regionId] = ageGroups.reduce((ageResult, ageGroup) => {
       const ageGroupId = normalizeQuotaId(ageGroup.id, createLocalId('age'));
-      const isLastCell =
-        Object.keys(result).length === regions.length - 1 && ageIndex === ageGroups.length - 1;
-      const target = isLastCell ? remainingTarget : Math.min(baseCellTarget, remainingTarget);
-      ageResult[ageGroupId] = target;
-      remainingTarget -= target;
+      ageResult[ageGroupId] = 0;
       return ageResult;
     }, {});
     return result;
@@ -502,6 +495,32 @@ export function createDefaultRegionAgeQuotaConfig(overrides = {}) {
     ageGroups,
     matrix: overrides.matrix ?? matrix,
   });
+}
+
+export function distributeRegionAgeQuotaMatrix(config = {}) {
+  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
+  const totalTarget = normalizeQuotaNumber(normalizedConfig.totalTarget, 0);
+  const cellCount = normalizedConfig.regions.length * normalizedConfig.ageGroups.length;
+  const baseCellTarget = cellCount > 0 ? Math.floor(totalTarget / cellCount) : 0;
+  let remainingTarget = totalTarget;
+
+  const matrix = normalizedConfig.regions.reduce((result, region, regionIndex) => {
+    result[region.id] = normalizedConfig.ageGroups.reduce((ageResult, ageGroup, ageIndex) => {
+      const isLastCell =
+        regionIndex === normalizedConfig.regions.length - 1 &&
+        ageIndex === normalizedConfig.ageGroups.length - 1;
+      const target = isLastCell ? remainingTarget : Math.min(baseCellTarget, remainingTarget);
+      ageResult[ageGroup.id] = target;
+      remainingTarget -= target;
+      return ageResult;
+    }, {});
+    return result;
+  }, {});
+
+  return {
+    ...normalizedConfig,
+    matrix,
+  };
 }
 
 export function normalizeRegionAgeQuotaConfig(config = {}) {
