@@ -80,6 +80,188 @@ const FILTER_RESPONSE_STATUSES = [
   RESPONSE_STATUSES.FOLLOW_UP,
 ];
 
+const SHARE_TYPES = {
+  PROGRESS: 'progress',
+  SHORTAGE: 'shortage',
+  SUMMARY: 'summary',
+  REPORT: 'report',
+};
+
+const SHARE_TYPE_LABELS = {
+  [SHARE_TYPES.PROGRESS]: '진행현황 공유',
+  [SHARE_TYPES.SHORTAGE]: '부족표본 공유',
+  [SHARE_TYPES.SUMMARY]: '결과요약 공유',
+  [SHARE_TYPES.REPORT]: '보고서 공유용 요약',
+};
+
+function buildAdminUrl(path) {
+  if (typeof window === 'undefined') {
+    return path;
+  }
+
+  return `${window.location.origin}${path}`;
+}
+
+function getShareTarget(survey, quotaSummary, quotaDashboard) {
+  if (quotaDashboard?.targetTotal > 0) {
+    return {
+      current: quotaDashboard.currentTotal,
+      target: quotaDashboard.targetTotal,
+      percent: quotaDashboard.percent,
+    };
+  }
+
+  const current = Number(quotaSummary?.responseCount ?? survey?.responseCount ?? 0);
+  const target = Number(quotaSummary?.maxResponses ?? survey?.maxResponses ?? 0);
+  return {
+    current,
+    target,
+    percent: target > 0 ? Math.round((current / target) * 100) : 0,
+  };
+}
+
+function getTopChoiceSummaries(survey, responses, limit = 3) {
+  const optionQuestionTypes = new Set([
+    QUESTION_TYPES.SINGLE_CHOICE,
+    QUESTION_TYPES.MULTIPLE_CHOICE,
+    QUESTION_TYPES.DROPDOWN,
+  ]);
+  const questions = (survey?.questions ?? []).filter((question) =>
+    optionQuestionTypes.has(question.type),
+  );
+  const questionMap = new Map(questions.map((question) => [question.id, question]));
+  const rows = new Map();
+
+  responses.forEach((response) => {
+    (response.answers ?? []).forEach((answerItem) => {
+      const question = questionMap.get(answerItem.questionId);
+      if (!question) return;
+
+      const answers = Array.isArray(answerItem.answer)
+        ? answerItem.answer
+        : [answerItem.answer];
+
+      answers
+        .map((answer) => String(answer ?? '').trim())
+        .filter(Boolean)
+        .forEach((answer) => {
+          const key = `${question.id}::${answer}`;
+          const current = rows.get(key) ?? {
+            questionTitle: question.title || '객관식 문항',
+            answer,
+            count: 0,
+          };
+          current.count += 1;
+          rows.set(key, current);
+        });
+    });
+  });
+
+  return [...rows.values()]
+    .sort((first, second) => second.count - first.count)
+    .slice(0, limit)
+    .map((row) => `${row.questionTitle}: ${row.answer} (${row.count}명)`);
+}
+
+function buildShareText({
+  type,
+  survey,
+  responses,
+  analytics,
+  quotaSummary,
+  quotaDashboard,
+  responseUrl,
+  reportUrl,
+}) {
+  const title = survey?.title || '제목 없는 설문';
+  const responseCount = Number(quotaSummary?.responseCount ?? responses.length ?? 0);
+  const target = getShareTarget(survey, quotaSummary, quotaDashboard);
+
+  if (type === SHARE_TYPES.SHORTAGE) {
+    const shortageLines = (quotaDashboard?.shortageTop ?? [])
+      .slice(0, 5)
+      .map((cell, index) =>
+        `${index + 1}. ${cell.regionLabel} / ${cell.ageGroupLabel}: ${cell.current}/${cell.target}, ${cell.shortage}명 부족`,
+      );
+
+    return [
+      '⚠️ 할당표본 부족 현황',
+      '',
+      `설문명: ${title}`,
+      `전체 응답: ${target.current} / ${target.target}`,
+      '',
+      '부족 TOP 5',
+      ...(shortageLines.length > 0 ? shortageLines : ['부족한 quota 셀이 없습니다.']),
+      '',
+      '적극 홍보 부탁드립니다.',
+    ].join('\n');
+  }
+
+  if (type === SHARE_TYPES.SUMMARY) {
+    if (responseCount === 0) {
+      return [
+        '📊 설문 결과 요약',
+        '',
+        `설문명: ${title}`,
+        '',
+        '응답 데이터가 아직 없습니다.',
+      ].join('\n');
+    }
+
+    const choiceSummaries = getTopChoiceSummaries(survey, responses, 3);
+    const averageSummaries = (analytics?.topRows ?? [])
+      .filter((row) => row.average !== null)
+      .slice(0, 3)
+      .map((row) => `${row.question.title}: 평균 ${formatAverage(row.average)} / ${row.max}`);
+    const resultLines = [
+      ...choiceSummaries,
+      ...averageSummaries,
+    ].slice(0, 5);
+
+    return [
+      '📊 설문 결과 요약',
+      '',
+      `설문명: ${title}`,
+      `총 응답수: ${responseCount}명`,
+      '',
+      '주요 결과:',
+      ...(resultLines.length > 0
+        ? resultLines.map((line) => `- ${line}`)
+        : ['- 주요 객관식/평균 문항 집계가 아직 없습니다.']),
+      analytics?.textResponses?.length > 0
+        ? '- 서술형 의견은 결과보고서 참고'
+        : '- 서술형 의견은 결과보고서 참고',
+    ].join('\n');
+  }
+
+  if (type === SHARE_TYPES.REPORT) {
+    return [
+      '📄 결과보고서 공유 안내',
+      '',
+      `설문명: ${title}`,
+      `응답수: ${responseCount}명`,
+      '결과보고서가 생성되었습니다.',
+      '',
+      '보고서 열기:',
+      reportUrl || responseUrl,
+    ].join('\n');
+  }
+
+  const targetText = target.target > 0 ? `${target.current} / ${target.target}` : `${responseCount}명`;
+  const percentText = target.target > 0 ? `${target.percent}%` : '-';
+
+  return [
+    '📊 영중폼 설문 진행현황',
+    '',
+    `설문명: ${title}`,
+    `응답수: ${targetText}`,
+    `진행률: ${percentText}`,
+    '',
+    '응답결과 보기:',
+    responseUrl,
+  ].join('\n');
+}
+
 function toValidDate(value) {
   if (!value) {
     return null;
@@ -354,6 +536,10 @@ function SurveyResponsesAdminPage() {
   const [reportSettings, setReportSettings] = useState(() =>
     buildReportSettingsDefaults({ survey: null, responses: [], user: null }),
   );
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareType, setShareType] = useState(SHARE_TYPES.PROGRESS);
+  const [shareText, setShareText] = useState('');
+  const [shareCopyMessage, setShareCopyMessage] = useState('');
   const reportSettingsHistoryPushedRef = useRef(false);
   const auditActor = {
     uid: user?.uid ?? '',
@@ -1172,12 +1358,91 @@ function SurveyResponsesAdminPage() {
     [survey?.quotaConfig, survey?.quotaCounts],
   );
   const quotaDashboardEnabled = Boolean(survey?.quotaConfig?.enabled);
+  const shareQuotaSummary = useMemo(() => getQuotaSummary(survey), [survey]);
+  const shareResponseUrl = useMemo(
+    () => buildAdminUrl(`/admin/surveys/${surveyId}/responses`),
+    [surveyId],
+  );
+  const shareReportUrl = useMemo(
+    () => buildAdminUrl(`/admin/surveys/${surveyId}/report`),
+    [surveyId],
+  );
+  const shareTypeOptions = useMemo(
+    () =>
+      [
+        SHARE_TYPES.PROGRESS,
+        quotaDashboardEnabled ? SHARE_TYPES.SHORTAGE : null,
+        SHARE_TYPES.SUMMARY,
+        SHARE_TYPES.REPORT,
+      ].filter(Boolean),
+    [quotaDashboardEnabled],
+  );
 
   useEffect(() => {
     if (activeTab === 'quota' && !quotaDashboardEnabled) {
       setActiveTab('responses');
     }
   }, [activeTab, quotaDashboardEnabled]);
+
+  useEffect(() => {
+    if (!quotaDashboardEnabled && shareType === SHARE_TYPES.SHORTAGE) {
+      setShareType(SHARE_TYPES.PROGRESS);
+    }
+  }, [quotaDashboardEnabled, shareType]);
+
+  useEffect(() => {
+    setShareText(
+      buildShareText({
+        type: shareType,
+        survey,
+        responses: analyticsSource,
+        analytics: surveyAnalytics,
+        quotaSummary: shareQuotaSummary,
+        quotaDashboard: regionAgeQuotaDashboard,
+        responseUrl: shareResponseUrl,
+        reportUrl: shareReportUrl,
+      }),
+    );
+    setShareCopyMessage('');
+  }, [
+    analyticsSource,
+    regionAgeQuotaDashboard,
+    shareQuotaSummary,
+    shareReportUrl,
+    shareResponseUrl,
+    shareType,
+    survey,
+    surveyAnalytics,
+  ]);
+
+  const handleOpenShareModal = () => {
+    setShareModalOpen(true);
+    setShareCopyMessage('');
+  };
+
+  const handleCopyShareText = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareText);
+      } else if (typeof document !== 'undefined') {
+        const textarea = document.createElement('textarea');
+        textarea.value = shareText;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } else {
+        throw new Error('clipboard unavailable');
+      }
+
+      setShareCopyMessage('공유 문구가 복사되었습니다. Google Chat, 이메일, 카카오톡 등에 붙여넣어 사용하세요.');
+    } catch {
+      setShareCopyMessage('복사에 실패했습니다. 문구를 직접 선택해 복사해주세요.');
+    }
+  };
 
   if (loading) {
     return <div className="empty-state">응답 목록을 불러오는 중입니다.</div>;
@@ -1190,7 +1455,7 @@ function SurveyResponsesAdminPage() {
   const normalizedStatus = normalizeSurveyStatus(survey?.status);
   const statusMeta = getSurveyStatusMeta(normalizedStatus);
   const formTypeMeta = getFormTypeMeta(survey?.formType);
-  const quotaSummary = getQuotaSummary(survey);
+  const quotaSummary = shareQuotaSummary;
   const publicUrl =
     typeof window === 'undefined'
       ? `/surveys/${surveyId}`
@@ -1318,6 +1583,18 @@ function SurveyResponsesAdminPage() {
           type="button"
         >
           통계/분석
+        </button>
+      </div>
+
+      <div className="panel response-share-panel">
+        <div>
+          <strong>공유 문구</strong>
+          <p className="meta-description">
+            진행현황, 부족표본, 결과요약을 복사해 Google Chat, 이메일, 카카오톡 등에 붙여넣을 수 있습니다.
+          </p>
+        </div>
+        <button className="secondary-button" onClick={handleOpenShareModal} type="button">
+          공유 문구 복사
         </button>
       </div>
 
@@ -2190,6 +2467,67 @@ function SurveyResponsesAdminPage() {
         </div>
       )}
       </>
+      )}
+
+      {shareModalOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShareModalOpen(false);
+            }
+          }}
+          role="presentation"
+        >
+          <div aria-modal="true" className="modal-panel share-copy-modal" role="dialog">
+            <div className="report-settings-header">
+              <div>
+                <h2>공유 문구 복사</h2>
+                <p>자동 생성된 문구를 필요에 맞게 수정한 뒤 복사할 수 있습니다.</p>
+              </div>
+              <button className="secondary-button" onClick={() => setShareModalOpen(false)} type="button">
+                닫기
+              </button>
+            </div>
+
+            <label className="field">
+              <span>공유 유형</span>
+              <select
+                value={shareType}
+                onChange={(event) => setShareType(event.target.value)}
+              >
+                {shareTypeOptions.map((type) => (
+                  <option key={type} value={type}>
+                    {SHARE_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+              {!quotaDashboardEnabled && (
+                <small>quota를 사용하지 않는 설문에서는 부족표본 공유가 숨겨집니다.</small>
+              )}
+            </label>
+
+            <label className="field share-copy-textarea-field">
+              <span>공유 문구</span>
+              <textarea
+                onChange={(event) => setShareText(event.target.value)}
+                rows="14"
+                value={shareText}
+              />
+            </label>
+
+            {shareCopyMessage && <p className="inline-note">{shareCopyMessage}</p>}
+
+            <div className="report-settings-actions">
+              <button className="secondary-button" onClick={() => setShareModalOpen(false)} type="button">
+                취소
+              </button>
+              <button className="primary-button" onClick={handleCopyShareText} type="button">
+                복사
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <QrModal

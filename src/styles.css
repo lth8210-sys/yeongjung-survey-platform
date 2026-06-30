@@ -2124,6 +2124,13 @@ button:disabled {
   gap: 16px;
 }
 
+.response-share-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .response-admin-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -2481,6 +2488,19 @@ button:disabled {
   max-height: min(88vh, 760px);
   overflow: auto;
   border-radius: 16px;
+}
+
+.share-copy-modal {
+  width: min(720px, 100%);
+  max-height: min(88vh, 760px);
+  overflow: auto;
+  border-radius: 16px;
+}
+
+.share-copy-textarea-field textarea {
+  min-height: 320px;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .report-settings-header {
@@ -3315,6 +3335,15 @@ button:disabled {
   .report-settings-date-row,
   .report-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .response-share-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .response-share-panel .secondary-button {
+    width: 100%;
   }
 
   .report-settings-actions {
