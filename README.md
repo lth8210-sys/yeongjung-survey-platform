@@ -1,17 +1,38 @@
 # yeongjung-survey-platform
 
-영중종합사회복지관 직원이 쉽게 사용할 수 있도록 설계한 React + Vite 기반 설문 플랫폼 초기 프로젝트입니다.
+영중종합사회복지관에서 실제 운영 중인 React + Vite + Firebase 기반 통합 설문 운영 플랫폼입니다.
+
+영중폼은 복지관 내부 운영자가 설문조사, 욕구조사, 만족도조사, 신청접수, 결과보고서, Quota 관리, 직원공유, 설문 템플릿을 한 곳에서 관리하기 위해 사용하는 운영 시스템입니다. 앞으로의 개발 원칙은 새 기능 추가보다 기존 운영 기능을 깨뜨리지 않는 Regression Zero를 우선합니다.
 
 ## 포함 기능
 
 - Google 로그인
 - 관리자 대시보드
-- 설문 목록 페이지
-- 새 설문 만들기
-- 질문 추가/삭제
-- 응답 페이지
-- Firestore 저장
-- 관리자 응답 결과 조회
+- 설문 생성
+- 설문 수정
+- Draft 저장
+- 설문 게시
+- 설문 마감
+- 설문 복제
+- 일반 설문
+- 욕구조사
+- 만족도조사
+- 신청접수
+- 조건분기
+- 기타 입력
+- 최대 선택 개수
+- Quota 관리
+- 직원공유 설문
+- 공개 응답 제출
+- 설문별 응답 관리
+- 최근응답 확인
+- 결과보고서 관리
+- CSV 다운로드
+- Excel 다운로드
+- DOCX 결과보고서 다운로드
+- 설문 템플릿
+- 감사로그
+- Firestore Security Rules 기반 권한 관리
 
 ## 시작 방법
 
@@ -90,6 +111,20 @@ firebase deploy
 배포 전에는 Firebase Console의 `Firestore Database > Rules` 화면과 로컬 `firestore.rules` 내용을 비교하고, 배포 후에는 관리자 계정과 일반 계정으로 권한 동작을 각각 테스트하는 것을 권장합니다.
 
 ## 운영 문서
+
+운영 문서는 `docs/` 폴더에서 관리합니다. 개발 전에는 프로젝트 가드레일과 QA 체크리스트를 먼저 확인하고, 데이터 구조나 권한을 건드릴 가능성이 있으면 관련 운영 문서를 함께 확인하세요.
+
+- [프로젝트 가드레일](./docs/PROJECT_GUARDRAILS.md)
+- [QA 체크리스트](./docs/QA_CHECKLIST.md)
+- [Firestore Rules 가이드](./docs/FIRESTORE_RULES_GUIDE.md)
+- [데이터 스키마](./docs/DATA_SCHEMA.md)
+- [변경 영향 매트릭스](./docs/CHANGE_IMPACT_MATRIX.md)
+- [Collection 의존관계](./docs/COLLECTION_DEPENDENCY.md)
+- [아키텍처](./docs/ARCHITECTURE.md)
+- [릴리즈 프로세스](./docs/RELEASE_PROCESS.md)
+- [버전 정책](./docs/VERSION_POLICY.md)
+- [알려진 이슈](./docs/KNOWN_ISSUES.md)
+- [로드맵](./docs/ROADMAP.md)
 
 운영 상태, 구조, 응답 흐름, 배포 절차, 기술부채, AI 협업 인수인계는 `ai/` 폴더에서 관리합니다.
 
