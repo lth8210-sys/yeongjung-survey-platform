@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { maskName, maskPhone } from '../utils/privacy';
 import ResponseDetailModal from '../components/ResponseDetailModal';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -14,6 +15,14 @@ import {
 } from '../firebase/surveys';
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin']);
+
+function getMaskedRespondentDisplay(response) {
+  const name = response.respondentName || response.respondent?.name;
+  const phone = response.respondentPhone || response.respondent?.phone;
+  if (name) return maskName(name);
+  if (phone) return maskPhone(phone);
+  return '응답자 정보 없음';
+}
 
 function toSeoulDateKey(value) {
   const date = value?.toDate?.() ?? (value ? new Date(value) : null);
@@ -207,7 +216,7 @@ function RecentResponsesPage() {
                     <p>{formatFirestoreDate(response.submittedAt)}</p>
                     <p>
                       {deletedMeta.deleted ? `${deletedMeta.label} 응답 기록` : '정상 설문 응답 기록'} ·{' '}
-                      {response.respondentName || response.respondent?.name || response.respondentPhone || response.respondent?.phone || '응답자 정보 없음'}
+                      {getMaskedRespondentDisplay(response)}
                     </p>
                   </div>
                   <div className="mini-actions">

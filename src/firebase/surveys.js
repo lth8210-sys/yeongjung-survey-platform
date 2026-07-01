@@ -55,6 +55,7 @@ import {
   SURVEY_VISIBILITIES,
   USER_ROLES,
 } from './users';
+import { logger } from '../utils/logger';
 
 export {
   BRANCH_ACTIONS,
@@ -116,7 +117,7 @@ function logFirestoreReadDenied(path, error) {
     return;
   }
 
-  console.error('[Firestore permission-denied]', {
+  logger.error('[Firestore permission-denied]', {
     path,
     code: error?.code ?? '',
     message: error?.message ?? '',

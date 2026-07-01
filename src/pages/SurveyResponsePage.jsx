@@ -33,6 +33,7 @@ import {
 } from '../utils/responseFlow';
 import { debounce } from '../utils/debounce';
 import { cleanupOldDrafts } from '../utils/cleanupDrafts';
+import { logger } from '../utils/logger';
 
 const responseChoiceRowStyle = {
   display: 'grid',
@@ -281,7 +282,9 @@ function SurveyResponsePage() {
       error?.code === 'permission-denied' ||
       String(error?.message ?? '').includes('Missing or insufficient permissions')
     ) {
-      return '응답 저장 권한이 없습니다. Firestore 규칙과 설문 상태를 확인해주세요.';
+      return import.meta.env.PROD
+        ? '응답 제출 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+        : '응답 저장 권한이 없습니다. Firestore 규칙과 설문 상태를 확인해주세요.';
     }
 
     if (error?.code === 'unavailable' || error?.code === 'network-request-failed') {
@@ -1939,7 +1942,7 @@ function SurveyResponsePage() {
         const safeSurveyId = sanitizeFirestoreDocumentSegment(survey.id);
         const safeClientSubmitId = sanitizeFirestoreDocumentSegment(clientSubmitId);
 
-        console.error('[SurveyResponsePage] submit permission-denied', {
+        logger.error('[SurveyResponsePage] submit permission-denied', {
           surveyPath: `surveys/${survey.id}`,
           responsePath: `responses/${safeSurveyId}__${safeClientSubmitId}`,
           clientSubmitLockPath: `surveys/${survey.id}/clientSubmitLocks/${safeClientSubmitId}`,

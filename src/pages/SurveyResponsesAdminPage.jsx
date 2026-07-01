@@ -46,6 +46,12 @@ import {
 } from '../firebase/surveys';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
 import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
+import {
+  maskAnswerByQuestion,
+  maskName,
+  maskPhone,
+  maskResponsesForDownload,
+} from '../utils/privacy';
 
 const RESPONSE_PAGE_SIZE = 20;
 const RESIDENT_ASSET_TEMPLATE_ID = 'resident_asset_interview_v1';
@@ -765,6 +771,7 @@ function SurveyResponsesAdminPage() {
     canEditSurvey,
     canViewSurveyResponses,
     canChangeSurveyStatus,
+    isSurveyOwner,
   } = useAuth();
   const { surveyId } = useParams();
   const [survey, setSurvey] = useState(null);
@@ -1188,6 +1195,12 @@ function SurveyResponsesAdminPage() {
 
   const surveyPiiQuestions = detectPrivacyQuestions(survey?.questions ?? []).piiQuestions;
   const surveyHasPii = surveyPiiQuestions.length > 0;
+  const piiQuestionIds = useMemo(
+    () => new Set(surveyPiiQuestions.map((q) => q.id)),
+    [surveyPiiQuestions],
+  );
+  const shouldMaskDownload =
+    !['super_admin', 'admin'].includes(role) && !isSurveyOwner(survey);
 
   const handleAnonymize = async (responseId) => {
     if (!responseId || !surveyHasPii) return;
@@ -1281,7 +1294,14 @@ function SurveyResponsesAdminPage() {
     const dataRows = exportSource.map((response) => {
       const answerItems = getOrderedResponseAnswerItems(survey.questions, response.answers);
       const answerMap = new Map(
-        answerItems.map((item) => [item.questionId, formatSurveyAnswer(item.answer, item)]),
+        answerItems.map((item) => {
+          const formatted = formatSurveyAnswer(item.answer, item);
+          const masked =
+            shouldMaskDownload && piiQuestionIds.has(item.questionId)
+              ? maskAnswerByQuestion(formatted, item.questionTitle, item.questionType)
+              : formatted;
+          return [item.questionId, masked];
+        }),
       );
 
       return [
@@ -1325,9 +1345,12 @@ function SurveyResponsesAdminPage() {
         setStatisticsExcelLoading(true);
         setStatisticsExcelMessage('통계 Excel 파일을 생성하는 중입니다...');
         const { downloadStatisticsExcel } = await import('../utils/statisticsExcel');
+        const excelResponses = shouldMaskDownload
+          ? maskResponsesForDownload(exportSource, piiQuestionIds)
+          : exportSource;
         const result = await downloadStatisticsExcel({
           survey,
-          responses: exportSource,
+          responses: excelResponses,
         });
         setStatisticsExcelMessage(
           `통계 Excel 다운로드가 완료되었습니다. (${Math.max(1, Math.round(result.size / 1024))}KB)`,
@@ -1365,8 +1388,8 @@ function SurveyResponsesAdminPage() {
         const summary = extractApplicationResponseSummary(survey.questions, response);
         return [
           formatFirestoreDate(response.submittedAt),
-          summary.name,
-          summary.phone,
+          shouldMaskDownload ? maskName(summary.name) : summary.name,
+          shouldMaskDownload ? maskPhone(summary.phone) : summary.phone,
           summary.primaryValue,
           getResponseStatusMeta(response.status).label,
           response.adminNote ?? '',
@@ -1413,8 +1436,8 @@ function SurveyResponsesAdminPage() {
         const summary = extractApplicationResponseSummary(survey.questions, response);
         return [
           formatFirestoreDate(response.submittedAt),
-          summary.name,
-          summary.phone,
+          shouldMaskDownload ? maskName(summary.name) : summary.name,
+          shouldMaskDownload ? maskPhone(summary.phone) : summary.phone,
           selectedSlotFilter.title,
           getResponseStatusMeta(response.status).label,
           response.adminNote ?? '',
@@ -2493,8 +2516,8 @@ function SurveyResponsesAdminPage() {
                   {slotRosterRows.map((row) => (
                     <tr key={`slot-roster-${row.id}`}>
                       <td>{formatFirestoreDate(row.submittedAt)}</td>
-                      <td>{row.name}</td>
-                      <td>{row.phone}</td>
+                      <td>{maskName(row.name)}</td>
+                      <td>{maskPhone(row.phone)}</td>
                       <td>
                         <span className={getResponseStatusMeta(row.status).className}>
                           {getResponseStatusMeta(row.status).label}
@@ -2547,8 +2570,8 @@ function SurveyResponsesAdminPage() {
                   return (
                     <tr key={response.id}>
                       <td>{formatFirestoreDate(response.submittedAt)}</td>
-                      <td>{response.summary.name}</td>
-                      <td>{response.summary.phone}</td>
+                      <td>{maskName(response.summary.name)}</td>
+                      <td>{maskPhone(response.summary.phone)}</td>
                       <td>{response.summary.primaryValue}</td>
                       <td>
                         <div className="response-status-panel response-status-panel-compact">
@@ -2693,18 +2716,24 @@ function SurveyResponsesAdminPage() {
                 </div>
 
               <div className="response-answer-list">
-                {response.answerItems.map((answer) => (
-                  <div className="response-answer-item" key={`${response.id}-${answer.questionId}`}>
-                    <strong>
-                      {questionDisplayMap[answer.questionId]?.shortLabel
-                        ? `${questionDisplayMap[answer.questionId].shortLabel}. `
-                        : ''}
-                      {answer.questionTitle}
-                    </strong>
-                    {answer.questionDescription && <small>{answer.questionDescription}</small>}
-                    <p>{formatSurveyAnswer(answer.answer, answer)}</p>
-                  </div>
-                ))}
+                {response.answerItems.map((answer) => {
+                  const displayValue = formatSurveyAnswer(answer.answer, answer);
+                  const maskedValue = piiQuestionIds.has(answer.questionId)
+                    ? maskAnswerByQuestion(displayValue, answer.questionTitle, answer.questionType)
+                    : displayValue;
+                  return (
+                    <div className="response-answer-item" key={`${response.id}-${answer.questionId}`}>
+                      <strong>
+                        {questionDisplayMap[answer.questionId]?.shortLabel
+                          ? `${questionDisplayMap[answer.questionId].shortLabel}. `
+                          : ''}
+                        {answer.questionTitle}
+                      </strong>
+                      {answer.questionDescription && <small>{answer.questionDescription}</small>}
+                      <p>{maskedValue}</p>
+                    </div>
+                  );
+                })}
               </div>
             </article>
             );

@@ -324,7 +324,8 @@ export async function upsertInternalUserProfile(firebaseUser) {
   // Internal @yeongjung.or.kr users who logged in without a pre-registered membership
   // should be treated as creators (active) — consistent with Firestore rules' currentRole()/currentStatus()
   // defaults for users without a users/{uid} doc. This also upgrades existing users who were
-  // auto-assigned the default viewer+pending values on first login before this fix.
+  // auto-assigned the default viewer+pending values on first login before this fix,
+  // and recovers active accounts whose role field is empty/null (role drift from manual admin edits).
   const isAutoAssignedInternalDefault =
     !membershipData &&
     (
@@ -332,7 +333,7 @@ export async function upsertInternalUserProfile(firebaseUser) {
       (
         (existingData.source === 'google' || !existingData.source) &&
         !existingData.membershipId &&
-        resolveStoredUserStatus(existingData) === USER_STATUSES.PENDING &&
+        (resolveStoredUserStatus(existingData) === USER_STATUSES.PENDING || !existingData.role) &&
         (
           !existingData.role ||
           normalizeUserRole(existingData.role, firebaseUser.email) === USER_ROLES.VIEWER

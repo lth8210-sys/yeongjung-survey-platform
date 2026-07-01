@@ -27,6 +27,7 @@ import {
   createSurveyTemplate,
   SURVEY_TEMPLATE_CATEGORIES,
 } from '../firebase/surveyTemplates';
+import { logger } from '../utils/logger';
 
 function TemplateSaveModal({ survey, saving, onClose, onSave }) {
   const [name, setName] = useState(survey?.title ?? '');
@@ -171,7 +172,7 @@ function SurveyListPage() {
       setSurveys(hydrated);
       if (debugListLoad) console.log('setSurveys 완료');
     } catch (loadError) {
-      console.error('설문 목록 조회 실패:', {
+      logger.error('설문 목록 조회 실패:', {
         code: loadError?.code,
         message: loadError?.message,
         role,
