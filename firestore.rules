@@ -10,13 +10,14 @@ service cloud.firestore {
     }
 
     function isInternalEmailValue(email) {
-      return email is string && email.matches('.*@yeongjung\\.or\\.kr$');
+      return email is string &&
+        email.matches('.*@[Yy][Ee][Oo][Nn][Gg][Jj][Uu][Nn][Gg]\\.[Oo][Rr]\\.[Kk][Rr]$');
     }
 
     function isInternalUser() {
       return isSignedIn() && (
-        isInternalEmailValue(userEmail()) ||
-        (hasUserDoc() && isInternalEmailValue(userDoc().data.email))
+        hasUserDoc() ||
+        isInternalEmailValue(userEmail())
       );
     }
 
@@ -53,21 +54,21 @@ service cloud.firestore {
     function currentRole() {
       return isSuperAdminEmail() || isSuperAdminUserDoc()
         ? 'super_admin'
-        : !isInternalUser()
-          ? ''
-          : hasUserDoc()
-            ? normalizeStoredRole(userDoc().data.role)
-            : 'creator';
+        : hasUserDoc()
+          ? normalizeStoredRole(userDoc().data.role)
+          : isInternalEmailValue(userEmail())
+            ? 'creator'
+            : '';
     }
 
     function currentStatus() {
       return isSuperAdminEmail() || isSuperAdminUserDoc()
         ? 'active'
-        : !isInternalUser()
-          ? ''
-          : hasUserDoc()
-            ? normalizeStoredUserStatus(userDoc().data)
-            : 'active';
+        : hasUserDoc()
+          ? normalizeStoredUserStatus(userDoc().data)
+          : isInternalEmailValue(userEmail())
+            ? 'active'
+            : '';
     }
 
     function normalizeStoredRole(role) {
@@ -140,18 +141,9 @@ service cloud.firestore {
       return currentStatus() == 'active' && currentRole() in ['super_admin', 'admin'];
     }
 
-    // TODO: users/{uid} 기반 role/status 평가 안정화 후 임시 제작자 이메일 allowlist를 제거한다.
-    function isCreatorEmail() {
-      return isSignedIn() && userEmail() in [
-        "levelup@yeongjung.or.kr"
-      ];
-    }
-
     function isCreator() {
-      return isCreatorEmail() || (
-        currentStatus() == 'active' &&
-        currentRole() == 'creator'
-      );
+      return currentStatus() == 'active' &&
+        currentRole() == 'creator';
     }
 
     function isViewer() {
@@ -260,8 +252,9 @@ service cloud.firestore {
 
     function canListManagedSurveys(data) {
       return isAtLeastAdmin() ||
-        isCreator() ||
+        (isCreator() && isSurveyOwner(data)) ||
         (
+          isInternalUser() &&
           currentStatus() == 'active' &&
           isOrganizationVisibleSurvey(data)
         );
