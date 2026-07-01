@@ -2786,6 +2786,7 @@ export async function createAuditLog({
   try {
     ensureFirestoreReady();
     const normalizedAction = String(action ?? '');
+    const normalizedSurveyId = String(surveyId ?? '').trim();
     const normalizedSurveyTitle = String(surveyTitle ?? '');
     const normalizedMetadata =
       typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata)
@@ -2807,9 +2808,16 @@ export async function createAuditLog({
       normalizedMetadata.surveyTitle = normalizedSurveyTitle;
     }
 
+    if (!normalizedSurveyId) {
+      logger.debug('[AuditLog] surveyId 없는 감사로그 생략', {
+        action: normalizedAction,
+      });
+      return;
+    }
+
     await addDoc(auditLogsCollection, {
       action: normalizedAction,
-      surveyId: String(surveyId ?? ''),
+      surveyId: normalizedSurveyId,
       responseId: responseId ? String(responseId) : null,
       actor: {
         uid: String(actor?.uid ?? ''),
