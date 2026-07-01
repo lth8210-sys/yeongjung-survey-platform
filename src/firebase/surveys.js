@@ -1758,8 +1758,7 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
       queryTasks.push(
         fetchSurveysByConstraint('surveys?ownerUid==currentUser', where('ownerUid', '==', userAccess.uid)),
         fetchSurveysByConstraint('surveys?createdByUid==currentUser', where('createdByUid', '==', userAccess.uid)),
-        fetchSurveysByConstraint('surveys?ownerId==currentUser', where('ownerId', '==', userAccess.uid)),
-        fetchSurveysByConstraint('surveys?userId==currentUser', where('userId', '==', userAccess.uid)),
+        // ownerId/userId: DB에 해당 필드를 가진 문서가 없으므로 쿼리 제거 (불필요한 Firestore read 방지)
         fetchSurveysByConstraint('surveys?createdBy.uid==currentUser', where('createdBy.uid', '==', userAccess.uid)),
       );
     }
@@ -1780,6 +1779,19 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
 
     if (results.length === 0 && rejectedResults.length > 0) {
       throw rejectedResults[0].reason;
+    }
+
+    // queryTasks[0]은 org 공개 쿼리, queryTasks[1..]이 ownership 쿼리.
+    // org 쿼리만 성공하고 ownership 쿼리 전부 거부된 경우 = role/permission 불일치 가능성.
+    const ownershipSettled = settledResults.slice(1);
+    if (ownershipSettled.length > 0 && ownershipSettled.every((r) => r.status === 'rejected')) {
+      logger.warn('[fetchManagedSurveys] 소유 설문 쿼리 전부 거부 — role/permission 불일치 의심', {
+        uid: userAccess.uid,
+        email: userAccess.email,
+        rejectedCount: ownershipSettled.length,
+        firstErrorCode: ownershipSettled[0]?.reason?.code,
+      });
+      options.onPartialResults?.('권한 설정 문제로 일부 설문만 표시될 수 있습니다. 관리자에게 문의하세요.');
     }
 
     const visibleSurveys = mergeUniqueSurveys(...results).filter(
@@ -2120,9 +2132,9 @@ export async function updateSurvey(
   const { responseCount, ...persistedConfiguration } = normalizedConfiguration;
   const currentSnapshot = await getDoc(doc(db, 'surveys', surveyId));
   const currentData = currentSnapshot.exists() ? currentSnapshot.data() : {};
-  const nextOwnerUid = currentData.ownerUid || updatedBy?.uid || currentData.createdBy?.uid || '';
+  const nextOwnerUid = currentData.ownerUid || currentData.createdBy?.uid || updatedBy?.uid || '';
   const nextOwnerEmail =
-    currentData.ownerEmail || updatedBy?.email || currentData.createdBy?.email || '';
+    currentData.ownerEmail || currentData.createdBy?.email || updatedBy?.email || '';
   const nextCreatedByUid =
     currentData.createdByUid || currentData.createdBy?.uid || updatedBy?.uid || '';
   const nextCreatedByEmail =
