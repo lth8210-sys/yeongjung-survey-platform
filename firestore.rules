@@ -468,7 +468,11 @@ service cloud.firestore {
       let role = resolvedRole(hasDoc, userData, email);
       let status = resolvedStatus(hasDoc, userData, email, role);
 
-      return data.surveyId is string &&
+      return (
+        status == 'active' &&
+        role in ['super_admin', 'admin']
+      ) || (
+        data.surveyId is string &&
         (
           canReadSurveyByIdWithAccess(data.surveyId, role, status) ||
           (
@@ -476,7 +480,8 @@ service cloud.firestore {
             role == 'creator' &&
             isResponseOwner(data)
           )
-        );
+        )
+      );
     }
 
     function canEditManagedResponse(data) {

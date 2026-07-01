@@ -175,6 +175,7 @@ function SurveyListPage() {
       logger.error('설문 목록 조회 실패:', {
         code: loadError?.code,
         message: loadError?.message,
+        path: loadError?.firestorePath ?? '',
         role,
         uid: user?.uid,
         email: user?.email,

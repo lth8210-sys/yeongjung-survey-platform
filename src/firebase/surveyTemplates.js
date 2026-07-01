@@ -35,6 +35,10 @@ function logFirestoreReadDenied(path, error) {
     return;
   }
 
+  if (error && typeof error === 'object') {
+    error.firestorePath = path;
+  }
+
   logger.error('[Firestore permission-denied]', {
     path,
     code: error?.code ?? '',

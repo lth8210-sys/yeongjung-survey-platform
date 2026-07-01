@@ -52,6 +52,7 @@ import {
   maskPhone,
   maskResponsesForDownload,
 } from '../utils/privacy';
+import { logger } from '../utils/logger';
 
 const RESPONSE_PAGE_SIZE = 20;
 const RESIDENT_ASSET_TEMPLATE_ID = 'resident_asset_interview_v1';
@@ -954,6 +955,14 @@ function SurveyResponsesAdminPage() {
         ),
       }));
     } catch (loadError) {
+      logger.error('[SurveyResponsesAdminPage] load failed', {
+        code: loadError?.code,
+        message: loadError?.message,
+        path: loadError?.firestorePath ?? '',
+        role,
+        uid: user?.uid,
+        email: user?.email,
+      });
       setError(
         getFirestoreErrorMessage(
           loadError,

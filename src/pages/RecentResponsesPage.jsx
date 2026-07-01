@@ -13,6 +13,7 @@ import {
   normalizeResponseProcessingStatus,
   RESPONSE_PROCESSING_STATUSES,
 } from '../firebase/surveys';
+import { logger } from '../utils/logger';
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin']);
 
@@ -64,9 +65,10 @@ function RecentResponsesPage() {
         setResponses(recentResponses);
         setSurveys(await hydrateSurveyResponseCounts(managedSurveys));
       } catch (loadError) {
-        console.error('최근 응답 조회 실패:', {
+        logger.error('최근 응답 조회 실패:', {
           code: loadError?.code,
           message: loadError?.message,
+          path: loadError?.firestorePath ?? '',
           role,
           uid: user?.uid,
           email: user?.email,

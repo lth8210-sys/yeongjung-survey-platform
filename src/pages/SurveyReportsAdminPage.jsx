@@ -10,6 +10,7 @@ import {
 } from '../firebase/surveys';
 import { useAuth } from '../contexts/AuthContext';
 import { buildSurveyAnalytics } from '../utils/surveyAnalytics';
+import { logger } from '../utils/logger';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '전체' },
@@ -113,7 +114,14 @@ export default function SurveyReportsAdminPage() {
       });
       setReports(items);
     } catch (loadError) {
-      console.error('[Reports] list load failed', loadError);
+      logger.error('[Reports] list load failed', {
+        code: loadError?.code,
+        message: loadError?.message,
+        path: loadError?.firestorePath ?? '',
+        role,
+        uid: user?.uid,
+        email: user?.email,
+      });
       setError('결과보고서 목록을 불러오지 못했습니다. 권한과 Firestore 규칙을 확인해주세요.');
     } finally {
       setLoading(false);

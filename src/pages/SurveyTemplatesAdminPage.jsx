@@ -9,6 +9,7 @@ import {
   SURVEY_TEMPLATE_CATEGORIES,
   updateSurveyTemplate,
 } from '../firebase/surveyTemplates';
+import { logger } from '../utils/logger';
 
 function getActor(user) {
   return {
@@ -100,7 +101,14 @@ export default function SurveyTemplatesAdminPage() {
         await fetchSurveyTemplates({ includeInactive: canAdministerTemplates }),
       );
     } catch (loadError) {
-      console.error('[SurveyTemplates] list load failed', loadError);
+      logger.error('[SurveyTemplates] list load failed', {
+        code: loadError?.code,
+        message: loadError?.message,
+        path: loadError?.firestorePath ?? '',
+        role,
+        uid: user?.uid,
+        email: user?.email,
+      });
       setError('설문 템플릿 목록을 불러오지 못했습니다. 권한과 Firestore 규칙을 확인해주세요.');
     } finally {
       setLoading(false);

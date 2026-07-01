@@ -117,6 +117,10 @@ function logFirestoreReadDenied(path, error) {
     return;
   }
 
+  if (error && typeof error === 'object') {
+    error.firestorePath = path;
+  }
+
   logger.error('[Firestore permission-denied]', {
     path,
     code: error?.code ?? '',
@@ -1464,6 +1468,10 @@ function mapSurveyDoc(snapshot) {
   const data = snapshot.data();
   const normalizedConfiguration = normalizeSurveyConfiguration(data);
   const normalizedQuestions = alignQuestionsToSections(data.questions, data.sections);
+  const normalizedDraftQuestions = alignQuestionsToSections(
+    Array.isArray(data.draftQuestions) ? data.draftQuestions : data.questions,
+    data.sections,
+  );
   const normalizedSections = normalizeSurveySections(data.sections, normalizedQuestions);
   const optionQuotaCounts = normalizeOptionQuotaCounts(data.optionQuotaCounts);
   const ownerUid = data.ownerUid ?? data.createdByUid ?? data.ownerId ?? data.userId ?? data.createdBy?.uid ?? '';
@@ -1490,6 +1498,7 @@ function mapSurveyDoc(snapshot) {
     },
     visibility: normalizeSurveyVisibility(data.visibility),
     questions: normalizedQuestions,
+    draftQuestions: normalizedDraftQuestions,
     sections: normalizedSections,
     optionQuotaCounts,
     ...normalizedConfiguration,
@@ -2029,6 +2038,7 @@ export async function createSurvey({
     descriptionFormat,
     tableBlocks: normalizeSurveyTableBlocks(tableBlocks),
     questions: normalizedQuestions,
+    draftQuestions: normalizedQuestions,
     sections: normalizedSections,
     optionQuotaCounts: {},
     status,
@@ -2102,6 +2112,7 @@ export async function updateSurvey(
     visibility,
     templateMetadata,
     updatedBy,
+    publishDraft = false,
   },
 ) {
   ensureFirestoreReady();
@@ -2158,13 +2169,29 @@ export async function updateSurvey(
     },
   );
 
+  const shouldPublishDraft = Boolean(publishDraft);
+  const questionPayload = shouldPublishDraft
+    ? {
+        questions: normalizedQuestions,
+        draftQuestions: normalizedQuestions,
+        sections: normalizedSections,
+      }
+    : {
+        draftQuestions: normalizedQuestions,
+        ...(Array.isArray(currentData.questions) && currentData.questions.length > 0
+          ? {}
+          : { questions: normalizedQuestions }),
+        ...(Array.isArray(currentData.sections) && currentData.sections.length > 0
+          ? {}
+          : { sections: normalizedSections }),
+      };
+
   await updateDoc(doc(db, 'surveys', surveyId), {
     title,
     description,
     descriptionFormat: nextDescriptionFormat,
     tableBlocks: normalizeSurveyTableBlocks(nextTableBlocks),
-    questions: normalizedQuestions,
-    sections: normalizedSections,
+    ...questionPayload,
     status,
     ownerUid: nextOwnerUid,
     ownerEmail: nextOwnerEmail,
@@ -2766,13 +2793,21 @@ export async function submitSurveyResponse({
   });
 }
 
-export async function fetchRecentResponses(limitCount = 20) {
+export async function fetchRecentResponses(limitCount = 20, options = {}) {
   ensureFirestoreReady();
-  const snapshot = await getDocs(
-    query(responsesCollection, orderBy('submittedAt', 'desc'), limit(limitCount)),
-  );
+  const pathLabel = `responses?orderBy=submittedAt.desc&limit=${limitCount}`;
+  let snapshot;
 
-  return filterDeletedResponses(snapshot.docs.map(mapResponseDoc));
+  try {
+    snapshot = await getDocs(
+      query(responsesCollection, orderBy('submittedAt', 'desc'), limit(limitCount)),
+    );
+  } catch (error) {
+    logFirestoreReadDenied(pathLabel, error);
+    throw error;
+  }
+
+  return filterDeletedResponses(snapshot.docs.map(mapResponseDoc), options.includeDeleted);
 }
 
 export async function createAuditLog({
@@ -2868,7 +2903,14 @@ export async function fetchAuditLogs({
 
   queryConstraints.push(limit(normalizedLimit));
 
-  const snapshot = await getDocs(query(auditLogsCollection, ...queryConstraints));
+  let snapshot;
+
+  try {
+    snapshot = await getDocs(query(auditLogsCollection, ...queryConstraints));
+  } catch (error) {
+    logFirestoreReadDenied('audit_logs', error);
+    throw error;
+  }
 
   return {
     logs: snapshot.docs.map((item) => ({
@@ -3011,7 +3053,14 @@ function getReportTimestampMillis(value) {
 export async function fetchManagedSurveyReports(userAccess = {}) {
   ensureFirestoreReady();
   const surveys = await fetchManagedSurveys(userAccess);
-  const surveyMap = new Map(surveys.map((survey) => [survey.id, survey]));
+  const readableSurveys = canManageAllSurveys(userAccess.role)
+    ? surveys
+    : userAccess.role === USER_ROLES.CREATOR
+      ? surveys.filter((survey) => isSurveyOwnedByUser(survey, userAccess))
+      : surveys.filter(
+          (survey) => normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
+        );
+  const surveyMap = new Map(readableSurveys.map((survey) => [survey.id, survey]));
   let reportDocs = [];
 
   if (canManageAllSurveys(userAccess.role)) {
@@ -3020,12 +3069,12 @@ export async function fetchManagedSurveyReports(userAccess = {}) {
       throw error;
     });
     reportDocs = snapshot.docs;
-  } else if (userAccess.role === USER_ROLES.CREATOR) {
-    const reportQueries = surveys.map((survey) => ({
+  } else if (readableSurveys.length > 0) {
+    const reportQueries = readableSurveys.map((survey) => ({
       path: `survey_reports?surveyId==${survey.id}`,
       read: () => getDocs(query(surveyReportsCollection, where('surveyId', '==', survey.id))),
     }));
-    const snapshots = await Promise.all(
+    const settledResults = await Promise.allSettled(
       reportQueries.map((item) =>
         item.read().catch((error) => {
           logFirestoreReadDenied(item.path, error);
@@ -3033,6 +3082,23 @@ export async function fetchManagedSurveyReports(userAccess = {}) {
         }),
       ),
     );
+    const snapshots = settledResults
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value);
+    const rejectedResults = settledResults.filter((result) => result.status === 'rejected');
+
+    if (snapshots.length === 0 && rejectedResults.length > 0) {
+      throw rejectedResults[0].reason;
+    }
+
+    if (rejectedResults.length > 0) {
+      logger.warn('[fetchManagedSurveyReports] 일부 설문 보고서 쿼리 거부', {
+        role: userAccess.role,
+        rejectedCount: rejectedResults.length,
+        firstErrorCode: rejectedResults[0]?.reason?.code,
+        firstPath: rejectedResults[0]?.reason?.firestorePath ?? '',
+      });
+    }
     reportDocs = snapshots.flatMap((snapshot) => snapshot.docs);
   }
 
@@ -3144,39 +3210,68 @@ export async function softDeleteSurveyReport(reportId, actor = {}) {
 
 export async function fetchManagedRecentResponses(userAccess = {}, limitCount = 20, options = {}) {
   ensureFirestoreReady();
-  const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
 
   if (canManageAllSurveys(userAccess.role)) {
-    return fetchRecentResponses(limitCount);
+    return fetchRecentResponses(limitCount, options);
   }
 
-  if (userAccess.role !== USER_ROLES.CREATOR || (!userAccess.uid && !normalizedEmail)) {
+  if (!userAccess.role) {
     return [];
   }
 
-  const responseQueries = [];
+  const managedSurveys = await fetchManagedSurveys(userAccess, { includeDeleted: options.includeDeleted });
+  const readableSurveys = userAccess.role === USER_ROLES.CREATOR
+    ? managedSurveys.filter((survey) => isSurveyOwnedByUser(survey, userAccess))
+    : managedSurveys.filter(
+        (survey) => normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
+      );
+  const uniqueSurveyIds = [...new Set(readableSurveys.map((survey) => survey.id).filter(Boolean))];
 
-  if (userAccess.uid) {
-    responseQueries.push(
-      getDocs(query(responsesCollection, where('surveyOwnerUid', '==', userAccess.uid))),
-    );
+  if (uniqueSurveyIds.length === 0) {
+    return [];
   }
 
-  if (normalizedEmail) {
-    responseQueries.push(
-      getDocs(query(responsesCollection, where('surveyOwnerEmail', '==', normalizedEmail))),
-    );
-  }
+  const responseQueries = uniqueSurveyIds.map((surveyId) => {
+    const pathLabel = `responses?surveyId==${surveyId}&orderBy=submittedAt.desc&limit=${limitCount}`;
 
-  const snapshots = (await Promise.allSettled(responseQueries))
+    return getDocs(
+      query(
+        responsesCollection,
+        where('surveyId', '==', surveyId),
+        orderBy('submittedAt', 'desc'),
+        limit(limitCount),
+      ),
+    ).catch((error) => {
+      logFirestoreReadDenied(pathLabel, error);
+      throw error;
+    });
+  });
+
+  const settledResults = await Promise.allSettled(responseQueries);
+  const snapshots = settledResults
     .filter((result) => result.status === 'fulfilled')
     .map((result) => result.value);
+  const rejectedResults = settledResults.filter((result) => result.status === 'rejected');
+
+  if (snapshots.length === 0 && rejectedResults.length > 0) {
+    throw rejectedResults[0].reason;
+  }
+
+  if (rejectedResults.length > 0) {
+    logger.warn('[fetchManagedRecentResponses] 일부 설문 응답 쿼리 거부', {
+      role: userAccess.role,
+      rejectedCount: rejectedResults.length,
+      firstErrorCode: rejectedResults[0]?.reason?.code,
+      firstPath: rejectedResults[0]?.reason?.firestorePath ?? '',
+    });
+  }
+
   const mergedDocs = snapshots.flatMap((snapshot) => snapshot.docs).reduce((result, item) => {
     result.set(item.id, item);
     return result;
   }, new Map());
 
-  return filterDeletedResponses([...mergedDocs.values()].map(mapResponseDoc))
+  return filterDeletedResponses([...mergedDocs.values()].map(mapResponseDoc), options.includeDeleted)
     .sort((first, second) => {
       const firstTime =
         first.submittedAt instanceof Timestamp ? first.submittedAt.toMillis() : 0;
