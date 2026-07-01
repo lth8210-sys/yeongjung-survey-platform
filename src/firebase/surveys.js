@@ -2823,7 +2823,11 @@ export async function createAuditLog({
     const warningKey = `${String(action ?? '')}:${auditError?.code ?? auditError?.message ?? 'unknown'}`;
     if (!warnedAuditLogFailures.has(warningKey)) {
       warnedAuditLogFailures.add(warningKey);
-      console.warn('[AuditLog] 감사로그 저장 실패:', auditError?.code ?? '', auditError?.message ?? auditError);
+      logger.warn('[AuditLog] 감사로그 저장 실패', {
+        path: 'audit_logs',
+        code: auditError?.code ?? '',
+        message: auditError?.message ?? String(auditError ?? ''),
+      });
     }
   }
 }

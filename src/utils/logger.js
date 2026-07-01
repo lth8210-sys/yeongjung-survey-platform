@@ -4,7 +4,11 @@
  * - PROD: uid, email, Firestore path, payload, stack 등 민감정보를 [MASKED]로 출력
  */
 
-const IS_PROD = import.meta.env.PROD;
+const IS_DEV = import.meta.env.DEV;
+const IS_LOCALHOST =
+  typeof window !== 'undefined' &&
+  ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+const SHOULD_MASK = !IS_DEV && !IS_LOCALHOST && import.meta.env.PROD;
 const MASKED = '[MASKED]';
 
 const SENSITIVE_KEYS = new Set([
@@ -25,7 +29,7 @@ const SENSITIVE_KEYS = new Set([
 function maskData(data) {
   if (data === null || data === undefined) return data;
   if (data instanceof Error) {
-    return IS_PROD ? { message: MASKED, code: data.code ?? '' } : data;
+    return SHOULD_MASK ? { message: MASKED, code: data.code ?? '' } : data;
   }
   if (typeof data !== 'object' || Array.isArray(data)) return data;
 
@@ -38,7 +42,7 @@ function maskData(data) {
 
 export const logger = {
   debug(message, data) {
-    if (IS_PROD) return;
+    if (SHOULD_MASK) return;
     if (data !== undefined) {
       console.debug(message, data);
     } else {
@@ -47,7 +51,7 @@ export const logger = {
   },
 
   warn(message, data) {
-    if (IS_PROD) {
+    if (SHOULD_MASK) {
       if (data !== undefined) {
         console.warn(message, maskData(data));
       } else {
@@ -61,7 +65,7 @@ export const logger = {
   },
 
   error(message, data) {
-    if (IS_PROD) {
+    if (SHOULD_MASK) {
       if (data !== undefined) {
         console.error(message, maskData(data));
       } else {

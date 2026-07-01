@@ -42,33 +42,48 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function isSuperAdminUserDoc() {
-      return isSignedIn() &&
-        hasUserDoc() &&
+    function resolvedRole(hasDoc, data, email) {
+      return isProtectedSuperAdminEmailValue(email) ||
         (
-          normalizeStoredRole(userDoc().data.role) == 'super_admin' ||
-          isProtectedSuperAdminEmailValue(userDoc().data.email)
-        );
-    }
-
-    function currentRole() {
-      return isSuperAdminEmail() || isSuperAdminUserDoc()
+          hasDoc &&
+          (
+            normalizeStoredRole(data.role) == 'super_admin' ||
+            isProtectedSuperAdminEmailValue(data.email)
+          )
+        )
         ? 'super_admin'
-        : hasUserDoc()
-          ? normalizeStoredRole(userDoc().data.role)
-          : isInternalEmailValue(userEmail())
+        : hasDoc
+          ? normalizeStoredRole(data.role)
+          : isInternalEmailValue(email)
             ? 'creator'
             : '';
     }
 
-    function currentStatus() {
-      return isSuperAdminEmail() || isSuperAdminUserDoc()
+    function resolvedStatus(hasDoc, data, email, role) {
+      return role == 'super_admin'
         ? 'active'
-        : hasUserDoc()
-          ? normalizeStoredUserStatus(userDoc().data)
-          : isInternalEmailValue(userEmail())
+        : hasDoc
+          ? normalizeStoredUserStatus(data)
+          : isInternalEmailValue(email)
             ? 'active'
             : '';
+    }
+
+    function currentRole() {
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let data = hasDoc ? userDoc().data : {};
+
+      return resolvedRole(hasDoc, data, email);
+    }
+
+    function currentStatus() {
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let data = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, data, email);
+
+      return resolvedStatus(hasDoc, data, email, role);
     }
 
     function normalizeStoredRole(role) {
@@ -144,10 +159,6 @@ service cloud.firestore {
     function isCreator() {
       return currentStatus() == 'active' &&
         currentRole() == 'creator';
-    }
-
-    function isViewer() {
-      return currentStatus() == 'active' && currentRole() == 'viewer';
     }
 
     function normalizedSurveyVisibility(data) {
@@ -242,73 +253,106 @@ service cloud.firestore {
       );
     }
 
-    function canReadManagedSurvey(data) {
-      return isInternalUser() && (
-        isAtLeastAdmin() ||
-        (isCreator() && isSurveyOwner(data)) ||
-        (currentStatus() == 'active' && isOrganizationVisibleSurvey(data))
+    function canReadManagedSurveyWithAccess(data, role, status) {
+      return status == 'active' && (
+        role in ['super_admin', 'admin'] ||
+        (role == 'creator' && isSurveyOwner(data)) ||
+        isOrganizationVisibleSurvey(data)
       );
+    }
+
+    function canEditManagedSurveyWithAccess(data, role, status) {
+      return status == 'active' && (
+        role in ['super_admin', 'admin'] ||
+        (role == 'creator' && isSurveyOwner(data))
+      );
+    }
+
+    function canReadManagedSurvey(data) {
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return canReadManagedSurveyWithAccess(data, role, status);
     }
 
     function canListManagedSurveys(data) {
-      return isAtLeastAdmin() ||
-        (isCreator() && isSurveyOwner(data)) ||
-        (
-          isInternalUser() &&
-          currentStatus() == 'active' &&
-          isOrganizationVisibleSurvey(data)
-        );
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return canReadManagedSurveyWithAccess(data, role, status);
     }
 
     function canEditManagedSurvey(data) {
-      return isInternalUser() && (
-        isAtLeastAdmin() ||
-        (isCreator() && isSurveyOwner(data))
-      );
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return canEditManagedSurveyWithAccess(data, role, status);
+    }
+
+    function canReadSurveyByIdWithAccess(surveyId, role, status) {
+      let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+      let surveyExists = surveyId is string && exists(surveyPath);
+      let surveyData = surveyExists ? get(surveyPath).data : {};
+
+      return surveyExists && canReadManagedSurveyWithAccess(surveyData, role, status);
+    }
+
+    function canEditSurveyByIdWithAccess(surveyId, role, status) {
+      let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+      let surveyExists = surveyId is string && exists(surveyPath);
+      let surveyData = surveyExists ? get(surveyPath).data : {};
+
+      return surveyExists && canEditManagedSurveyWithAccess(surveyData, role, status);
+    }
+
+    function canEditSurveyById(surveyId) {
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return canEditSurveyByIdWithAccess(surveyId, role, status);
+    }
+
+    function canReadSurveyTemplates() {
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return status == 'active' && role in ['super_admin', 'admin', 'creator'];
     }
 
     function canManageReportForSurvey(surveyId) {
-      return isAtLeastAdmin() || (
-        isCreator() &&
-        surveyId is string &&
-        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
-        isSurveyOwner(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
-      );
+      return canEditSurveyById(surveyId);
     }
 
     function canReadManagedReport(reportId, data) {
-      return isAtLeastAdmin() || (
-        isCreator() &&
-        reportId is string &&
-        exists(/databases/$(database)/documents/surveys/$(reportId)) &&
-        isSurveyOwner(get(/databases/$(database)/documents/surveys/$(reportId)).data)
-      ) || (
-        (
-          data.keys().hasAny(["surveyId"]) &&
-          data.surveyId is string &&
-          exists(/databases/$(database)/documents/surveys/$(data.surveyId)) &&
-          canReadReportForSurvey(data.surveyId)
-        )
-      );
-    }
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+      let surveyId = data.keys().hasAny(["surveyId"]) && data.surveyId is string
+        ? data.surveyId
+        : reportId;
 
-    function canReadReportForSurvey(surveyId) {
-      return surveyId is string &&
-        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+      return status == 'active' &&
         (
-          (
-            isCreator() &&
-            isSurveyOwner(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
-          ) ||
-          (
-            currentStatus() == 'active' &&
-            isOrganizationVisibleSurvey(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
-          )
+          role in ['super_admin', 'admin'] ||
+          canReadSurveyByIdWithAccess(surveyId, role, status)
         );
-    }
-
-    function canListManagedReports() {
-      return isAtLeastAdmin() || isCreator();
     }
 
     function validReportCreate() {
@@ -418,21 +462,47 @@ service cloud.firestore {
     }
 
     function canReadManagedResponse(data) {
-      return isAtLeastAdmin() || (
-        isInternalUser() &&
-        data.surveyId is string &&
-        exists(/databases/$(database)/documents/surveys/$(data.surveyId)) &&
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return data.surveyId is string &&
         (
-          (isCreator() && (
-            isResponseOwner(data) ||
-            isSurveyOwner(get(/databases/$(database)/documents/surveys/$(data.surveyId)).data)
-          )) ||
+          canReadSurveyByIdWithAccess(data.surveyId, role, status) ||
           (
-            currentStatus() == 'active' &&
-            isOrganizationVisibleSurvey(get(/databases/$(database)/documents/surveys/$(data.surveyId)).data)
+            status == 'active' &&
+            role == 'creator' &&
+            isResponseOwner(data)
           )
-        )
-      );
+        );
+    }
+
+    function canEditManagedResponse(data) {
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return status == 'active' &&
+        data.surveyId is string &&
+        (
+          role in ['super_admin', 'admin'] ||
+          (
+            role == 'creator' &&
+            (
+              isResponseOwner(data) ||
+              canEditSurveyByIdWithAccess(data.surveyId, role, status)
+            )
+          )
+        );
+    }
+
+    function canCreateAuditLog() {
+      return request.resource.data.surveyId is string &&
+        canEditSurveyById(request.resource.data.surveyId);
     }
 
     function validManagedSurveyCreate() {
@@ -457,10 +527,19 @@ service cloud.firestore {
     }
 
     function canReadSurveySubdoc(surveyId) {
-      return exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
+      let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+      let surveyExists = exists(surveyPath);
+      let surveyData = surveyExists ? get(surveyPath).data : {};
+      let email = userEmail();
+      let hasDoc = isSignedIn() && hasUserDoc();
+      let userData = hasDoc ? userDoc().data : {};
+      let role = resolvedRole(hasDoc, userData, email);
+      let status = resolvedStatus(hasDoc, userData, email, role);
+
+      return surveyExists &&
         (
-          surveyStatusForRead(get(/databases/$(database)/documents/surveys/$(surveyId)).data) ||
-          canReadManagedSurvey(get(/databases/$(database)/documents/surveys/$(surveyId)).data)
+          surveyStatusForRead(surveyData) ||
+          canReadManagedSurveyWithAccess(surveyData, role, status)
         );
     }
 
@@ -625,27 +704,21 @@ service cloud.firestore {
         ) &&
         getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.status in ["published", "closed"];
       allow read: if canReadManagedResponse(resource.data);
-      allow update: if isAtLeastAdmin() || (
-        isCreator() &&
-        (
-          isResponseOwner(resource.data) ||
-          isSurveyOwner(get(/databases/$(database)/documents/surveys/$(resource.data.surveyId)).data)
-        )
-      );
+      allow update: if canEditManagedResponse(resource.data);
       allow delete: if false;
     }
 
     match /survey_reports/{reportId} {
       allow get: if canReadManagedReport(reportId, resource.data);
-      allow list: if canListManagedReports();
+      allow list: if canReadManagedReport(reportId, resource.data);
       allow create: if validReportCreate();
       allow update: if validReportUpdate();
       allow delete: if false;
     }
 
     match /survey_templates/{templateId} {
-      allow get: if isAtLeastAdmin() || isCreator();
-      allow list: if isAtLeastAdmin() || isCreator();
+      allow get: if canReadSurveyTemplates();
+      allow list: if canReadSurveyTemplates();
       allow create: if (isAtLeastAdmin() || isCreator()) &&
         request.resource.data.keys().hasOnly([
           "name",
@@ -707,7 +780,7 @@ service cloud.firestore {
     }
 
     match /audit_logs/{logId} {
-      allow create: if (isAtLeastAdmin() || isCreator()) &&
+      allow create: if canCreateAuditLog() &&
         request.resource.data.keys().hasOnly([
           "action",
           "surveyId",

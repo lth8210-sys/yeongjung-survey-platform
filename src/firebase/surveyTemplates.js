@@ -19,6 +19,7 @@ import {
   sanitizeSurveySections,
 } from './surveys';
 import { createQuestionId, createSectionId } from './surveyNormalize';
+import { logger } from '../utils/logger';
 
 const surveyTemplatesCollection = db ? collection(db, 'survey_templates') : null;
 
@@ -34,7 +35,7 @@ function logFirestoreReadDenied(path, error) {
     return;
   }
 
-  console.error('[Firestore permission-denied]', {
+  logger.error('[Firestore permission-denied]', {
     path,
     code: error?.code ?? '',
     message: error?.message ?? '',
