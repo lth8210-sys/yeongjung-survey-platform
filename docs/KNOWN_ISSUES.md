@@ -30,6 +30,9 @@
 | KI-004 | Survey Reports Permission | 완료 | 중간 | 중간 | P2 | 2026-07 | 2026-07 |
 | KI-005 | Draft Publish | 예정 | 높음 | 높음 | P1 | 2026-07 | - |
 | KI-006 | Functions Notification | 보류 | 중간 | 낮음 | P3 | 2026-07 | - |
+| KI-007 | 설문 수정 저장 시 공개 문항 미반영 | 완료 | 치명 | 중간 | P1 | 2026-07 | 2026-07 |
+| KI-008 | 공개 응답 제출 필드 화이트리스트 부재 | 완료 | 높음 | 낮음 | P1 | 2026-07 | 2026-07 |
+| KI-009 | CSV/Excel 수식 인젝션 | 완료 | 높음 | 낮음 | P1 | 2026-07 | 2026-07 |
 
 ## KI-001 Creator Permission
 
@@ -102,3 +105,67 @@
 - 해결: 핵심 설문/응답 안정화 이후 별도 설계한다.
 - 재발방지: 알림 실패가 응답 제출을 막지 않도록 비동기 처리한다.
 - 운영 영향: 관리자 실시간 알림이 제한될 수 있다.
+
+## KI-007 설문 수정 저장 시 공개 문항 미반영
+
+- 상태: 완료
+- 영향도: 치명
+- 재발 가능성: 중간
+- 우선순위: P1
+- 관련 파일: `src/firebase/surveys.js`, `src/pages/SurveyBuilderPage.jsx`
+- 원인: b5c175e(2026-07-01)에서 `questions`(공개본)/`draftQuestions`(초안) 분리 및
+  `publishDraft` 옵션이 `updateSurvey`에 도입됐으나, `SurveyBuilderPage.jsx`의 저장
+  호출이 `publishDraft`를 전달하지 않아 기본값 `false`로 처리됐다. 기존 설문은
+  거의 항상 `questions`가 이미 채워져 있으므로, 저장할 때마다 `draftQuestions`만
+  갱신되고 응답자가 실제로 보는 `questions`는 그대로 남아 편집 내용이 반영되지
+  않았다(재오픈 시에도 `questions`를 다시 불러오므로 방금 수정한 내용이 사라진
+  것처럼 보임).
+- 해결: 빌더의 저장 호출에 `publishDraft: true`를 명시해 항상 공개 문항을 즉시
+  갱신하도록 복구했다. `updateSurvey` 내부의 분기 로직은 `resolveQuestionPayload`
+  순수 함수로 분리해 `test/surveyUpdatePayload.test.js`로 고정했다.
+- 재발방지: `draftQuestions`/`publishDraft`를 실제 초안-게시 UX로 확장할 때는
+  빌더가 어떤 경우에 `publishDraft: true`를 보내는지 명확히 설계하고,
+  `resolveQuestionPayload` 테스트를 함께 갱신한다.
+- 운영 영향: 2026-07-01 이후 배포된 환경에서 기존 설문을 2회 이상 수정 저장한
+  경우 공개 문항이 최신 상태가 아니었을 수 있다. 배포 후 실제 설문 재확인 필요.
+
+## KI-008 공개 응답 제출 필드 화이트리스트 부재
+
+- 상태: 완료
+- 영향도: 높음
+- 재발 가능성: 낮음
+- 우선순위: P1
+- 관련 파일: `firestore.rules`
+- 원인: `responses` create 규칙이 `hasOnly()` 화이트리스트 없이 최소 필드 존재만
+  검증해, 응답자가 `surveyOwnerEmail`, `status`, `surveyDeleted` 등 임의 필드를
+  위조해 써넣을 수 있는 여지가 있었다.
+- 해결: `validPublicResponseCreate()`를 추가해 `submitSurveyResponse()`가 실제로
+  쓰는 25개 top-level 필드만 허용하고, 항상 고정값인 필드(`status`,
+  `surveyDeleted`, `surveyPermanentlyDeleted`, `hiddenFromDefaultList`,
+  `adminNote`)는 값까지 강제했다. 소유자 스냅샷 필드(`surveyOwnerUid` 등)는
+  legacy 설문의 소유자 필드가 6종으로 혼재되어 서버측 파생 없이 안전하게 대조할
+  수 없어 이번 범위에서는 타입 검증까지만 적용했다(후속 과제로 남김).
+- 재발방지: `submitSurveyResponse()`에 새 필드를 추가하면 반드시
+  `validPublicResponseCreate()`의 `hasOnly()` 목록도 함께 갱신한다. 이 규칙은
+  로컬 에뮬레이터(Java 런타임 필요)로 사전 검증하지 못했으므로, 배포 직후
+  실제 공개 설문 제출 스모크 테스트가 필수다.
+- 운영 영향: 화이트리스트 목록이 실제 코드와 어긋나면 정상 제출도
+  permission-denied로 막힐 수 있다 — 배포 직후 반드시 실제 제출 확인.
+
+## KI-009 CSV/Excel 수식 인젝션
+
+- 상태: 완료
+- 영향도: 높음
+- 재발 가능성: 낮음
+- 우선순위: P1
+- 관련 파일: `src/utils/csvSafeCell.js`, `src/pages/SurveyResponsesAdminPage.jsx`, `src/utils/statisticsExcel.js`
+- 원인: 응답자가 자유응답/이름 등에 `=`, `+`, `-`, `@`로 시작하는 값(예:
+  `=HYPERLINK(...)`)을 입력하면, 관리자가 CSV/Excel을 엑셀로 열 때 수식으로
+  해석되어 실행될 수 있었다(CSV/Formula Injection). 기존 `escapeCsvValue`는
+  큰따옴표만 이스케이프했다.
+- 해결: `src/utils/csvSafeCell.js`의 `sanitizeCellValue`/`sanitizeRow`를 CSV
+  다운로드(`downloadCsv`)와 통계 Excel의 응답 원본/자유의견 시트에 적용해
+  위험 접두문자로 시작하는 값 앞에 작은따옴표를 붙이도록 했다.
+- 재발방지: 응답 데이터를 CSV/Excel 셀에 새로 쓰는 코드를 추가할 때는
+  `sanitizeCellValue`/`sanitizeRow`를 거치도록 한다.
+- 운영 영향: 없음(방어적 강화, 기존 정상 데이터 표시에는 영향 없음).
