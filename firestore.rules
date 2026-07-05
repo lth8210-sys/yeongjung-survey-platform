@@ -630,8 +630,12 @@ service cloud.firestore {
     }
 
     match /surveys/{surveyId} {
+      // NOTE: list는 get과 달리 항상 canListManagedSurveys()만 요구했다 — 즉 비로그인
+      // 방문자는 개별 설문 링크(get)는 볼 수 있어도 공개 설문 목록(list, "/surveys")은
+      // 절대 조회할 수 없었다(2026-07-05 발견, list/get 분리 커밋부터 존재하던 기존 버그).
+      // get과 동일하게 게시/마감(surveyStatusForRead) 상태면 비로그인도 목록 조회를 허용한다.
       allow get: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data);
-      allow list: if canListManagedSurveys(resource.data);
+      allow list: if surveyStatusForRead(resource.data) || canListManagedSurveys(resource.data);
       allow create: if validManagedSurveyCreate();
       allow delete: if canEditManagedSurvey(resource.data);
       allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
