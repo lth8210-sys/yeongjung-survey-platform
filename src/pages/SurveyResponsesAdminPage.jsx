@@ -52,6 +52,7 @@ import {
   maskPhone,
   maskResponsesForDownload,
 } from '../utils/privacy';
+import { sanitizeRow } from '../utils/csvSafeCell';
 import { logger } from '../utils/logger';
 
 const RESPONSE_PAGE_SIZE = 20;
@@ -751,7 +752,9 @@ function escapeCsvValue(value) {
 }
 
 function downloadCsv(filename, rows) {
-  const csvContent = rows.map((row) => row.map((value) => escapeCsvValue(value)).join(',')).join('\n');
+  const csvContent = rows
+    .map((row) => sanitizeRow(row).map((value) => escapeCsvValue(value)).join(','))
+    .join('\n');
   const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

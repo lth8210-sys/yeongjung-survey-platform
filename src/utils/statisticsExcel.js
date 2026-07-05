@@ -13,6 +13,7 @@ import {
   buildSurveyAnalytics,
   generateRuleBasedReportSummary,
 } from './surveyAnalytics';
+import { sanitizeRow, sanitizeCellValue } from './csvSafeCell';
 
 const COLORS = {
   navy: '173B63',
@@ -319,7 +320,8 @@ function createRawSheet(workbook, survey, responses) {
   sheet.getRow(3).values = headers;
   styleHeaderRow(sheet.getRow(3));
   rows.forEach((row, index) => {
-    sheet.getRow(4 + index).values = row;
+    // 응답자가 입력한 원본 텍스트가 그대로 들어오므로 수식 인젝션 방지 처리 필수
+    sheet.getRow(4 + index).values = sanitizeRow(row);
   });
   if (rows.length) styleBodyRows(sheet, 4, 3 + rows.length);
   finalizeSheet(sheet, {
@@ -403,7 +405,8 @@ function createFreeTextSheet(workbook, analytics) {
     category.count,
     denominator > 0 ? category.count / denominator : 0,
     category.analysisText,
-    category.examples.join('\n'),
+    // examples는 응답자의 자유의견 원문 발췌이므로 수식 인젝션 방지 처리 필수
+    sanitizeCellValue(category.examples.join('\n')),
   ]);
   rows.forEach((row, index) => {
     const targetRow = sheet.getRow(4 + index);
