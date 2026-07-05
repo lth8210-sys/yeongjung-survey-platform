@@ -7,6 +7,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../firebase/config';
+import { logger } from './logger';
 
 const DRAFT_PREFIX = 'draft_';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,15 +43,15 @@ function cleanupLocalDrafts(userId) {
         if (updatedAt && now - updatedAt > SEVEN_DAYS_MS) {
           window.localStorage.removeItem(key);
           removedCount += 1;
-          console.log('old draft removed', key);
+          logger.debug('old draft removed', key);
         }
       } catch (error) {
-        console.error('local draft cleanup failed:', error);
+        logger.error('local draft cleanup failed:', error);
       }
     });
 
   if (removedCount === 0) {
-    console.log('no cleanup needed');
+    logger.debug('no cleanup needed');
   }
 }
 
@@ -75,15 +76,15 @@ export async function cleanupOldDrafts(userId) {
         if (updatedAt && now - updatedAt > SEVEN_DAYS_MS) {
           await deleteDoc(doc(db, 'draftResponses', draftDoc.id));
           removedCount += 1;
-          console.log('old draft removed', draftDoc.id);
+          logger.debug('old draft removed', draftDoc.id);
         }
       }),
     );
 
     if (removedCount === 0) {
-      console.log('no cleanup needed');
+      logger.debug('no cleanup needed');
     }
   } catch (error) {
-    console.error('Firestore draft cleanup failed:', error);
+    logger.error('Firestore draft cleanup failed:', error);
   }
 }
