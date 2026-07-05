@@ -90,6 +90,39 @@ export {
   supportsPlaceholder,
 } from './surveyNormalize';
 
+/**
+ * updateSurvey에서 저장할 questions/draftQuestions/sections 조합을 결정한다.
+ * publishDraft=true(빌더의 일반 저장)면 항상 공개 문항(questions)을 즉시 갱신한다.
+ * publishDraft=false는 아직 UI에 연결되지 않은 향후 초안-게시 분리용 경로이며,
+ * 현재 questions가 이미 존재하면 draftQuestions만 갱신하고 questions는 보존한다.
+ * (회귀 이력: b5c175e에서 이 분기가 추가된 뒤 빌더가 publishDraft를 넘기지 않아
+ *  기존 설문 편집 저장이 공개 문항에 반영되지 않는 회귀가 있었다 — surveys.js 테스트로 고정.)
+ */
+export function resolveQuestionPayload({
+  currentData = {},
+  normalizedQuestions,
+  normalizedSections,
+  publishDraft = false,
+}) {
+  if (publishDraft) {
+    return {
+      questions: normalizedQuestions,
+      draftQuestions: normalizedQuestions,
+      sections: normalizedSections,
+    };
+  }
+
+  return {
+    draftQuestions: normalizedQuestions,
+    ...(Array.isArray(currentData.questions) && currentData.questions.length > 0
+      ? {}
+      : { questions: normalizedQuestions }),
+    ...(Array.isArray(currentData.sections) && currentData.sections.length > 0
+      ? {}
+      : { sections: normalizedSections }),
+  };
+}
+
 function ensureFirestoreReady() {
   if (!isFirebaseConfigured || !db) {
     throw new Error(getFirebaseStatusMessage() || 'Firestore가 아직 설정되지 않았습니다.');
@@ -2169,22 +2202,12 @@ export async function updateSurvey(
     },
   );
 
-  const shouldPublishDraft = Boolean(publishDraft);
-  const questionPayload = shouldPublishDraft
-    ? {
-        questions: normalizedQuestions,
-        draftQuestions: normalizedQuestions,
-        sections: normalizedSections,
-      }
-    : {
-        draftQuestions: normalizedQuestions,
-        ...(Array.isArray(currentData.questions) && currentData.questions.length > 0
-          ? {}
-          : { questions: normalizedQuestions }),
-        ...(Array.isArray(currentData.sections) && currentData.sections.length > 0
-          ? {}
-          : { sections: normalizedSections }),
-      };
+  const questionPayload = resolveQuestionPayload({
+    currentData,
+    normalizedQuestions,
+    normalizedSections,
+    publishDraft,
+  });
 
   await updateDoc(doc(db, 'surveys', surveyId), {
     title,

@@ -1472,6 +1472,10 @@ function SurveyBuilderPage() {
           tableBlocks,
           questions: validQuestions,
           sections: validSections,
+          // 빌더 저장은 항상 공개 문항(questions)을 즉시 갱신합니다.
+          // draftQuestions/publishDraft는 별도 초안-게시 UX가 도입되기 전까지는
+          // questions와 함께 동기화되는 사본으로만 사용합니다.
+          publishDraft: true,
           status,
           formType,
           branchingEnabled: effectiveBranchingEnabled,
