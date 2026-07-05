@@ -686,12 +686,82 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    match /responses/{responseId} {
-      allow create: if
+    // 공개 응답 제출(responses create)의 필드 화이트리스트.
+    // submitSurveyResponse()(src/firebase/surveys.js)가 실제로 쓰는 top-level 필드와
+    // 반드시 동기화 상태를 유지해야 한다 — 필드를 추가했는데 여기 반영하지 않으면
+    // 정상 제출이 permission-denied로 막힌다(응답링크 미제출 원인이 될 수 있음).
+    // 값이 항상 고정 상수인 필드(status/surveyDeleted 등)는 위조 방지를 위해
+    // 값까지 강제한다. 소유자 스냅샷(surveyOwnerUid 등)은 legacy 설문의 소유자 필드가
+    // 6종으로 혼재되어 있어(03_INFORMATION_ARCHITECTURE_REVIEW.md) 서버측 파생 없이
+    // 안전하게 대조할 수 없으므로 이번 하드닝 범위에서는 타입 검증까지만 수행한다.
+    function validPublicResponseCreate() {
+      return request.resource.data.keys().hasOnly([
+        "surveyId",
+        "surveyTitle",
+        "clientSubmitId",
+        "surveyType",
+        "surveyOwnerEmail",
+        "surveyOwnerUid",
+        "surveyCreatedByEmail",
+        "surveyCreatedByUid",
+        "surveyDeleted",
+        "surveyPermanentlyDeleted",
+        "hiddenFromDefaultList",
+        "answers",
+        "status",
+        "responseMode",
+        "visibleQuestionIds",
+        "visibleSectionIds",
+        "skippedQuestionIds",
+        "quota",
+        "respondent",
+        "respondentName",
+        "respondentPhone",
+        "selectedSlotLabel",
+        "adminNote",
+        "submittedAt",
+        "updatedAt"
+      ]) &&
         request.resource.data.surveyId is string &&
         request.resource.data.surveyTitle is string &&
         request.resource.data.answers is list &&
         request.resource.data.respondent is map &&
+        request.resource.data.status == "submitted" &&
+        request.resource.data.surveyDeleted == false &&
+        request.resource.data.surveyPermanentlyDeleted == false &&
+        request.resource.data.hiddenFromDefaultList == false &&
+        request.resource.data.adminNote == "" &&
+        request.resource.data.submittedAt == request.time &&
+        (
+          !request.resource.data.keys().hasAny(["clientSubmitId"]) ||
+          request.resource.data.clientSubmitId is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["surveyType"]) ||
+          request.resource.data.surveyType is string
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["visibleQuestionIds"]) ||
+          request.resource.data.visibleQuestionIds is list
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["visibleSectionIds"]) ||
+          request.resource.data.visibleSectionIds is list
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["skippedQuestionIds"]) ||
+          request.resource.data.skippedQuestionIds is list
+        ) &&
+        (
+          !request.resource.data.keys().hasAny(["quota"]) ||
+          request.resource.data.quota == null ||
+          request.resource.data.quota is map
+        );
+    }
+
+    match /responses/{responseId} {
+      allow create: if
+        validPublicResponseCreate() &&
         exists(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)) &&
         surveyStatusForResponse(
           get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data
