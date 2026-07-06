@@ -122,6 +122,8 @@ function QuestionEditor({
     question.type === QUESTION_TYPES.SINGLE_CHOICE ||
     question.type === QUESTION_TYPES.DROPDOWN ||
     question.type === QUESTION_TYPES.APPLICATION_SLOT_CHOICE;
+  const isMultipleChoiceType = question.type === QUESTION_TYPES.MULTIPLE_CHOICE;
+  const maxSelectionsValue = question.validation?.maxSelections ?? '';
   const optionCapacityEnabled =
     Boolean(question.meta?.optionCapacityEnabled) || optionItems.some((item) => item.capacity);
   const simpleBranchingSupported =
@@ -952,6 +954,39 @@ function QuestionEditor({
           </label>
         )}
       </div>
+
+      {isMultipleChoiceType && (
+        <label className="field">
+          <span>최대 선택 개수 (비워두면 제한 없음)</span>
+          <input
+            type="number"
+            min="1"
+            max={normalizedOptions.length || undefined}
+            value={maxSelectionsValue}
+            onChange={(event) => {
+              const rawValue = event.target.value;
+              const nextValidation = { ...(question.validation ?? {}) };
+
+              if (rawValue === '') {
+                delete nextValidation.maxSelections;
+              } else {
+                const parsedValue = Math.max(1, Math.floor(Number(rawValue) || 1));
+                nextValidation.maxSelections = parsedValue;
+              }
+
+              onChange({
+                ...question,
+                validation: nextValidation,
+              });
+            }}
+            placeholder="예: 2"
+          />
+          <small>
+            응답자는 이 문항에서 최대 개수를 초과해 선택할 수 없습니다. 예: 2를 입력하면
+            "2개까지 선택"처럼 안내 문구를 적어도 실제로 3개 이상은 선택되지 않습니다.
+          </small>
+        </label>
+      )}
 
         </>
       )}

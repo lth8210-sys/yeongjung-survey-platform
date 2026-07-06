@@ -74,6 +74,7 @@ export {
   createConditionId,
   createQuestionId,
   createSectionId,
+  getMaxSelections,
   getScaleQuestionConfig,
   isAnswerEmpty,
   isNonResponseQuestionType,

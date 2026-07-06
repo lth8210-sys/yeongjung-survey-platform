@@ -1093,6 +1093,7 @@ export const FORM_TEMPLATES = [
         options: ['상담·사례관리', '경제·물질지원', '주민모임·관계망', '교육문화', '돌봄·건강', '취약계층 발굴', '주민참여·공동체', '공간개방', '기타'],
         allowOther: true,
         required: true,
+        validation: { maxSelections: 2 },
         sectionKey: 'welfare_center',
       }),
       createNeedsQuestion(42, '현재 귀하의 삶에 전반적으로 얼마나 만족하십니까?', {
@@ -1127,6 +1128,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_INFANT_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-2', '[아동] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
@@ -1135,6 +1137,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_CHILD_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-3', '[청소년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
@@ -1143,6 +1146,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_TEEN_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-4', '[청년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
@@ -1151,6 +1155,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_YOUTH_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-5', '[중장년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
@@ -1159,6 +1164,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_MIDDLE_AGE_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion('46-6', '[노년] 가장 필요한 지원은 무엇입니까? 2개까지 선택', {
@@ -1167,6 +1173,7 @@ export const FORM_TEMPLATES = [
         options: YEONGJUNG_NEEDS_SENIOR_SUPPORT_OPTIONS,
         allowOther: true,
         required: false,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(47, '위에서 선택한 지원이 필요한 가장 큰 이유는 무엇입니까?', {
@@ -1188,6 +1195,7 @@ export const FORM_TEMPLATES = [
         options: ['거리·교통', '주거환경', '안전·치안', '생활정보 부족', '이웃관계 부족', '아이·청소년 공간 부족', '어르신 돌봄 부족', '문화·여가 부족', '재개발·상권변화로 인한 불편', '기타'],
         allowOther: true,
         required: true,
+        validation: { maxSelections: 2 },
         sectionKey: 'lifecycle_needs',
       }),
       createNeedsQuestion(50, '영등포 지역 또는 우리 동네가 더 살기 좋은 마을이 되기 위해 가장 필요하다고 생각하는 것은 무엇입니까?', {

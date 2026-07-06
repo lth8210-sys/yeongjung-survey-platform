@@ -461,6 +461,43 @@ export function getScaleQuestionConfig(question = {}) {
   };
 }
 
+/**
+ * 다중선택 문항의 최대 선택 개수를 판정한다.
+ * 1순위: 명시적으로 설정된 값(question.validation.maxSelections 등 — 빌더 UI에서
+ * 설정). normalizeQuestion()이 top-level 필드는 화이트리스트로 걸러내므로
+ * validation/settings/meta 하위에 저장된 값만 저장 후에도 살아남는다.
+ * 2순위(하위호환): "2개까지 선택", "최대 2개", "2개까지 고르" 등 문항 제목/설명/
+ * 옵션에 적힌 텍스트에서 개수를 추출한다. 이미 만들어진 설문(예: 욕구조사
+ * 템플릿)이 텍스트로만 제한을 표시하고 실제 데이터에는 값이 없는 경우를 위한
+ * 안전망이며, 명시적 값이 있으면 텍스트보다 항상 우선한다.
+ */
+export function getMaxSelections(question = {}) {
+  const candidates = [
+    question.maxSelections,
+    question.settings?.maxSelections,
+    question.validation?.maxSelections,
+    question.validation?.max,
+    question.meta?.maxSelections,
+  ];
+  const configuredValue = candidates.find((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+
+  if (configuredValue !== undefined) {
+    return Math.floor(Number(configuredValue));
+  }
+
+  const searchableText = [
+    question.title,
+    question.label,
+    question.description,
+    question.helpText,
+    ...(Array.isArray(question.options) ? question.options : []),
+  ].filter(Boolean).join(' ');
+  const match = searchableText.match(/(?:최대\s*(\d+)\s*개)|(?:(\d+)\s*개\s*까지\s*(?:선택|고르|체크|선정))/);
+  const matchedValue = match ? (match[1] ?? match[2]) : null;
+
+  return matchedValue ? Math.floor(Number(matchedValue)) : null;
+}
+
 export function isAnswerEmpty(question, answer) {
   const normalizedType = normalizeQuestionType(question?.type);
 

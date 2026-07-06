@@ -34,6 +34,7 @@
 | KI-008 | 공개 응답 제출 필드 화이트리스트 부재 | 완료 | 높음 | 낮음 | P1 | 2026-07 | 2026-07 |
 | KI-009 | CSV/Excel 수식 인젝션 | 완료 | 높음 | 낮음 | P1 | 2026-07 | 2026-07 |
 | KI-010 | 공개 설문 목록(list) 비로그인 조회 불가 | 완료 | 치명 | 낮음 | P1 | 2026-07 | 2026-07 |
+| KI-011 | 다중선택 "N개까지 선택" 제한 미강제 | 완료 | 중간 | 중간 | P2 | 2026-07 | 2026-07 |
 
 ## KI-001 Creator Permission
 
@@ -193,3 +194,44 @@
   범위를 갖는지 항상 함께 확인한다. 이번처럼 `list`만 조용히 뒤처지기 쉽다.
 - 운영 영향: 이 규칙이 도입된 시점부터 배포 시점까지, 비로그인 방문자가
   "설문 목록" 화면으로 게시 중인 설문을 둘러볼 수 없었다(직접 링크는 영향 없음).
+
+## KI-011 다중선택 "N개까지 선택" 제한 미강제
+
+- 상태: 완료
+- 영향도: 중간
+- 재발 가능성: 중간
+- 우선순위: P2
+- 관련 파일: `src/firebase/surveyNormalize.js`, `src/pages/SurveyResponsePage.jsx`,
+  `src/components/QuestionEditor.jsx`, `src/data/formTemplates.js`
+- 원인: 다중선택 문항의 선택 개수 제한을 판정하는 `getMaxSelections`가 문항
+  제목/설명 텍스트에서 정규식 `/최대\s*(\d+)\s*개/`("최대 N개")만 인식했다.
+  그러나 "2026 영중 지역주민 욕구조사" 템플릿을 포함해 실제로 자주 쓰이는
+  문구는 "N개까지 선택"("최대"가 없음)이었고, 이 값은 어떤 문항 데이터
+  필드에도 명시적으로 저장돼 있지 않았다. 그 결과 문항 제목은 "2개까지
+  선택"이라고 안내하면서도 실제로는 3개, 4개, ... 선택지 전체를 선택해도
+  제출까지 막히지 않았다. 빌더 화면에도 이 값을 직접 설정할 UI가 없었다.
+- 해결:
+  1. `getMaxSelections`를 `SurveyResponsePage.jsx`에서
+     `src/firebase/surveyNormalize.js`로 추출해 export하고(단일 소스,
+     테스트 가능하도록), 텍스트 정규식을 `"N개까지 선택/고르/체크/선정"`
+     형태까지 인식하도록 확장했다.
+  2. `QuestionEditor.jsx`의 다중선택 문항 편집 화면에 "최대 선택 개수"
+     숫자 입력을 추가했다 — `question.validation.maxSelections`에 저장되며,
+     `normalizeQuestion()`이 `validation` 객체 전체를 보존하므로 저장 후에도
+     유지된다(주의: top-level `question.maxSelections`로 저장하면
+     `normalizeQuestion()`의 필드 화이트리스트에 의해 저장 시 사라진다 —
+     반드시 `validation.maxSelections` 또는 `settings.maxSelections` 사용).
+  3. `formTemplates.js`의 욕구조사 템플릿 "N개까지 선택" 문항 8개(Q41,
+     Q46-1~6, Q49)에 `validation: { maxSelections: 2 }`를 명시적으로 설정했다.
+  4. 실제 운영 중인 "2026 영중 지역주민 욕구조사" 설문(이미 생성된 문서,
+     템플릿 데이터 변경과 무관)에서 정규식 fallback만으로 `getMaxSelections`가
+     8개 문항 모두 정확히 2를 반환하는지 라이브 데이터로 직접 확인했다 —
+     이 프론트엔드 배포만으로 기존 설문도 즉시 보호된다(데이터 마이그레이션
+     불필요).
+- 재발방지: `test/getMaxSelections.test.js`에 실제 욕구조사 문구를 포함한
+  회귀 테스트 11개 고정. 새 문항 유형/문구 패턴을 추가할 때 이 테스트를
+  함께 갱신한다.
+- 운영 영향: 없음(강화만 이루어짐). 다만 클라이언트 UI 레벨 강제일 뿐 서버
+  (Firestore rules)에서 `answers` 내용을 검증하지는 않으므로, 조작된
+  요청으로 우회 제출하는 것까지 막지는 못한다 — v2 Cloud Functions 단계의
+  서버측 응답 검증 과제로 남긴다(docs/review/11_V2_MASTER_BLUEPRINT.md 참조).

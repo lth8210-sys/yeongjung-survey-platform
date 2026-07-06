@@ -7,6 +7,7 @@ import {
   formatPublicDateTime,
   getClosedSurveyMessage,
   getDraftSurveyMessage,
+  getMaxSelections,
   getPublicSurveyState,
   getQuestionOptionItems,
   getScaleQuestionConfig,
@@ -106,32 +107,6 @@ function getQuotaField(question = {}) {
   }
 
   return '';
-}
-
-function getMaxSelections(question = {}) {
-  const candidates = [
-    question.maxSelections,
-    question.settings?.maxSelections,
-    question.validation?.maxSelections,
-    question.validation?.max,
-    question.meta?.maxSelections,
-  ];
-  const configuredValue = candidates.find((value) => Number.isFinite(Number(value)) && Number(value) > 0);
-
-  if (configuredValue !== undefined) {
-    return Math.floor(Number(configuredValue));
-  }
-
-  const searchableText = [
-    question.title,
-    question.label,
-    question.description,
-    question.helpText,
-    ...(Array.isArray(question.options) ? question.options : []),
-  ].filter(Boolean).join(' ');
-  const match = searchableText.match(/최대\s*(\d+)\s*개/);
-
-  return match ? Math.floor(Number(match[1])) : null;
 }
 
 function sanitizeFirestoreDocumentSegment(value) {
