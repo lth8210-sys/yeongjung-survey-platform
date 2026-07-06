@@ -662,7 +662,10 @@ service cloud.firestore {
         request.resource.data.lockType in ['form_duplicate', 'one_slot_per_person'] &&
         exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
-      allow update, delete: if false;
+      allow update: if false;
+      // 응답 삭제 시 lock을 함께 해제해 신청자가 재신청할 수 있도록 허용한다(KI-012).
+      // 삭제 권한은 응답 삭제 권한과 같은 수준(설문 관리 권한)으로 제한한다.
+      allow delete: if canEditSurveySubdoc(surveyId);
     }
 
     match /surveys/{surveyId}/applicationSlotLocks/{lockId} {
@@ -676,7 +679,9 @@ service cloud.firestore {
         request.resource.data.responseId is string &&
         exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
-      allow update, delete: if false;
+      allow update: if false;
+      // 응답 삭제 시 슬롯 lock을 함께 해제한다(KI-012). 권한 범위는 위 applicantLocks와 동일.
+      allow delete: if canEditSurveySubdoc(surveyId);
     }
 
     match /surveys/{surveyId}/clientSubmitLocks/{lockId} {

@@ -3532,6 +3532,16 @@ export async function updateResponseStatus(responseId, status, updatedBy = {}) {
   await updateDoc(doc(db, 'responses', responseId), updates);
 }
 
+const ANONYMIZED_PII_MARKER = '[익명처리됨]';
+
+/**
+ * lock 문서가 지금 삭제하려는 그 응답이 만든 것인지 확인한다.
+ * 32비트 해시(hashString) 충돌로 다른 응답의 lock을 잘못 계산해 지우는 것을 막는 안전장치.
+ */
+export function shouldReleaseLock(lockData, responseId) {
+  return Boolean(lockData) && String(lockData.responseId ?? '') === String(responseId ?? '');
+}
+
 export async function deleteSurveyResponse(responseId, deletedBy = {}) {
   ensureFirestoreReady();
   const responseRef = doc(db, 'responses', responseId);
@@ -3598,6 +3608,52 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
       nextResponseCount = Math.max(0, Number(survey.responseCount ?? 0) - 1);
     }
 
+    // 중복신청/1인1슬롯 lock 정리: 응답이 삭제되어도 lock이 남으면 해당 신청자는
+    // 영구히 재신청할 수 없다(KI-012). applicantKey가 익명처리된 경우는 안전하게
+    // 재계산할 수 없어 건드리지 않는다(여러 익명 응답이 같은 마스킹 문자열을 공유).
+    const applicantKey = String(response.respondent?.applicantKey ?? '');
+    const canResolveLocks = surveyId && applicantKey && applicantKey !== ANONYMIZED_PII_MARKER;
+    let applicantLockRefToDelete = null;
+    const slotLockRefsToDelete = [];
+
+    if (canResolveLocks) {
+      const applicantLockRef = doc(
+        db,
+        'surveys',
+        surveyId,
+        'applicationApplicantLocks',
+        buildApplicantLockDocumentId(applicantKey),
+      );
+      const applicantLockSnapshot = await transaction.get(applicantLockRef);
+
+      if (shouldReleaseLock(applicantLockSnapshot.data(), responseId)) {
+        applicantLockRefToDelete = applicantLockRef;
+      }
+
+      const slotSelections = Array.isArray(response.respondent?.slotSelections)
+        ? response.respondent.slotSelections
+        : [];
+
+      for (const slotSelection of slotSelections) {
+        if (!slotSelection?.questionId || !slotSelection?.slotValue) {
+          continue;
+        }
+
+        const slotLockRef = doc(
+          db,
+          'surveys',
+          surveyId,
+          'applicationSlotLocks',
+          buildApplicationSlotLockDocumentId(slotSelection.questionId, slotSelection.slotValue, applicantKey),
+        );
+        const slotLockSnapshot = await transaction.get(slotLockRef);
+
+        if (shouldReleaseLock(slotLockSnapshot.data(), responseId)) {
+          slotLockRefsToDelete.push(slotLockRef);
+        }
+      }
+    }
+
     if (quotaCountsSnapshot?.exists() && response.quota?.regionId && response.quota?.ageGroupId) {
       const quotaConfig = normalizeRegionAgeQuotaConfig(
         quotaConfigSnapshot?.exists()
@@ -3644,6 +3700,14 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
         updatedAt: serverTimestamp(),
       });
     }
+
+    if (applicantLockRefToDelete) {
+      transaction.delete(applicantLockRefToDelete);
+    }
+
+    slotLockRefsToDelete.forEach((slotLockRef) => {
+      transaction.delete(slotLockRef);
+    });
 
     transaction.set(auditLogRef, {
       action: 'response_delete',

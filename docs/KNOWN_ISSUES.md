@@ -35,6 +35,7 @@
 | KI-009 | CSV/Excel 수식 인젝션 | 완료 | 높음 | 낮음 | P1 | 2026-07 | 2026-07 |
 | KI-010 | 공개 설문 목록(list) 비로그인 조회 불가 | 완료 | 치명 | 낮음 | P1 | 2026-07 | 2026-07 |
 | KI-011 | 다중선택 "N개까지 선택" 제한 미강제 | 완료 | 중간 | 중간 | P2 | 2026-07 | 2026-07 |
+| KI-012 | 응답 삭제 시 중복신청 lock 미해제 | 완료 | 중간 | 중간 | P2 | 2026-07 | 2026-07 |
 
 ## KI-001 Creator Permission
 
@@ -235,3 +236,39 @@
   (Firestore rules)에서 `answers` 내용을 검증하지는 않으므로, 조작된
   요청으로 우회 제출하는 것까지 막지는 못한다 — v2 Cloud Functions 단계의
   서버측 응답 검증 과제로 남긴다(docs/review/11_V2_MASTER_BLUEPRINT.md 참조).
+
+## KI-012 응답 삭제 시 중복신청 lock 미해제
+
+- 상태: 완료
+- 영향도: 중간
+- 재발 가능성: 중간
+- 우선순위: P2
+- 관련 파일: `src/firebase/surveys.js`(`deleteSurveyResponse`), `firestore.rules`
+- 원인: 중복신청 방지(`duplicateCheckEnabled`/`oneSlotPerPersonEnabled`) 또는
+  슬롯 중복방지(`slotDuplicateCheckEnabled`)가 켜진 신청형 폼에서, 제출 시
+  `applicationApplicantLocks`/`applicationSlotLocks` 서브컬렉션에 신청자
+  식별키(전화번호 또는 이름+생년월일) 기준 lock 문서가 생성된다. 그런데
+  관리자가 해당 응답을 삭제(`deleteSurveyResponse`, soft delete)해도 이
+  lock 문서는 전혀 정리되지 않았다 — Firestore rules도 두 컬렉션 모두
+  `allow update, delete: if false`로 영구 불변이었다. 결과적으로 응답을
+  삭제해도 그 신청자는 같은 정보로 **영구히 재신청이 불가능**했다(중복 오신청
+  삭제 후 재도움, 테스트 응답 삭제 후 재테스트 등 흔한 운영 시나리오에서 발생).
+- 해결:
+  1. `deleteSurveyResponse`가 응답의 `respondent.applicantKey`/`slotSelections`로
+     원래 lock 문서 ID를 재계산해 조회하고, `shouldReleaseLock()`(lock의
+     `responseId`가 삭제 대상 응답과 정확히 일치하는지 확인 — 32비트
+     비암호화 해시 충돌로 다른 신청자의 lock을 잘못 지우는 사고 방지)을
+     통과한 lock만 같은 트랜잭션에서 함께 삭제한다.
+  2. 개인정보 익명화(`anonymizeResponsePii`)로 `applicantKey`가
+     `[익명처리됨]`으로 마스킹된 응답은 안전하게 재계산할 수 없으므로
+     lock 정리를 건너뛴다(여러 익명 응답이 같은 문자열을 공유해 서로 다른
+     신청자의 lock을 지울 위험이 있음).
+  3. `firestore.rules`의 두 lock 컬렉션에 `allow delete:
+     if canEditSurveySubdoc(surveyId)`를 추가했다(update는 여전히 금지) —
+     응답을 삭제할 수 있는 것과 같은 수준(설문 관리 권한)으로 제한.
+- 재발방지: `test/shouldReleaseLock.test.js`로 안전장치 로직 고정. lock
+  컬렉션에 새 종류를 추가하면 삭제 시 정리 로직도 함께 갱신한다.
+- 운영 영향: 이 배포 전까지 삭제된 신청형 응답의 신청자는 재신청이 막혀
+  있었을 수 있다. 배포 후에도 과거에 이미 삭제된 응답의 lock은 자동으로
+  정리되지 않으므로(이 로직은 삭제 "시점"에만 작동), 필요 시 해당 신청자의
+  lock 문서를 수동으로 확인해야 한다.
