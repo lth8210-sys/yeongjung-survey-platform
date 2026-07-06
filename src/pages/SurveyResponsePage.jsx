@@ -1993,7 +1993,11 @@ function SurveyResponsePage() {
           {titleWithNumber}
           {question.description && <small>{question.description}</small>}
           {renderQuestionInput(question, index)}
-          {fieldErrors[questionKey] && <small className="error-text">{fieldErrors[questionKey]}</small>}
+          {fieldErrors[questionKey] && (
+            <small className="error-text" id={`error-${questionKey}`} role="alert">
+              {fieldErrors[questionKey]}
+            </small>
+          )}
         </div>
       );
     }
@@ -2019,7 +2023,11 @@ function SurveyResponsePage() {
           </small>
         )}
         {renderQuestionInput(question, index)}
-        {fieldErrors[questionKey] && <small className="error-text">{fieldErrors[questionKey]}</small>}
+        {fieldErrors[questionKey] && (
+          <small className="error-text" id={`error-${questionKey}`} role="alert">
+            {fieldErrors[questionKey]}
+          </small>
+        )}
       </div>
     );
   };
@@ -2271,7 +2279,11 @@ function SurveyResponsePage() {
             <div className="form-message">{visibleFlow.termination.message}</div>
           )}
 
-          {message && <div className="form-message">{message}</div>}
+          {message && (
+            <div className="form-message" role="alert" aria-live="assertive">
+              {message}
+            </div>
+          )}
 
           {import.meta.env.DEV && (
             <div className="inline-note response-debug-panel">
