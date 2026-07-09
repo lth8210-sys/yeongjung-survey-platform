@@ -29,7 +29,7 @@ import {
   getQuestionOptionItems,
   getOrderedResponseAnswerItems,
   getQuotaSummary,
-  buildRegionAgeQuotaDashboard,
+  buildAgeQuotaDashboard,
   getResponseStatusMeta,
   getSurveyStatusMeta,
   isApplicationFormType,
@@ -165,7 +165,7 @@ const SHARE_COPY_TEMPLATES = {
     shortageTitle: '⚠️ 할당표본 부족 현황',
     shortageHeading: '부족표본 TOP 5',
     shortageEmptyText: '부족한 할당표본 셀이 없습니다.',
-    shortageCta: '부족 권역·연령대 중심으로 적극 홍보 부탁드립니다.',
+    shortageCta: '부족 연령대 중심으로 적극 홍보 부탁드립니다.',
     countLabel: '응답수',
     actionNoun: '응답',
     participantNoun: '참여',
@@ -398,8 +398,8 @@ function buildShareText({
   if (type === SHARE_TYPES.SHORTAGE) {
     const shortageLines = (quotaDashboard?.shortageTop ?? [])
       .slice(0, 5)
-      .map((cell, index) =>
-        `${index + 1}. ${cell.regionLabel} / ${cell.ageGroupLabel}: ${cell.current}/${cell.target}, ${cell.shortage}명 부족`,
+      .map((row, index) =>
+        `${index + 1}. ${row.ageGroupLabel}: ${row.current}/${row.target}, ${row.shortage}명 부족`,
       );
 
     return [
@@ -1288,15 +1288,15 @@ function SurveyResponsesAdminPage() {
             }
             return result;
           }, []);
+    const addressQuestionId = survey.questions.find((question) => question.meta?.addressField)?.id ?? '';
 
     const headerRow = [
       '제출일',
       '응답 ID',
       '처리 상태',
       '관리자 비고',
-      '권역',
+      '주소',
       '연령대',
-      '거주지역',
       '출생년도',
       '나이',
       '초과응답',
@@ -1321,9 +1321,8 @@ function SurveyResponsesAdminPage() {
         response.id,
         getResponseStatusMeta(response.status).label,
         response.adminNote ?? '',
-        response.quota?.regionLabel ?? '',
+        addressQuestionId ? (answerMap.get(addressQuestionId) ?? '') : '',
         response.quota?.ageGroupLabel ?? '',
-        response.quota?.area ?? '',
         response.quota?.birthYear ?? '',
         response.quota?.age ?? '',
         response.quota?.isOverQuota ? 'Y' : '',
@@ -1649,8 +1648,8 @@ function SurveyResponsesAdminPage() {
     const totalCount = getQuotaSummary(survey).responseCount ?? responses.length;
     return new Map(responses.map((r, i) => [r.id, totalCount - i]));
   }, [responses, survey]);
-  const regionAgeQuotaDashboard = useMemo(
-    () => buildRegionAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
+  const ageQuotaDashboard = useMemo(
+    () => buildAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
     [survey?.quotaConfig, survey?.quotaCounts],
   );
   const quotaDashboardEnabled = Boolean(survey?.quotaConfig?.enabled);
@@ -1696,7 +1695,7 @@ function SurveyResponsesAdminPage() {
         responses: analyticsSource,
         analytics: surveyAnalytics,
         quotaSummary: shareQuotaSummary,
-        quotaDashboard: regionAgeQuotaDashboard,
+        quotaDashboard: ageQuotaDashboard,
         responseUrl: shareResponseUrl,
         reportUrl: shareReportUrl,
       }),
@@ -1704,7 +1703,7 @@ function SurveyResponsesAdminPage() {
     setShareCopyMessage('');
   }, [
     analyticsSource,
-    regionAgeQuotaDashboard,
+    ageQuotaDashboard,
     shareQuotaSummary,
     shareReportUrl,
     shareResponseUrl,
@@ -1990,7 +1989,7 @@ function SurveyResponsesAdminPage() {
         <div className="panel quota-dashboard-panel">
           <div className="builder-header-row">
             <div>
-              <h2>권역 × 연령대 할당표본 현황</h2>
+              <h2>연령대별 할당표본 현황</h2>
               <p className="meta-description">
                 quotaCounts 누적 문서 기준입니다. 응답 원본 전체를 다시 읽지 않습니다.
               </p>
@@ -2000,32 +1999,32 @@ function SurveyResponsesAdminPage() {
           <div className="analytics-summary-grid">
             <div className="application-summary-card">
               <small>전체 목표 대비 현재</small>
-              <strong>{regionAgeQuotaDashboard.currentTotal} / {regionAgeQuotaDashboard.targetTotal}</strong>
+              <strong>{ageQuotaDashboard.currentTotal} / {ageQuotaDashboard.targetTotal}</strong>
             </div>
             <div className="application-summary-card">
               <small>전체 달성률</small>
-              <strong>{regionAgeQuotaDashboard.percent}%</strong>
+              <strong>{ageQuotaDashboard.percent}%</strong>
             </div>
             <div className="application-summary-card">
               <small>초과응답 수</small>
-              <strong>{regionAgeQuotaDashboard.overQuotaCount}건</strong>
+              <strong>{ageQuotaDashboard.overQuotaCount}건</strong>
             </div>
             <div className="application-summary-card">
-              <small>마감된 셀</small>
-              <strong>{regionAgeQuotaDashboard.closedCellCount}개</strong>
+              <small>마감된 연령대</small>
+              <strong>{ageQuotaDashboard.closedCellCount}개</strong>
             </div>
           </div>
 
-          {regionAgeQuotaDashboard.shortageTop.length > 0 && (
+          {ageQuotaDashboard.shortageTop.length > 0 && (
             <div className="option-status-list">
               <div className="builder-header-row">
                 <div>
                   <h3>부족 표본 TOP 5</h3>
                   <p className="meta-description">
-                    부족 인원 많은 순, 달성률 낮은 순, 권역/연령 순으로 정렬합니다.
+                    부족 인원 많은 순, 달성률 낮은 순으로 정렬합니다.
                   </p>
                 </div>
-                {regionAgeQuotaDashboard.shortageCells.length > regionAgeQuotaDashboard.shortageTop.length && (
+                {ageQuotaDashboard.shortageRows.length > ageQuotaDashboard.shortageTop.length && (
                   <button
                     className="secondary-button"
                     onClick={() => setShowAllQuotaShortages((current) => !current)}
@@ -2036,13 +2035,13 @@ function SurveyResponsesAdminPage() {
                 )}
               </div>
               {(showAllQuotaShortages
-                ? regionAgeQuotaDashboard.shortageCells
-                : regionAgeQuotaDashboard.shortageTop
-              ).map((cell, index) => (
-                <div className="inline-note" key={`shortage-${cell.regionId}-${cell.ageGroupId}`}>
-                  <strong>{index + 1}. {cell.regionLabel} {cell.ageGroupLabel}</strong>
+                ? ageQuotaDashboard.shortageRows
+                : ageQuotaDashboard.shortageTop
+              ).map((row, index) => (
+                <div className="inline-note" key={`shortage-${row.ageGroupId}`}>
+                  <strong>{index + 1}. {row.ageGroupLabel}</strong>
                   {' '}
-                  {cell.shortage}명 부족 ({cell.current}/{cell.target})
+                  {row.shortage}명 부족 ({row.current}/{row.target})
                 </div>
               ))}
             </div>
@@ -2052,43 +2051,32 @@ function SurveyResponsesAdminPage() {
             <table className="response-table quota-dashboard-table">
               <thead>
                 <tr>
-                  <th>권역</th>
-                  {regionAgeQuotaDashboard.config.ageGroups.map((ageGroup) => (
-                    <th key={`quota-dashboard-head-${ageGroup.id}`}>{ageGroup.label}</th>
-                  ))}
-                  <th>계</th>
+                  <th>연령대</th>
+                  <th>목표</th>
+                  <th>응답수</th>
+                  <th>남은 인원</th>
+                  <th>달성률</th>
+                  <th>상태</th>
                 </tr>
               </thead>
               <tbody>
-                {regionAgeQuotaDashboard.rows.map((row) => (
-                  <tr key={`quota-dashboard-row-${row.region.id}`}>
-                    <th>{row.region.label}</th>
-                    {row.cells.map((cell) => (
-                      <td key={`quota-dashboard-cell-${cell.regionId}-${cell.ageGroupId}`}>
-                        <strong>{cell.current} / {cell.target}</strong>
-                        <span>{cell.percent}% · {cell.status}</span>
-                      </td>
-                    ))}
-                    <td>
-                      <strong>{row.currentTotal} / {row.targetTotal}</strong>
-                      <span>
-                        {row.targetTotal > 0 ? Math.round((row.currentTotal / row.targetTotal) * 100) : 0}%
-                      </span>
-                    </td>
+                {ageQuotaDashboard.rows.map((row) => (
+                  <tr key={`quota-dashboard-row-${row.ageGroupId}`}>
+                    <th>{row.ageGroupLabel}</th>
+                    <td>{row.target}</td>
+                    <td>{row.current}</td>
+                    <td>{Math.max(0, row.target - row.current)}</td>
+                    <td>{row.percent}%</td>
+                    <td>{row.status}</td>
                   </tr>
                 ))}
                 <tr>
                   <th>계</th>
-                  {regionAgeQuotaDashboard.ageTotals.map((total) => (
-                    <td key={`quota-dashboard-total-${total.ageGroup.id}`}>
-                      <strong>{total.current} / {total.target}</strong>
-                      <span>{total.percent}%</span>
-                    </td>
-                  ))}
-                  <td>
-                    <strong>{regionAgeQuotaDashboard.currentTotal} / {regionAgeQuotaDashboard.targetTotal}</strong>
-                    <span>{regionAgeQuotaDashboard.percent}%</span>
-                  </td>
+                  <td>{ageQuotaDashboard.targetTotal}</td>
+                  <td>{ageQuotaDashboard.currentTotal}</td>
+                  <td>{Math.max(0, ageQuotaDashboard.targetTotal - ageQuotaDashboard.currentTotal)}</td>
+                  <td>{ageQuotaDashboard.percent}%</td>
+                  <td />
                 </tr>
               </tbody>
             </table>

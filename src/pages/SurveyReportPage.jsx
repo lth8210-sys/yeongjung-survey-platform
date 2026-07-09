@@ -394,10 +394,25 @@ export default function SurveyReportPage() {
     load();
   }, [reportNavigation.reportId, surveyId]);
 
-  const analytics = useMemo(
-    () => (survey ? buildSurveyAnalytics(survey, responses) : null),
-    [survey, responses],
-  );
+  // buildSurveyAnalytics()는 응답/문항 데이터 형태에 따라 예외를 던질 수 있다.
+  // 이 값을 그냥 useMemo에서 던지게 두면 React 렌더 도중 예외가 발생해 페이지
+  // 전체가 흰 화면으로 죽고(콘솔 외에는 원인이 보이지 않음), 아래 데이터 로딩
+  // useEffect의 try/catch는 이 경로를 전혀 잡지 못한다 — 결과보고 생성 오류의
+  // 근본 원인 중 하나였다. 여기서 잡아 기존 `error` 상태와 같은 방식으로
+  // 사용자에게 원인 파악 가능한 메시지를 보여준다.
+  const analyticsResult = useMemo(() => {
+    if (!survey) {
+      return { data: null, error: null };
+    }
+
+    try {
+      return { data: buildSurveyAnalytics(survey, responses), error: null };
+    } catch (analyticsError) {
+      console.error('[SurveyReportPage] buildSurveyAnalytics 실패', analyticsError);
+      return { data: null, error: analyticsError };
+    }
+  }, [survey, responses]);
+  const analytics = analyticsResult.data;
 
   const dateRange = useMemo(() => getDateRange(responses), [responses]);
 
@@ -421,18 +436,27 @@ export default function SurveyReportPage() {
     [dateRange, generatedAt, savedReport, survey],
   );
 
-  const defaultReportSections = useMemo(
-    () =>
-      analytics
-        ? buildDefaultReportSections({
-            survey,
-            analytics,
-            responseCount: responses.length,
-            summary,
-          })
-        : null,
-    [analytics, responses.length, summary, survey],
-  );
+  const defaultReportSectionsResult = useMemo(() => {
+    if (!analytics) {
+      return { data: null, error: null };
+    }
+
+    try {
+      return {
+        data: buildDefaultReportSections({
+          survey,
+          analytics,
+          responseCount: responses.length,
+          summary,
+        }),
+        error: null,
+      };
+    } catch (sectionsError) {
+      console.error('[SurveyReportPage] buildDefaultReportSections 실패', sectionsError);
+      return { data: null, error: sectionsError };
+    }
+  }, [analytics, responses.length, summary, survey]);
+  const defaultReportSections = defaultReportSectionsResult.data;
 
   const auditActor = useMemo(
     () => ({
@@ -780,6 +804,21 @@ export default function SurveyReportPage() {
     return (
       <div className="report-loading-screen">
         <p>{error}</p>
+        <button
+          className="secondary-button"
+          onClick={() => navigate(`/admin/surveys/${surveyId}/responses`)}
+          type="button"
+        >
+          돌아가기
+        </button>
+      </div>
+    );
+  }
+
+  if (analyticsResult.error || defaultReportSectionsResult.error) {
+    return (
+      <div className="report-loading-screen">
+        <p>통계를 계산하는 중 오류가 발생했습니다. 설문 문항 구조와 응답 데이터를 확인한 뒤 다시 시도해주세요.</p>
         <button
           className="secondary-button"
           onClick={() => navigate(`/admin/surveys/${surveyId}/responses`)}

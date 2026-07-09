@@ -32,7 +32,6 @@ import {
   SURVEY_STATUSES,
 } from './surveyConstants';
 import {
-  createConditionId,
   createSectionId,
   getScaleQuestionConfig,
   isAnswerEmpty,
@@ -40,6 +39,7 @@ import {
   isScaleQuestionType,
   isSelectableQuestionType,
   normalizeBranchAction,
+  normalizeBranchCondition,
   normalizeBranching,
   normalizeConditionCombinator,
   normalizeConditionOperator,
@@ -81,6 +81,7 @@ export {
   isScaleQuestionType,
   isSelectableQuestionType,
   normalizeBranchAction,
+  normalizeBranchCondition,
   normalizeBranching,
   normalizeConditionCombinator,
   normalizeConditionOperator,
@@ -168,11 +169,10 @@ export const QUOTA_CLOSE_MODES = {
   ADMIN_ONLY: 'admin_only',
 };
 
-export const DEFAULT_REGION_AGE_QUOTA_CONFIG = {
+export const DEFAULT_AGE_QUOTA_CONFIG = {
   enabled: false,
   totalTarget: 520,
   baseYear: 2026,
-  regionMode: 'region_age',
   closeMode: QUOTA_CLOSE_MODES.BLOCK,
   ageGroups: [
     { id: 'age_0_19', label: '0~19세', minAge: 0, maxAge: 19 },
@@ -180,14 +180,7 @@ export const DEFAULT_REGION_AGE_QUOTA_CONFIG = {
     { id: 'age_40_64', label: '40~64세', minAge: 40, maxAge: 64 },
     { id: 'age_65_plus', label: '65세 이상', minAge: 65, maxAge: null },
   ],
-  regions: [
-    { id: 'region_1', label: '1권역', areas: ['영등포동2가', '영등포동5가', '영등포동7가'] },
-    { id: 'region_2', label: '2권역', areas: ['영등포동1가', '영등포동3가', '영등포동4가', '영등포동6가', '영등포동8가'] },
-    { id: 'region_3', label: '3권역', areas: ['영등포본동'] },
-    { id: 'region_4', label: '4권역', areas: ['문래동', '당산1동', '당산2동'] },
-    { id: 'region_5', label: '5권역', areas: ['여의동', '양평1동', '양평2동'] },
-  ],
-  matrix: {},
+  targets: {},
 };
 
 const TARGETED_FORM_TYPES = new Set([
@@ -503,74 +496,56 @@ function normalizeQuotaId(value, fallback) {
   return normalizedValue || fallback;
 }
 
-export function createDefaultRegionAgeQuotaConfig(overrides = {}) {
+export function createDefaultAgeQuotaConfig(overrides = {}) {
   const baseConfig = {
-    ...DEFAULT_REGION_AGE_QUOTA_CONFIG,
-    ageGroups: DEFAULT_REGION_AGE_QUOTA_CONFIG.ageGroups.map((group) => ({ ...group })),
-    regions: DEFAULT_REGION_AGE_QUOTA_CONFIG.regions.map((region) => ({
-      ...region,
-      areas: [...region.areas],
-    })),
+    ...DEFAULT_AGE_QUOTA_CONFIG,
+    ageGroups: DEFAULT_AGE_QUOTA_CONFIG.ageGroups.map((group) => ({ ...group })),
   };
 
   const totalTarget = normalizeQuotaNumber(overrides.totalTarget ?? baseConfig.totalTarget, 520);
-  const regions = Array.isArray(overrides.regions) ? overrides.regions : baseConfig.regions;
   const ageGroups = Array.isArray(overrides.ageGroups) ? overrides.ageGroups : baseConfig.ageGroups;
-  const matrix = regions.reduce((result, region) => {
-    const regionId = normalizeQuotaId(region.id, createLocalId('region'));
-    result[regionId] = ageGroups.reduce((ageResult, ageGroup) => {
-      const ageGroupId = normalizeQuotaId(ageGroup.id, createLocalId('age'));
-      ageResult[ageGroupId] = 0;
-      return ageResult;
-    }, {});
+  const targets = ageGroups.reduce((result, ageGroup) => {
+    const ageGroupId = normalizeQuotaId(ageGroup.id, createLocalId('age'));
+    result[ageGroupId] = 0;
     return result;
   }, {});
 
-  return normalizeRegionAgeQuotaConfig({
+  return normalizeAgeQuotaConfig({
     ...baseConfig,
     ...overrides,
     totalTarget,
-    regions,
     ageGroups,
-    matrix: overrides.matrix ?? matrix,
+    targets: overrides.targets ?? targets,
   });
 }
 
-export function distributeRegionAgeQuotaMatrix(config = {}) {
-  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
+export function distributeAgeQuotaTargets(config = {}) {
+  const normalizedConfig = normalizeAgeQuotaConfig(config);
   const totalTarget = normalizeQuotaNumber(normalizedConfig.totalTarget, 0);
-  const cellCount = normalizedConfig.regions.length * normalizedConfig.ageGroups.length;
-  const baseCellTarget = cellCount > 0 ? Math.floor(totalTarget / cellCount) : 0;
+  const groupCount = normalizedConfig.ageGroups.length;
+  const baseGroupTarget = groupCount > 0 ? Math.floor(totalTarget / groupCount) : 0;
   let remainingTarget = totalTarget;
 
-  const matrix = normalizedConfig.regions.reduce((result, region, regionIndex) => {
-    result[region.id] = normalizedConfig.ageGroups.reduce((ageResult, ageGroup, ageIndex) => {
-      const isLastCell =
-        regionIndex === normalizedConfig.regions.length - 1 &&
-        ageIndex === normalizedConfig.ageGroups.length - 1;
-      const target = isLastCell ? remainingTarget : Math.min(baseCellTarget, remainingTarget);
-      ageResult[ageGroup.id] = target;
-      remainingTarget -= target;
-      return ageResult;
-    }, {});
+  const targets = normalizedConfig.ageGroups.reduce((result, ageGroup, index) => {
+    const isLastGroup = index === groupCount - 1;
+    const target = isLastGroup ? remainingTarget : Math.min(baseGroupTarget, remainingTarget);
+    result[ageGroup.id] = target;
+    remainingTarget -= target;
     return result;
   }, {});
 
   return {
     ...normalizedConfig,
-    matrix,
+    targets,
   };
 }
 
-export function normalizeRegionAgeQuotaConfig(config = {}) {
+export function normalizeAgeQuotaConfig(config = {}) {
   const safeConfig = config && typeof config === 'object' && !Array.isArray(config) ? config : {};
-  const fallback = DEFAULT_REGION_AGE_QUOTA_CONFIG;
+  const fallback = DEFAULT_AGE_QUOTA_CONFIG;
   const ageGroupsSource = Array.isArray(safeConfig.ageGroups) && safeConfig.ageGroups.length > 0
     ? safeConfig.ageGroups
     : fallback.ageGroups;
-  const regionsSource = Array.isArray(safeConfig.regions) && safeConfig.regions.length > 0
-    ? safeConfig.regions
-    : fallback.regions;
   const ageGroups = ageGroupsSource.map((group, index) => {
     const minAge = Number(group?.minAge);
     const rawMaxAge = group?.maxAge;
@@ -585,22 +560,12 @@ export function normalizeRegionAgeQuotaConfig(config = {}) {
       maxAge: Number.isFinite(maxAge) ? Math.max(0, Math.floor(maxAge)) : null,
     };
   });
-  const regions = regionsSource.map((region, index) => ({
-    id: normalizeQuotaId(region?.id, `region_${index + 1}`),
-    label: String(region?.label ?? `${index + 1}권역`).trim() || `${index + 1}권역`,
-    areas: Array.isArray(region?.areas)
-      ? region.areas.map((area) => String(area ?? '').trim()).filter(Boolean)
-      : [],
-  }));
-  const sourceMatrix =
-    safeConfig.matrix && typeof safeConfig.matrix === 'object' && !Array.isArray(safeConfig.matrix)
-      ? safeConfig.matrix
+  const sourceTargets =
+    safeConfig.targets && typeof safeConfig.targets === 'object' && !Array.isArray(safeConfig.targets)
+      ? safeConfig.targets
       : {};
-  const matrix = regions.reduce((result, region) => {
-    result[region.id] = ageGroups.reduce((ageResult, ageGroup) => {
-      ageResult[ageGroup.id] = normalizeQuotaNumber(sourceMatrix?.[region.id]?.[ageGroup.id], 0);
-      return ageResult;
-    }, {});
+  const targets = ageGroups.reduce((result, ageGroup) => {
+    result[ageGroup.id] = normalizeQuotaNumber(sourceTargets?.[ageGroup.id], 0);
     return result;
   }, {});
 
@@ -608,216 +573,103 @@ export function normalizeRegionAgeQuotaConfig(config = {}) {
     enabled: Boolean(safeConfig.enabled),
     totalTarget: normalizeQuotaNumber(safeConfig.totalTarget, 0),
     baseYear: normalizeQuotaNumber(safeConfig.baseYear, new Date().getFullYear()),
-    regionMode: safeConfig.regionMode === 'region_age' ? 'region_age' : 'region_age',
     closeMode: Object.values(QUOTA_CLOSE_MODES).includes(safeConfig.closeMode)
       ? safeConfig.closeMode
       : QUOTA_CLOSE_MODES.BLOCK,
     ageGroups,
-    regions,
-    matrix,
+    targets,
   };
 }
 
-export function createEmptyQuotaCounts(config = {}) {
-  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
+export function createEmptyAgeQuotaCounts(config = {}) {
+  const normalizedConfig = normalizeAgeQuotaConfig(config);
   return {
     total: 0,
-    cells: normalizedConfig.regions.reduce((result, region) => {
-      result[region.id] = normalizedConfig.ageGroups.reduce((ageResult, ageGroup) => {
-        ageResult[ageGroup.id] = 0;
-        return ageResult;
-      }, {});
+    cells: normalizedConfig.ageGroups.reduce((result, ageGroup) => {
+      result[ageGroup.id] = 0;
       return result;
     }, {}),
   };
 }
 
-export function normalizeQuotaCounts(counts = {}, config = {}) {
-  const emptyCounts = createEmptyQuotaCounts(config);
+export function normalizeAgeQuotaCounts(counts = {}, config = {}) {
+  const emptyCounts = createEmptyAgeQuotaCounts(config);
   const safeCounts = counts && typeof counts === 'object' && !Array.isArray(counts) ? counts : {};
 
   return {
     ...emptyCounts,
     total: normalizeQuotaNumber(safeCounts.total, emptyCounts.total),
-    cells: Object.entries(emptyCounts.cells).reduce((result, [regionId, ageCells]) => {
-      result[regionId] = Object.keys(ageCells).reduce((ageResult, ageGroupId) => {
-        ageResult[ageGroupId] = normalizeQuotaNumber(safeCounts.cells?.[regionId]?.[ageGroupId], 0);
-        return ageResult;
-      }, {});
+    cells: Object.keys(emptyCounts.cells).reduce((result, ageGroupId) => {
+      result[ageGroupId] = normalizeQuotaNumber(safeCounts.cells?.[ageGroupId], 0);
       return result;
     }, {}),
   };
 }
 
-export function normalizeQuotaAreaValue(value) {
-  return String(value ?? '')
-    .trim()
-    .replace(/[·ㆍ・･∙⋅•]/g, '.')
-    .replace(/\s+/g, '')
-    .replace(/[.。．,，、/\\-]+/g, '')
-    .toLowerCase();
-}
-
-function normalizeQuotaAreaComparable(value) {
-  return normalizeQuotaAreaValue(value).replace(/가$/, '');
-}
-
-function getRegionAreaAliases(areas = []) {
-  const aliases = new Set();
-  const normalizedAreas = areas.map((area) => normalizeQuotaAreaValue(area)).filter(Boolean);
-
-  normalizedAreas.forEach((area) => {
-    aliases.add(area);
-    aliases.add(normalizeQuotaAreaComparable(area));
-  });
-
-  const groupedByPrefixSuffix = normalizedAreas.reduce((result, area) => {
-    const match = area.match(/^(.+?)(\d+)가$/);
-
-    if (!match) {
-      return result;
-    }
-
-    const [, prefix, numberText] = match;
-    const key = `${prefix}::가`;
-    result[key] = result[key] ?? { prefix, suffix: '가', numbers: [] };
-    result[key].numbers.push(numberText);
-    return result;
-  }, {});
-
-  Object.values(groupedByPrefixSuffix).forEach((group) => {
-    if (group.numbers.length < 2) {
-      return;
-    }
-
-    const combined = `${group.prefix}${group.numbers.join('')}${group.suffix}`;
-    aliases.add(combined);
-    aliases.add(normalizeQuotaAreaComparable(combined));
-  });
-
-  return aliases;
-}
-
-function findQuotaRegionByArea(regions = [], area = '') {
-  const normalizedArea = normalizeQuotaAreaValue(area);
-  const comparableArea = normalizeQuotaAreaComparable(area);
-
-  return regions.find((region) => {
-    const aliases = getRegionAreaAliases(region.areas);
-    return aliases.has(normalizedArea) || aliases.has(comparableArea);
-  }) ?? null;
-}
-
-export function buildQuotaAreaMappingDebugRows(config = {}, areaValues = []) {
-  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
-
-  return areaValues.map((areaValue) => {
-    const region = findQuotaRegionByArea(normalizedConfig.regions, areaValue);
-
-    return {
-      rawArea: areaValue,
-      normalizedArea: normalizeQuotaAreaValue(areaValue),
-      mapped: Boolean(region),
-      regionId: region?.id ?? '',
-      regionLabel: region?.label ?? '',
-    };
-  });
-}
-
-export function resolveRegionAgeQuota(input = {}, config = {}) {
-  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
-  const area = String(input.area ?? '').trim();
-  const normalizedArea = normalizeQuotaAreaValue(area);
-  const birthYear = Number(input.birthYear);
+export function resolveAgeQuota(input = {}, config = {}) {
+  const normalizedConfig = normalizeAgeQuotaConfig(config);
+  const rawBirthYear = typeof input === 'object' && input !== null ? input.birthYear : input;
+  const trimmedBirthYear = typeof rawBirthYear === 'string' ? rawBirthYear.trim() : rawBirthYear;
+  const birthYear =
+    trimmedBirthYear === '' || trimmedBirthYear === null || trimmedBirthYear === undefined
+      ? NaN
+      : Number(trimmedBirthYear);
   const age = Number.isFinite(birthYear) ? normalizedConfig.baseYear - Math.floor(birthYear) : null;
-  const region = findQuotaRegionByArea(normalizedConfig.regions, area);
   const ageGroup = Number.isFinite(age)
     ? normalizedConfig.ageGroups.find((group) =>
         age >= group.minAge && (group.maxAge === null || age <= group.maxAge),
       ) ?? null
     : null;
 
-  if (!area || !region || !ageGroup || !Number.isFinite(age) || age < 0) {
+  if (!ageGroup || !Number.isFinite(age) || age < 0) {
     return {
       valid: false,
-      area,
-      normalizedArea,
       birthYear: Number.isFinite(birthYear) ? Math.floor(birthYear) : null,
       age,
-      region,
       ageGroup,
     };
   }
 
   return {
     valid: true,
-    area,
-    normalizedArea,
     birthYear: Math.floor(birthYear),
     age,
-    region,
     ageGroup,
   };
 }
 
-export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
-  const normalizedConfig = normalizeRegionAgeQuotaConfig(config);
-  const normalizedCounts = normalizeQuotaCounts(counts, normalizedConfig);
-  const rows = normalizedConfig.regions.map((region) => {
-    const cells = normalizedConfig.ageGroups.map((ageGroup) => {
-      const regionIndex = normalizedConfig.regions.findIndex((item) => item.id === region.id);
-      const ageGroupIndex = normalizedConfig.ageGroups.findIndex((item) => item.id === ageGroup.id);
-      const target = normalizeQuotaNumber(normalizedConfig.matrix?.[region.id]?.[ageGroup.id], 0);
-      const current = normalizeQuotaNumber(normalizedCounts.cells?.[region.id]?.[ageGroup.id], 0);
-      const percent = target > 0 ? Math.round((current / target) * 100) : 0;
-      const shortage = Math.max(0, target - current);
-      const status =
-        target > 0 && current > target
-          ? '초과응답'
-          : target > 0 && current >= target
-            ? '마감'
-            : percent >= 80
-              ? '진행중'
-              : '부족';
-
-      return {
-        regionId: region.id,
-        regionLabel: region.label,
-        regionIndex,
-        ageGroupId: ageGroup.id,
-        ageGroupLabel: ageGroup.label,
-        ageGroupIndex,
-        current,
-        target,
-        percent,
-        shortage,
-        status,
-      };
-    });
+export function buildAgeQuotaDashboard(config = {}, counts = {}) {
+  const normalizedConfig = normalizeAgeQuotaConfig(config);
+  const normalizedCounts = normalizeAgeQuotaCounts(counts, normalizedConfig);
+  const rows = normalizedConfig.ageGroups.map((ageGroup, ageGroupIndex) => {
+    const target = normalizeQuotaNumber(normalizedConfig.targets?.[ageGroup.id], 0);
+    const current = normalizeQuotaNumber(normalizedCounts.cells?.[ageGroup.id], 0);
+    const percent = target > 0 ? Math.round((current / target) * 100) : 0;
+    const shortage = Math.max(0, target - current);
+    const status =
+      target > 0 && current > target
+        ? '초과응답'
+        : target > 0 && current >= target
+          ? '마감'
+          : percent >= 80
+            ? '진행중'
+            : '부족';
 
     return {
-      region,
-      cells,
-      currentTotal: cells.reduce((sum, cell) => sum + cell.current, 0),
-      targetTotal: cells.reduce((sum, cell) => sum + cell.target, 0),
+      ageGroupId: ageGroup.id,
+      ageGroupLabel: ageGroup.label,
+      ageGroupIndex,
+      current,
+      target,
+      percent,
+      shortage,
+      status,
     };
   });
-  const ageTotals = normalizedConfig.ageGroups.map((ageGroup) => {
-    const current = rows.reduce(
-      (sum, row) => sum + (row.cells.find((cell) => cell.ageGroupId === ageGroup.id)?.current ?? 0),
-      0,
-    );
-    const target = rows.reduce(
-      (sum, row) => sum + (row.cells.find((cell) => cell.ageGroupId === ageGroup.id)?.target ?? 0),
-      0,
-    );
-    return { ageGroup, current, target, percent: target > 0 ? Math.round((current / target) * 100) : 0 };
-  });
-  const targetTotal = rows.reduce((sum, row) => sum + row.targetTotal, 0);
-  const currentTotal = normalizedCounts.total || rows.reduce((sum, row) => sum + row.currentTotal, 0);
-  const allCells = rows.flatMap((row) => row.cells);
-  const shortageCells = allCells
-    .filter((cell) => cell.shortage > 0)
+  const targetTotal = rows.reduce((sum, row) => sum + row.target, 0);
+  const currentTotal = normalizedCounts.total || rows.reduce((sum, row) => sum + row.current, 0);
+  const shortageRows = rows
+    .filter((row) => row.shortage > 0)
     .sort((first, second) => {
       if (second.shortage !== first.shortage) {
         return second.shortage - first.shortage;
@@ -827,10 +679,6 @@ export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
         return first.percent - second.percent;
       }
 
-      if (first.regionIndex !== second.regionIndex) {
-        return first.regionIndex - second.regionIndex;
-      }
-
       return first.ageGroupIndex - second.ageGroupIndex;
     });
 
@@ -838,14 +686,13 @@ export function buildRegionAgeQuotaDashboard(config = {}, counts = {}) {
     config: normalizedConfig,
     counts: normalizedCounts,
     rows,
-    ageTotals,
     currentTotal,
     targetTotal,
     percent: targetTotal > 0 ? Math.round((currentTotal / targetTotal) * 100) : 0,
-    overQuotaCount: allCells.reduce((sum, cell) => sum + Math.max(0, cell.current - cell.target), 0),
-    closedCellCount: allCells.filter((cell) => cell.target > 0 && cell.current >= cell.target).length,
-    shortageCells,
-    shortageTop: shortageCells.slice(0, 5),
+    overQuotaCount: rows.reduce((sum, row) => sum + Math.max(0, row.current - row.target), 0),
+    closedCellCount: rows.filter((row) => row.target > 0 && row.current >= row.target).length,
+    shortageRows,
+    shortageTop: shortageRows.slice(0, 5),
   };
 }
 
@@ -1120,21 +967,6 @@ export function isOptionQuotaQuestion(question = {}) {
   }
 
   return Object.keys(normalizedQuestion.optionSettings ?? {}).length > 0;
-}
-
-export function normalizeBranchCondition(condition = {}) {
-  return {
-    id:
-      typeof condition.id === 'string' && condition.id.trim()
-        ? condition.id.trim()
-        : createConditionId(),
-    questionId: condition.questionId?.trim?.() ?? '',
-    operator: normalizeConditionOperator(condition.operator),
-    value:
-      typeof condition.value === 'string' || typeof condition.value === 'number'
-        ? String(condition.value)
-        : '',
-  };
 }
 
 function createDefaultSection(index = 0) {
@@ -1542,8 +1374,8 @@ function mapSurveyDoc(snapshot) {
 async function fetchSurveyQuotaData(surveyId) {
   if (!surveyId) {
     return {
-      quotaConfig: createDefaultRegionAgeQuotaConfig(),
-      quotaCounts: createEmptyQuotaCounts(DEFAULT_REGION_AGE_QUOTA_CONFIG),
+      quotaConfig: createDefaultAgeQuotaConfig(),
+      quotaCounts: createEmptyAgeQuotaCounts(DEFAULT_AGE_QUOTA_CONFIG),
     };
   }
 
@@ -1557,13 +1389,13 @@ async function fetchSurveyQuotaData(surveyId) {
       throw error;
     }),
   ]);
-  const quotaConfig = normalizeRegionAgeQuotaConfig(
+  const quotaConfig = normalizeAgeQuotaConfig(
     configSnapshot.exists()
       ? configSnapshot.data()
-      : createDefaultRegionAgeQuotaConfig(),
+      : createDefaultAgeQuotaConfig(),
   );
-  const quotaCounts = normalizeQuotaCounts(
-    countsSnapshot.exists() ? countsSnapshot.data() : createEmptyQuotaCounts(quotaConfig),
+  const quotaCounts = normalizeAgeQuotaCounts(
+    countsSnapshot.exists() ? countsSnapshot.data() : createEmptyAgeQuotaCounts(quotaConfig),
     quotaConfig,
   );
 
@@ -2100,8 +1932,8 @@ export async function createSurvey({
     updatedAt: serverTimestamp(),
   };
 
-  const normalizedQuotaConfig = normalizeRegionAgeQuotaConfig(
-    quotaConfig ?? createDefaultRegionAgeQuotaConfig(),
+  const normalizedQuotaConfig = normalizeAgeQuotaConfig(
+    quotaConfig ?? createDefaultAgeQuotaConfig(),
   );
   const created = await addDoc(surveysCollection, payload);
   await setDoc(doc(db, 'surveys', created.id, 'quotaConfig', 'main'), {
@@ -2109,7 +1941,7 @@ export async function createSurvey({
     updatedAt: serverTimestamp(),
   });
   await setDoc(doc(db, 'surveys', created.id, 'quotaCounts', 'main'), {
-    ...createEmptyQuotaCounts(normalizedQuotaConfig),
+    ...createEmptyAgeQuotaCounts(normalizedQuotaConfig),
     updatedAt: serverTimestamp(),
   });
   return created.id;
@@ -2250,7 +2082,7 @@ export async function updateSurvey(
   });
 
   if (quotaConfig) {
-    const normalizedQuotaConfig = normalizeRegionAgeQuotaConfig(quotaConfig);
+    const normalizedQuotaConfig = normalizeAgeQuotaConfig(quotaConfig);
     const countsRef = doc(db, 'surveys', surveyId, 'quotaCounts', 'main');
     const countsSnapshot = await getDoc(countsRef);
 
@@ -2261,12 +2093,12 @@ export async function updateSurvey(
 
     if (!countsSnapshot.exists()) {
       await setDoc(countsRef, {
-        ...createEmptyQuotaCounts(normalizedQuotaConfig),
+        ...createEmptyAgeQuotaCounts(normalizedQuotaConfig),
         updatedAt: serverTimestamp(),
       });
     } else {
       await setDoc(countsRef, {
-        ...normalizeQuotaCounts(countsSnapshot.data(), normalizedQuotaConfig),
+        ...normalizeAgeQuotaCounts(countsSnapshot.data(), normalizedQuotaConfig),
         updatedAt: serverTimestamp(),
       }, { merge: true });
     }
@@ -2309,7 +2141,7 @@ export async function duplicateSurvey(surveyId, createdBy) {
     adminNotificationEnabled: survey.adminNotificationEnabled,
     visibility: survey.visibility,
     quotaConfig: {
-      ...createDefaultRegionAgeQuotaConfig(survey.quotaConfig),
+      ...createDefaultAgeQuotaConfig(survey.quotaConfig),
       enabled: Boolean(survey.quotaConfig?.enabled),
     },
     templateMetadata: {
@@ -2543,13 +2375,13 @@ export async function submitSurveyResponse({
       transaction.get(quotaConfigRef),
       transaction.get(quotaCountsRef),
     ]);
-    const quotaConfig = normalizeRegionAgeQuotaConfig(
+    const quotaConfig = normalizeAgeQuotaConfig(
       quotaConfigSnapshot.exists()
         ? quotaConfigSnapshot.data()
-        : createDefaultRegionAgeQuotaConfig(),
+        : createDefaultAgeQuotaConfig(),
     );
-    const quotaCounts = normalizeQuotaCounts(
-      quotaCountsSnapshot.exists() ? quotaCountsSnapshot.data() : createEmptyQuotaCounts(quotaConfig),
+    const quotaCounts = normalizeAgeQuotaCounts(
+      quotaCountsSnapshot.exists() ? quotaCountsSnapshot.data() : createEmptyAgeQuotaCounts(quotaConfig),
       quotaConfig,
     );
 
@@ -2691,22 +2523,16 @@ export async function submitSurveyResponse({
     let nextQuotaCounts = quotaCounts;
 
     if (quotaConfig.enabled) {
-      const resolvedQuota = resolveRegionAgeQuota(quotaInput, quotaConfig);
+      const resolvedQuota = resolveAgeQuota(quotaInput, quotaConfig);
 
       if (!resolvedQuota.valid) {
-        const error = new Error('출생년도와 거주지역을 확인해주세요.');
+        const error = new Error('출생년도를 확인해주세요.');
         error.code = 'failed-precondition';
         throw error;
       }
 
-      const target = normalizeQuotaNumber(
-        quotaConfig.matrix?.[resolvedQuota.region.id]?.[resolvedQuota.ageGroup.id],
-        0,
-      );
-      const currentCount = normalizeQuotaNumber(
-        quotaCounts.cells?.[resolvedQuota.region.id]?.[resolvedQuota.ageGroup.id],
-        0,
-      );
+      const target = normalizeQuotaNumber(quotaConfig.targets?.[resolvedQuota.ageGroup.id], 0);
+      const currentCount = normalizeQuotaNumber(quotaCounts.cells?.[resolvedQuota.ageGroup.id], 0);
       const isClosedCell = target > 0 && currentCount >= target;
       const canAdminOverride = canManageAllSurveys(currentUserAccess.role);
 
@@ -2715,15 +2541,12 @@ export async function submitSurveyResponse({
         (quotaConfig.closeMode === QUOTA_CLOSE_MODES.BLOCK ||
           (quotaConfig.closeMode === QUOTA_CLOSE_MODES.ADMIN_ONLY && !canAdminOverride))
       ) {
-        const error = new Error('선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
+        const error = new Error('선택하신 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
         error.code = 'resource-exhausted';
         throw error;
       }
 
       responseQuota = {
-        area: resolvedQuota.area,
-        regionId: resolvedQuota.region.id,
-        regionLabel: resolvedQuota.region.label,
         birthYear: resolvedQuota.birthYear,
         age: resolvedQuota.age,
         ageGroupId: resolvedQuota.ageGroup.id,
@@ -2735,10 +2558,7 @@ export async function submitSurveyResponse({
         total: normalizeQuotaNumber(quotaCounts.total, 0) + 1,
         cells: {
           ...quotaCounts.cells,
-          [resolvedQuota.region.id]: {
-            ...(quotaCounts.cells?.[resolvedQuota.region.id] ?? {}),
-            [resolvedQuota.ageGroup.id]: currentCount + 1,
-          },
+          [resolvedQuota.ageGroup.id]: currentCount + 1,
         },
       };
     }
@@ -3654,26 +3474,22 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
       }
     }
 
-    if (quotaCountsSnapshot?.exists() && response.quota?.regionId && response.quota?.ageGroupId) {
-      const quotaConfig = normalizeRegionAgeQuotaConfig(
+    if (quotaCountsSnapshot?.exists() && response.quota?.ageGroupId) {
+      const quotaConfig = normalizeAgeQuotaConfig(
         quotaConfigSnapshot?.exists()
           ? quotaConfigSnapshot.data()
-          : createDefaultRegionAgeQuotaConfig(),
+          : createDefaultAgeQuotaConfig(),
       );
-      const quotaCounts = normalizeQuotaCounts(quotaCountsSnapshot.data(), quotaConfig);
-      const regionId = String(response.quota.regionId);
+      const quotaCounts = normalizeAgeQuotaCounts(quotaCountsSnapshot.data(), quotaConfig);
       const ageGroupId = String(response.quota.ageGroupId);
-      const currentCellCount = normalizeQuotaNumber(quotaCounts.cells?.[regionId]?.[ageGroupId], 0);
+      const currentCellCount = normalizeQuotaNumber(quotaCounts.cells?.[ageGroupId], 0);
 
       nextQuotaCounts = {
         ...quotaCounts,
         total: Math.max(0, normalizeQuotaNumber(quotaCounts.total, 0) - 1),
         cells: {
           ...quotaCounts.cells,
-          [regionId]: {
-            ...(quotaCounts.cells?.[regionId] ?? {}),
-            [ageGroupId]: Math.max(0, currentCellCount - 1),
-          },
+          [ageGroupId]: Math.max(0, currentCellCount - 1),
         },
       };
     }

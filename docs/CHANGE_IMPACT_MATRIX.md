@@ -22,9 +22,10 @@
 | `fetchResponsesForSurvey()` | 응답 관리 | deleted survey fallback | 설문 삭제 후 응답 |
 | `fetchAllResponsesForSurveyExport()` | 전체 내보내기 | CSV, Excel, 보고서 | 큰 응답 수 성능 |
 | `hydrateSurveyResponseCounts()` | 설문 목록 count | 대시보드 표시 | 응답 수 표시 |
-| `buildSurveyAnalytics()` | 통계 | 보고서, Excel, 화면 요약 | 객관식/척도/서술형 |
-| `buildRegionAgeQuotaDashboard()` | quota dashboard | 부족 현황 공유 | 권역/연령 matrix |
-| `resolveRegionAgeQuota()` | quota 매칭 | 제출 차단, count 증가 | 생년/지역 응답 |
+| `buildSurveyAnalytics()` | 통계 | 보고서, Excel, 화면 요약 | 객관식/척도/서술형, 예외 발생 시 `SurveyReportPage`가 흰 화면으로 죽지 않는지(2026-07 안전망 추가) |
+| `buildAgeQuotaDashboard()` | quota dashboard | 부족 현황 공유 | 연령대 목표(2026-07부터 지역 quota 폐지, 연령 전용) |
+| `resolveAgeQuota()` | quota 매칭 | 제출 차단, count 증가 | 생년 응답(2026-07부터 지역 응답 매칭 없음) |
+| `buildVisibleQuestionFlow()` question-level `visibilityConditions` | 문항 단위 조건부 표시 | 진행률, 제출 payload, 결과보고 문항 매핑 | 숨겨진 문항이 통계/보고서 집계에서 안전하게 제외되는지(질문 id 불일치 포함) |
 | `saveSurveyReport()` | 보고서 저장 | survey_reports, audit_logs | 보고서 저장/재열람 |
 | `fetchSurveyReport()` | 보고서 열람 | 인쇄, DOCX | reportId/surveyId 일치 |
 | `fetchManagedSurveyReports()` | 보고서 목록 | 권한, 목록 화면 | surveyId별 report query |

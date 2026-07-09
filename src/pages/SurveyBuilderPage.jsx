@@ -15,17 +15,17 @@ import { FORM_TEMPLATES } from '../data/formTemplates';
 import {
   alignQuestionsToSections,
   createAuditLog,
-  createDefaultRegionAgeQuotaConfig,
+  createDefaultAgeQuotaConfig,
   createSurvey,
   detectPrivacyQuestions,
-  distributeRegionAgeQuotaMatrix,
+  distributeAgeQuotaTargets,
   fetchResponseCountBySurveyId,
   fetchSurveyById,
   formatFirestoreDate,
   getFirestoreErrorMessage,
   isApplicationFormType,
   normalizeSurveyConfiguration,
-  normalizeRegionAgeQuotaConfig,
+  normalizeAgeQuotaConfig,
   normalizeSurveySections,
   normalizeSurveyStatus,
   normalizeMaxResponses,
@@ -395,7 +395,7 @@ function SurveyBuilderPage() {
   const [completionMessage, setCompletionMessage] = useState('');
   const [adminNotificationEnabled, setAdminNotificationEnabled] = useState(false);
   const [visibility, setVisibility] = useState(SURVEY_VISIBILITIES.PRIVATE);
-  const [quotaConfig, setQuotaConfig] = useState(() => createDefaultRegionAgeQuotaConfig());
+  const [quotaConfig, setQuotaConfig] = useState(() => createDefaultAgeQuotaConfig());
   const [loading, setLoading] = useState(isEditMode);
   const [notFound, setNotFound] = useState(false);
   const [fetchError, setFetchError] = useState('');
@@ -630,7 +630,7 @@ function SurveyBuilderPage() {
         setCompletionMessage(normalizedConfiguration.completionMessage ?? '');
         setAdminNotificationEnabled(normalizedConfiguration.adminNotificationEnabled);
         setVisibility(normalizeSurveyVisibility(survey.visibility));
-        setQuotaConfig(normalizeRegionAgeQuotaConfig(survey.quotaConfig));
+        setQuotaConfig(normalizeAgeQuotaConfig(survey.quotaConfig));
         setSelectedTemplateId(survey.templateId ?? '');
         setTemplateMetadata({
           templateId: survey.templateId ?? '',
@@ -1012,7 +1012,7 @@ function SurveyBuilderPage() {
     setCompletionMessage(instantiated.completionMessage);
     setAdminNotificationEnabled(instantiated.adminNotificationEnabled);
     setVisibility(SURVEY_VISIBILITIES.PRIVATE);
-    setQuotaConfig(createDefaultRegionAgeQuotaConfig());
+    setQuotaConfig(createDefaultAgeQuotaConfig());
     setOptionQuotaCounts({});
     setSelectedStoredTemplateId(template.id);
     setSelectedStoredTemplateName(template.name);
@@ -1088,8 +1088,8 @@ function SurveyBuilderPage() {
     const templateVisibility = normalizeSurveyVisibility(
       template.settings?.visibility ?? template.survey?.visibility,
     );
-    const templateQuotaConfig = normalizeRegionAgeQuotaConfig(
-      template.quotaConfig ?? template.settings?.quotaConfig ?? createDefaultRegionAgeQuotaConfig(),
+    const templateQuotaConfig = normalizeAgeQuotaConfig(
+      template.quotaConfig ?? template.settings?.quotaConfig ?? createDefaultAgeQuotaConfig(),
     );
     const nextTemplateMetadata = template.templateMetadata ?? { templateId: template.id, templateVersion: 1 };
     const rawTemplateSections =
@@ -1283,7 +1283,7 @@ function SurveyBuilderPage() {
     setCompletionMessage('');
     setAdminNotificationEnabled(false);
     setVisibility(SURVEY_VISIBILITIES.PRIVATE);
-    setQuotaConfig(createDefaultRegionAgeQuotaConfig());
+    setQuotaConfig(createDefaultAgeQuotaConfig());
     setOptionQuotaCounts({});
     setSelectedStoredTemplateId('');
     setSelectedStoredTemplateName('');
@@ -1355,7 +1355,7 @@ function SurveyBuilderPage() {
     setCompletionMessage('');
     setAdminNotificationEnabled(false);
     setVisibility(SURVEY_VISIBILITIES.PRIVATE);
-    setQuotaConfig(createDefaultRegionAgeQuotaConfig({
+    setQuotaConfig(createDefaultAgeQuotaConfig({
       enabled: wizardStartType === 'needs_survey' && wizardUseQuota,
       totalTarget: wizardUseQuota ? 520 : 0,
     }));
@@ -1495,7 +1495,7 @@ function SurveyBuilderPage() {
           completionMessage,
           adminNotificationEnabled,
           visibility,
-          quotaConfig: normalizeRegionAgeQuotaConfig(quotaConfig),
+          quotaConfig: normalizeAgeQuotaConfig(quotaConfig),
           templateMetadata,
           updatedBy: {
             uid: user?.uid ?? '',
@@ -1541,7 +1541,7 @@ function SurveyBuilderPage() {
         completionMessage,
         adminNotificationEnabled,
         visibility,
-        quotaConfig: normalizeRegionAgeQuotaConfig(quotaConfig),
+        quotaConfig: normalizeAgeQuotaConfig(quotaConfig),
         templateMetadata,
         createdBy: {
           uid: user?.uid ?? '',
@@ -1682,15 +1682,9 @@ function SurveyBuilderPage() {
 
     return badges;
   };
-  const normalizedQuotaConfig = normalizeRegionAgeQuotaConfig(quotaConfig);
-  const quotaMatrixTotal = normalizedQuotaConfig.regions.reduce(
-    (regionSum, region) =>
-      regionSum +
-      normalizedQuotaConfig.ageGroups.reduce(
-        (ageSum, ageGroup) =>
-          ageSum + (normalizedQuotaConfig.matrix?.[region.id]?.[ageGroup.id] ?? 0),
-        0,
-      ),
+  const normalizedQuotaConfig = normalizeAgeQuotaConfig(quotaConfig);
+  const quotaMatrixTotal = normalizedQuotaConfig.ageGroups.reduce(
+    (ageSum, ageGroup) => ageSum + (normalizedQuotaConfig.targets?.[ageGroup.id] ?? 0),
     0,
   );
   const quotaTargetDifference = quotaMatrixTotal - normalizedQuotaConfig.totalTarget;
@@ -1700,44 +1694,25 @@ function SurveyBuilderPage() {
       : 0;
   const quotaTargetMismatch = normalizedQuotaConfig.enabled && quotaTargetDifference !== 0;
   const quotaMismatchWarning = quotaTargetMismatch
-    ? `⚠ 권역×연령 matrix 합계(${quotaMatrixTotal}명)가 총 목표(${normalizedQuotaConfig.totalTarget}명)와 다릅니다. 차이 ${quotaTargetDifference > 0 ? '+' : ''}${quotaTargetDifference}명.`
+    ? `⚠ 연령대별 할당 합계(${quotaMatrixTotal}명)가 총 목표(${normalizedQuotaConfig.totalTarget}명)와 다릅니다. 차이 ${quotaTargetDifference > 0 ? '+' : ''}${quotaTargetDifference}명.`
     : '';
   const updateQuotaConfig = (updater) => {
-    setQuotaConfig((current) => normalizeRegionAgeQuotaConfig(updater(normalizeRegionAgeQuotaConfig(current))));
+    setQuotaConfig((current) => normalizeAgeQuotaConfig(updater(normalizeAgeQuotaConfig(current))));
   };
   const handleAutoDistributeQuota = () => {
-    setQuotaConfig((current) => distributeRegionAgeQuotaMatrix(current));
+    setQuotaConfig((current) => distributeAgeQuotaTargets(current));
   };
-  const updateQuotaCellTarget = (regionId, ageGroupId, value) => {
+  const updateQuotaCellTarget = (ageGroupId, value) => {
     updateQuotaConfig((current) => ({
       ...current,
-      matrix: {
-        ...current.matrix,
-        [regionId]: {
-          ...(current.matrix?.[regionId] ?? {}),
-          [ageGroupId]: Math.max(0, Math.floor(Number(value) || 0)),
-        },
+      targets: {
+        ...current.targets,
+        [ageGroupId]: Math.max(0, Math.floor(Number(value) || 0)),
       },
     }));
   };
-  const updateQuotaRegionAreas = (regionId, value) => {
-    updateQuotaConfig((current) => ({
-      ...current,
-      regions: current.regions.map((region) =>
-        region.id === regionId
-          ? {
-              ...region,
-              areas: String(value ?? '')
-                .split(',')
-                .map((area) => area.trim())
-                .filter(Boolean),
-            }
-          : region,
-      ),
-    }));
-  };
-  const cloneQuotaConfig = (value) => normalizeRegionAgeQuotaConfig(
-    JSON.parse(JSON.stringify(normalizeRegionAgeQuotaConfig(value))),
+  const cloneQuotaConfig = (value) => normalizeAgeQuotaConfig(
+    JSON.parse(JSON.stringify(normalizeAgeQuotaConfig(value))),
   );
   const createSettingsSnapshot = () => ({
     status,
@@ -2357,9 +2332,9 @@ function SurveyBuilderPage() {
                 <div className="builder-subpanel">
                   <div className="builder-header-row">
                     <div>
-                      <strong>권역 × 연령대 할당표본</strong>
+                      <strong>연령대별 할당표본</strong>
                       <p className="meta-description">
-                        욕구조사처럼 지역과 연령대별 목표 응답 수를 따로 관리할 때 사용합니다.
+                        욕구조사처럼 연령대별 목표 응답 수를 따로 관리할 때 사용합니다.
                       </p>
                     </div>
                     <div className="card-actions">
@@ -2466,48 +2441,26 @@ function SurveyBuilderPage() {
                         <table className="response-table quota-config-table">
                           <thead>
                             <tr>
-                              <th>권역</th>
-                              {normalizedQuotaConfig.ageGroups.map((ageGroup) => (
-                                <th key={`quota-age-${ageGroup.id}`}>{ageGroup.label}</th>
-                              ))}
-                              <th>권역 합계</th>
-                              <th>세부 행정동</th>
+                              <th>연령대</th>
+                              <th>목표 응답 수</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {normalizedQuotaConfig.regions.map((region) => {
-                              const regionTotal = normalizedQuotaConfig.ageGroups.reduce(
-                                (sum, ageGroup) =>
-                                  sum + (normalizedQuotaConfig.matrix?.[region.id]?.[ageGroup.id] ?? 0),
-                                0,
-                              );
-
-                              return (
-                                <tr key={`quota-region-${region.id}`}>
-                                  <td>{region.label}</td>
-                                  {normalizedQuotaConfig.ageGroups.map((ageGroup) => (
-                                    <td key={`${region.id}-${ageGroup.id}`}>
-                                      <input
-                                        min="0"
-                                        onChange={(event) =>
-                                          updateQuotaCellTarget(region.id, ageGroup.id, event.target.value)
-                                        }
-                                        type="number"
-                                        value={normalizedQuotaConfig.matrix?.[region.id]?.[ageGroup.id] ?? 0}
-                                      />
-                                    </td>
-                                  ))}
-                                  <td className="quota-region-total-cell">{regionTotal}명</td>
-                                  <td>
-                                    <input
-                                      onChange={(event) => updateQuotaRegionAreas(region.id, event.target.value)}
-                                      type="text"
-                                      value={region.areas.join(', ')}
-                                    />
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                            {normalizedQuotaConfig.ageGroups.map((ageGroup) => (
+                              <tr key={`quota-age-${ageGroup.id}`}>
+                                <td>{ageGroup.label}</td>
+                                <td>
+                                  <input
+                                    min="0"
+                                    onChange={(event) =>
+                                      updateQuotaCellTarget(ageGroup.id, event.target.value)
+                                    }
+                                    type="number"
+                                    value={normalizedQuotaConfig.targets?.[ageGroup.id] ?? 0}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
                           </tbody>
                         </table>
                       </div>

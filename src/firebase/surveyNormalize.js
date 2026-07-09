@@ -138,6 +138,29 @@ export function normalizeConditionCombinator(combinator) {
   return CONDITION_COMBINATORS.AND;
 }
 
+export function normalizeBranchCondition(condition = {}) {
+  return {
+    id:
+      typeof condition.id === 'string' && condition.id.trim()
+        ? condition.id.trim()
+        : createConditionId(),
+    questionId: condition.questionId?.trim?.() ?? '',
+    operator: normalizeConditionOperator(condition.operator),
+    value:
+      typeof condition.value === 'string' || typeof condition.value === 'number'
+        ? String(condition.value)
+        : '',
+  };
+}
+
+function normalizeVisibilityConditions(conditions) {
+  return Array.isArray(conditions)
+    ? conditions
+        .map((condition) => normalizeBranchCondition(condition))
+        .filter((condition) => condition.questionId)
+    : [];
+}
+
 function normalizeQuestionId(id, index) {
   if (typeof id === 'string' && id.trim()) {
     return id.trim();
@@ -420,6 +443,8 @@ export function normalizeQuestion(question = {}) {
         ? question.settings
         : {},
     meta: question.meta && typeof question.meta === 'object' ? question.meta : {},
+    visibilityConditions: normalizeVisibilityConditions(question.visibilityConditions),
+    visibilityCombinator: normalizeConditionCombinator(question.visibilityCombinator),
     branching: normalizeBranching(
       question.branching,
       {

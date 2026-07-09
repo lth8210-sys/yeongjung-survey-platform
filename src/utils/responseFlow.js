@@ -394,17 +394,26 @@ export function buildVisibleQuestionFlow({ survey, answers = {} }) {
     }
 
     visitedQuestionIds.add(currentQuestion.id);
-    visibleQuestionIds.push(currentQuestion.id);
-    visibleQuestionIdSet.add(currentQuestion.id);
 
-    if (currentSection && !visibleSectionIdSetForFlow.has(currentSection.id)) {
-      visibleSectionIdSetForFlow.add(currentSection.id);
-      visibleSectionIds.push(currentSection.id);
+    const currentQuestionVisible = evaluateConditions(
+      currentQuestion.visibilityConditions,
+      currentQuestion.visibilityCombinator,
+      answers,
+    );
+
+    if (currentQuestionVisible) {
+      visibleQuestionIds.push(currentQuestion.id);
+      visibleQuestionIdSet.add(currentQuestion.id);
+
+      if (currentSection && !visibleSectionIdSetForFlow.has(currentSection.id)) {
+        visibleSectionIdSetForFlow.add(currentSection.id);
+        visibleSectionIds.push(currentSection.id);
+      }
     }
 
     const currentAnswer = getQuestionAnswer(currentQuestion, answers);
 
-    if (!isNonResponseQuestionType(currentQuestion.type)) {
+    if (currentQuestionVisible && !isNonResponseQuestionType(currentQuestion.type)) {
       if (
         isAnswerEmpty({ ...currentQuestion, required: true }, currentAnswer) &&
         (currentQuestion.branching?.enabled || branchTargetGroups.has(currentQuestion.id))

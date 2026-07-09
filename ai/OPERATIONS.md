@@ -237,6 +237,13 @@ npx firebase deploy
 8. PDF 미리보기에서 표지, 목차, 본문 페이지 나눔을 확인합니다.
 9. `/admin/reports`에서 저장본을 열고 검색·복제·삭제를 확인합니다.
 10. `/admin/audit-logs`에서 실행한 작업의 action을 확인합니다.
+11. 욕구조사 등 `quotaConfig.enabled`가 켜진 설문은 `/admin/surveys/{id}/responses`의
+    "할당표본 현황" 탭에서 연령대별 목표/응답수/남은 인원/마감 상태가 정상 표시되는지
+    확인합니다(2026-07부터 연령대 전용, 지역 quota는 폐지되었습니다).
+12. "2026 영중 지역주민 욕구조사"처럼 `src/data/formTemplates.js`의 문항 구조를 바꾼
+    배포 직후에는, 라이브 Firestore 설문 문서가 새 템플릿과 자동 동기화되지 않는다는
+    점을 반드시 확인합니다(KI-013, [docs/KNOWN_ISSUES.md](../docs/KNOWN_ISSUES.md)) —
+    Survey Builder에서 직접 재구성하거나 별도 마이그레이션 스크립트로 반영해야 합니다.
 
 ## 9. 자주 발생하는 문제
 

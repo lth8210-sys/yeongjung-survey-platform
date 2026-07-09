@@ -91,6 +91,29 @@
 - 종료 분기가 있으면 `visibleFlow.termination`에 메시지가 담깁니다.
 - 분기 수정 시 선택형뿐 아니라 비선택형 질문이 뒤에 남아 있는지 확인해야 합니다.
 
+## 문항 단위 조건부 표시 (visibilityConditions) — 2026-07 추가
+
+- 섹션 단위 `visibilityConditions`(하나 이상의 문항 응답으로 섹션 전체를 보여줄지 판단)와 별개로,
+  **문항 하나만** 다른 문항의 응답에 따라 보이거나 숨겨져야 하는 경우 `question.visibilityConditions` /
+  `question.visibilityCombinator`를 사용합니다. 필드 형태와 평가 방식은 섹션의
+  `visibilityConditions`와 동일합니다(`{ id, questionId, operator, value }[]`, 기본 combinator `AND`).
+- 정규화: `src/firebase/surveyNormalize.js`의 `normalizeQuestion()`이 이 두 필드를
+  화이트리스트에 포함해 저장/로드 시 보존합니다(`normalizeBranchCondition`을 공유).
+- 평가: `src/utils/responseFlow.js`의 `buildVisibleQuestionFlow()`가 각 질문을 방문할 때마다
+  `evaluateConditions(question.visibilityConditions, question.visibilityCombinator, answers)`로
+  판정합니다. 조건을 만족하지 않으면 해당 질문은 `visibleQuestionIds`/`visibleSectionIds`에
+  추가되지 않고(=화면에 렌더링되지 않고 진행률 계산에서도 제외됩니다) `skippedQuestionIds`에
+  포함되며, 흐름은 끊기지 않고 다음 질문으로 계속 진행합니다. 숨겨진 필수 문항은 미응답이어도
+  흐름을 막지 않습니다(분기 waypoint와 달리 값이 없어도 break하지 않음).
+- 제출 시 저장되는 `answers` 배열은 `SurveyResponsePage.jsx`가 항상 `visibleFlow.visibleQuestions`
+  기준으로 구성하므로, 조건부로 숨겨진 문항의 값은 별도 처리 없이 자동으로 제출/저장 대상에서
+  제외됩니다(응답을 저장하지 않는 정책으로 통일).
+- 실제 사용 예: "2026 영중 지역주민 욕구조사"의 Q45(세대원, 해당 모두 선택)에 따라
+  Q46-1~6(세대별 욕구) 및 Q46-6 직전의 노년 출생연도 문항이 개별적으로 보이거나 숨겨집니다
+  (`src/data/formTemplates.js`의 `needsGenerationVisibility()` 헬퍼, `CONDITION_OPERATORS.INCLUDES`
+  로 다중선택 응답에 특정 세대 라벨이 포함되는지 판정). 회귀 테스트:
+  `test/responseFlow.test.js`(합성 픽스처), `test/needsSurveyTemplate.test.js`(실제 템플릿 데이터).
+
 ## 향후 리팩토링 방향
 
 - `SurveyResponsePage.jsx`의 흐름 계산, 검증, 렌더링을 작은 훅/유틸로 점진 분리합니다.

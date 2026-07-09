@@ -54,10 +54,10 @@
 | --- | --- |
 | `surveyId` | 연결된 설문 ID |
 | `surveyTitle` | 제출 시점 설문 제목 |
-| `answers` | 응답 배열 또는 응답 데이터 |
+| `answers` | 응답 배열 또는 응답 데이터. 주소(예: "2026 영중 지역주민 욕구조사" Q1)도 별도 top-level 필드 없이 이 배열 안에 일반 문항 답변으로 저장된다(`meta.addressField: true`가 붙은 문항으로 식별) |
 | `respondent` | 응답자 메타데이터 |
 | `submittedAt` | 제출 시각 |
-| `quota` | quota 매칭 결과 |
+| `quota` | 연령대 quota 매칭 결과(`{ birthYear, age, ageGroupId, ageGroupLabel, isOverQuota }`, 2026-07부터 지역 필드 없음) |
 | `deleted` | 삭제 처리 여부 |
 | `surveyOwnerUid` | 설문 소유자 UID 스냅샷 |
 | `surveyOwnerEmail` | 설문 소유자 이메일 스냅샷 |
@@ -131,16 +131,19 @@
 
 경로: `surveys/{surveyId}/quotaConfig/main`
 
+2026-07부터 quota는 연령대(age)만 사용한다. 이전에는 권역(region) x 연령대 matrix였으나,
+Q1(거주지)이 행정동 선택형에서 주소 자유 입력형으로 바뀌며 응답값을 권역으로 매핑할 수
+없게 되어 지역 quota를 폐지했다. 관련: `src/firebase/surveys.js`의
+`resolveAgeQuota`/`buildAgeQuotaDashboard`/`normalizeAgeQuotaConfig`.
+
 | Field | 의미 |
 | --- | --- |
 | `enabled` | quota 사용 여부 |
 | `totalTarget` | 전체 목표 응답 수 |
 | `baseYear` | 연령 계산 기준연도 |
-| `regionMode` | 권역 계산 방식 |
 | `closeMode` | 목표 도달 시 처리 방식 |
-| `ageGroups` | 연령대 정의 |
-| `regions` | 권역과 행정동 정의 |
-| `matrix` | 권역 x 연령대 목표 수 |
+| `ageGroups` | 연령대 정의(`{ id, label, minAge, maxAge }[]`) |
+| `targets` | 연령대별 목표 수(`{ [ageGroupId]: number }`) |
 | `updatedAt` | 수정 시각 |
 
 ## quotaCounts
@@ -150,7 +153,7 @@
 | Field | 의미 |
 | --- | --- |
 | `total` | 전체 누적 응답 수 |
-| `cells` | 권역 x 연령대 누적 응답 수 |
+| `cells` | 연령대별 누적 응답 수(`{ [ageGroupId]: number }`) |
 | `updatedAt` | 수정 시각 |
 
 ## Collection 관계

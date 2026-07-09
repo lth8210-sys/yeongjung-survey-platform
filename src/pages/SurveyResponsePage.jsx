@@ -13,8 +13,8 @@ import {
   getScaleQuestionConfig,
   getQuotaSummary,
   getReceptionPeriodText,
-  buildRegionAgeQuotaDashboard,
-  resolveRegionAgeQuota,
+  buildAgeQuotaDashboard,
+  resolveAgeQuota,
   isApplicationFormType,
   subscribePublicSurvey,
   submitSurveyResponse,
@@ -88,7 +88,7 @@ function normalizeSearchText(value) {
 function getQuotaField(question = {}) {
   const explicitField = question?.meta?.quotaField;
 
-  if (explicitField === 'area' || explicitField === 'birthYear') {
+  if (explicitField === 'birthYear') {
     return explicitField;
   }
 
@@ -97,10 +97,6 @@ function getQuotaField(question = {}) {
     question.label,
     question.description,
   ].filter(Boolean).join(' '));
-
-  if (searchableText.includes('거주지역')) {
-    return 'area';
-  }
 
   if (searchableText.includes('출생연도') || searchableText.includes('출생년도')) {
     return 'birthYear';
@@ -204,9 +200,9 @@ function SurveyResponsePage() {
   const closedMessage = getClosedSurveyMessage(survey?.formType);
   const draftMessage = getDraftSurveyMessage(survey?.formType);
   const quotaSummary = getQuotaSummary(survey);
-  const regionAgeQuotaEnabled = Boolean(survey?.quotaConfig?.enabled);
+  const ageQuotaEnabled = Boolean(survey?.quotaConfig?.enabled);
   const quotaDashboard = useMemo(
-    () => buildRegionAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
+    () => buildAgeQuotaDashboard(survey?.quotaConfig, survey?.quotaCounts),
     [survey?.quotaConfig, survey?.quotaCounts],
   );
   const getQuestionKey = (question, index) => question?.id || `legacy-question-${index + 1}`;
@@ -540,13 +536,12 @@ function SurveyResponsePage() {
   const quotaInput = useMemo(() => {
     const nextInput = {
       birthYear: '',
-      area: '',
     };
 
     (survey?.questions ?? []).forEach((question, index) => {
       const quotaField = getQuotaField(question);
 
-      if (quotaField !== 'area' && quotaField !== 'birthYear') {
+      if (quotaField !== 'birthYear') {
         return;
       }
 
@@ -556,16 +551,14 @@ function SurveyResponsePage() {
     return nextInput;
   }, [answers, otherInputs, survey]);
   const resolvedQuota = useMemo(
-    () => resolveRegionAgeQuota(quotaInput, survey?.quotaConfig),
+    () => resolveAgeQuota(quotaInput, survey?.quotaConfig),
     [quotaInput, survey?.quotaConfig],
   );
   const selectedQuotaCell = resolvedQuota.valid
-    ? quotaDashboard.rows
-        .find((row) => row.region.id === resolvedQuota.region.id)
-        ?.cells.find((cell) => cell.ageGroupId === resolvedQuota.ageGroup.id)
+    ? quotaDashboard.rows.find((row) => row.ageGroupId === resolvedQuota.ageGroup.id)
     : null;
   const selectedQuotaClosed = Boolean(
-    regionAgeQuotaEnabled &&
+    ageQuotaEnabled &&
       selectedQuotaCell?.target > 0 &&
       selectedQuotaCell.current >= selectedQuotaCell.target &&
       (survey?.quotaConfig?.closeMode === 'block' ||
@@ -573,15 +566,12 @@ function SurveyResponsePage() {
   );
   const quotaGateBlocked = selectedQuotaClosed;
   const logQuotaPrecheckFailure = (source) => {
-    if (!regionAgeQuotaEnabled || resolvedQuota.valid) {
+    if (!ageQuotaEnabled || resolvedQuota.valid) {
       return;
     }
 
     console.warn('[SurveyResponsePage] quota precheck failed', {
       source,
-      rawArea: quotaInput.area,
-      normalizedArea: resolvedQuota.normalizedArea ?? '',
-      regionMappingFailed: Boolean(quotaInput.area) && !resolvedQuota.region,
       rawBirthYear: quotaInput.birthYear,
       birthYearInvalid: !resolvedQuota.birthYear,
       surveyId: survey?.id ?? '',
@@ -1632,17 +1622,17 @@ function SurveyResponsePage() {
     }
 
     if (
-      regionAgeQuotaEnabled &&
-      currentSectionQuestions.some((question) => getQuotaField(question) === 'area' || getQuotaField(question) === 'birthYear')
+      ageQuotaEnabled &&
+      currentSectionQuestions.some((question) => getQuotaField(question) === 'birthYear')
     ) {
       if (!resolvedQuota.valid) {
         logQuotaPrecheckFailure('next-section');
-        setMessage('Q1 거주지역과 Q4 출생연도를 확인해주세요.');
+        setMessage('Q4 출생연도를 확인해주세요.');
         return;
       }
 
       if (selectedQuotaClosed) {
-        setMessage('선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
+        setMessage('선택하신 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
         return;
       }
     }
@@ -1792,17 +1782,17 @@ function SurveyResponsePage() {
       return;
     }
 
-    if (regionAgeQuotaEnabled) {
+    if (ageQuotaEnabled) {
       if (!resolvedQuota.valid) {
         logQuotaPrecheckFailure('submit');
-        setMessage('출생년도와 거주지역을 먼저 확인해주세요.');
+        setMessage('출생년도를 먼저 확인해주세요.');
         setSubmitting(false);
         submitLockedRef.current = false;
         return;
       }
 
       if (selectedQuotaClosed) {
-        setMessage('선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
+        setMessage('선택하신 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.');
         setSubmitting(false);
         submitLockedRef.current = false;
         return;
@@ -1843,7 +1833,7 @@ function SurveyResponsePage() {
       visibleSectionIds: visibleFlow.visibleSectionIds,
       skippedQuestionIds: visibleFlow.skippedQuestionIds,
       clientSubmitId,
-      quotaInput: regionAgeQuotaEnabled ? quotaInput : null,
+      quotaInput: ageQuotaEnabled ? quotaInput : null,
       currentUserAccess: {
         uid: user?.uid ?? '',
         email: user?.email ?? '',
@@ -1929,7 +1919,6 @@ function SurveyResponsePage() {
           visibility: survey.visibility,
           publicState: publicState.key,
           quotaEnabled: Boolean(survey.quotaConfig?.enabled),
-          regionAgeQuotaEnabled: Boolean(survey?.quotaConfig?.enabled),
           code: error?.code ?? '',
           message: error?.message ?? '',
         });
@@ -2033,7 +2022,7 @@ function SurveyResponsePage() {
   };
 
   const renderQuotaGate = () => {
-    if (!regionAgeQuotaEnabled || !selectedQuotaClosed) {
+    if (!ageQuotaEnabled || !selectedQuotaClosed) {
       return null;
     }
 
@@ -2041,7 +2030,7 @@ function SurveyResponsePage() {
       <div className="application-info-card quota-gate-panel">
         <strong>응답 마감 안내</strong>
         <div className="form-message">
-          선택하신 거주지역과 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.
+          선택하신 연령대의 목표 응답이 마감되었습니다. 참여해 주셔서 감사합니다.
         </div>
       </div>
     );

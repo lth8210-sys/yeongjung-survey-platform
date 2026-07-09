@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildVisibleQuestionFlow, getResponseMode } from '../src/utils/responseFlow.js';
-import { QUESTION_TYPES, BRANCH_ACTIONS } from '../src/firebase/surveyConstants.js';
+import { QUESTION_TYPES, BRANCH_ACTIONS, CONDITION_OPERATORS } from '../src/firebase/surveyConstants.js';
 
 // 이 테스트 스위트는 ai/RESPONSE_FLOW.md에 문서화된 "응답 흐름의 핵심 원칙"과
 // ai/AI_HANDOFF.md의 "가장 중요한 이슈"(객관식 이후 주관식/장문형 문항 누락 및 자동 제출)를
@@ -220,5 +220,94 @@ describe('buildVisibleQuestionFlow — 욕구조사형 다중 섹션/분기 흐�
 
     expect(flow.termination).toBeTruthy();
     expect(flow.visibleQuestionIds).not.toContain('q2');
+  });
+});
+
+// "2026 영중 지역주민 욕구조사" Q45(세대원, 해당 모두 선택) → Q46-1~6(세대별 욕구) 문항
+// 조건부 표시 회귀 방지 테스트. Q46-x는 question.visibilityConditions에 Q45 응답이
+// 해당 세대를 포함(INCLUDES)하는지 조건이 걸려 있으며, 같은 섹션 안에서 동적으로
+// 보이거나 숨겨져야 한다(섹션/페이지 이동 없이).
+function buildGenerationNeedsFixture() {
+  const generationVisibility = (label) => ({
+    visibilityConditions: [{ questionId: 'q45', operator: CONDITION_OPERATORS.INCLUDES, value: label }],
+  });
+
+  return {
+    sections: [{ id: 'lifecycle_needs', title: '생애주기별 욕구' }],
+    questions: [
+      {
+        id: 'q45',
+        sectionId: 'lifecycle_needs',
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
+        title: '세대원',
+        options: ['영유아', '아동', '청소년', '청년', '중장년', '노년'],
+        required: true,
+      },
+      { id: 'q46-1', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.MULTIPLE_CHOICE, title: '[영유아] 욕구', options: ['a', 'b'], required: false, ...generationVisibility('영유아') },
+      { id: 'q46-2', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.MULTIPLE_CHOICE, title: '[아동] 욕구', options: ['a', 'b'], required: false, ...generationVisibility('아동') },
+      { id: 'q46-3', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.MULTIPLE_CHOICE, title: '[청소년] 욕구', options: ['a', 'b'], required: false, ...generationVisibility('청소년') },
+      { id: 'q46-4', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.MULTIPLE_CHOICE, title: '[청년] 욕구', options: ['a', 'b'], required: false, ...generationVisibility('청년') },
+      { id: 'q46-5', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.MULTIPLE_CHOICE, title: '[중장년] 욕구', options: ['a', 'b'], required: false, ...generationVisibility('중장년') },
+      { id: 'q46-6-birthyear', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.NUMBER, title: '[노년] 출생연도', required: false, ...generationVisibility('노년') },
+      { id: 'q46-6', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.MULTIPLE_CHOICE, title: '[노년] 욕구', options: ['a', 'b'], required: false, ...generationVisibility('노년') },
+      { id: 'q47-next', sectionId: 'lifecycle_needs', type: QUESTION_TYPES.SHORT_TEXT, title: '다음 문항', required: false },
+    ],
+  };
+}
+
+describe('buildVisibleQuestionFlow — Q45 세대원 선택에 따른 Q46 조건부 표시', () => {
+  it('영유아만 선택하면 영유아 욕구 문항만 노출된다', () => {
+    const survey = buildGenerationNeedsFixture();
+    const flow = buildVisibleQuestionFlow({ survey, answers: { q45: ['영유아'] } });
+
+    expect(flow.visibleQuestionIds).toContain('q46-1');
+    expect(flow.visibleQuestionIds).not.toContain('q46-2');
+    expect(flow.visibleQuestionIds).not.toContain('q46-3');
+    expect(flow.visibleQuestionIds).not.toContain('q46-4');
+    expect(flow.visibleQuestionIds).not.toContain('q46-5');
+    expect(flow.visibleQuestionIds).not.toContain('q46-6-birthyear');
+    expect(flow.visibleQuestionIds).not.toContain('q46-6');
+    // 조건부로 숨겨진 문항은 진행률/제출 대상에서 제외되도록 skippedQuestionIds에 포함된다.
+    expect(flow.skippedQuestionIds).toContain('q46-2');
+    // 이어지는 문항은 정상적으로 계속 노출된다 (흐름이 끊기지 않음).
+    expect(flow.visibleQuestionIds).toContain('q47-next');
+  });
+
+  it('아동과 청소년을 함께 선택하면 두 문항만 노출된다', () => {
+    const survey = buildGenerationNeedsFixture();
+    const flow = buildVisibleQuestionFlow({ survey, answers: { q45: ['아동', '청소년'] } });
+
+    expect(flow.visibleQuestionIds).toContain('q46-2');
+    expect(flow.visibleQuestionIds).toContain('q46-3');
+    expect(flow.visibleQuestionIds).not.toContain('q46-1');
+    expect(flow.visibleQuestionIds).not.toContain('q46-4');
+    expect(flow.visibleQuestionIds).not.toContain('q46-5');
+    expect(flow.visibleQuestionIds).not.toContain('q46-6');
+  });
+
+  it('청년만 선택하면 청년 욕구 문항만 노출된다', () => {
+    const survey = buildGenerationNeedsFixture();
+    const flow = buildVisibleQuestionFlow({ survey, answers: { q45: ['청년'] } });
+
+    expect(flow.visibleQuestionIds).toEqual(['q45', 'q46-4', 'q47-next']);
+  });
+
+  it('노년을 선택하면 출생연도 문항과 노년 욕구 문항이 함께 노출된다', () => {
+    const survey = buildGenerationNeedsFixture();
+    const flow = buildVisibleQuestionFlow({ survey, answers: { q45: ['노년'] } });
+
+    expect(flow.visibleQuestionIds).toContain('q46-6-birthyear');
+    expect(flow.visibleQuestionIds).toContain('q46-6');
+    expect(flow.visibleQuestionIds).not.toContain('q46-1');
+  });
+
+  it('아무 세대도 선택하지 않으면 세대별 욕구 문항이 하나도 노출되지 않는다', () => {
+    const survey = buildGenerationNeedsFixture();
+    const flow = buildVisibleQuestionFlow({ survey, answers: { q45: [] } });
+
+    expect(flow.visibleQuestionIds).toEqual(['q45', 'q47-next']);
+    expect(flow.skippedQuestionIds).toEqual(
+      expect.arrayContaining(['q46-1', 'q46-2', 'q46-3', 'q46-4', 'q46-5', 'q46-6-birthyear', 'q46-6']),
+    );
   });
 });
