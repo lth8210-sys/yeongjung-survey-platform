@@ -239,3 +239,55 @@ describe('remapStructureIds() — 범용 동작 (섹션 복제 duplicateSection(
     expect(result.ref).toBe(newSectionId);
   });
 });
+
+// 회귀 배경: applyTemplate()이 정규화된 문항의 원본(sectionKey 포함 raw) 문항을 찾을 때
+// title+type 기준 find()를 썼다. 같은 제목+타입의 문항이 템플릿에 2개 이상 있으면
+// find()는 항상 첫 번째 일치 항목만 반환해, 뒤 문항들이 전부 첫 번째 문항의 섹션으로
+// 잘못 배치됐다. normalizeQuestions()가 배열 순서/개수를 그대로 보존한다는 점을 이용해
+// index 기반 매칭으로 교체했다 — 이 테스트는 그 index 매칭 방식 자체를 검증한다
+// (SurveyBuilderPage.jsx의 실제 로직과 동일한 절차를 재현).
+describe('applyTemplate() sectionKey 매칭 — 중복 제목+타입 문항에서도 올바른 섹션에 배치된다', () => {
+  function resolveSectionIdLikeApplyTemplate(rawTemplateQuestions, sectionKeyToId, baseSectionId) {
+    const normalized = normalizeQuestions(rawTemplateQuestions);
+
+    return normalized.map((question, index) => {
+      const sourceQuestion = rawTemplateQuestions[index];
+
+      return {
+        ...question,
+        sectionId:
+          sectionKeyToId.get(sourceQuestion?.sectionKey) ??
+          (question.sectionId && sectionKeyToId.get(question.sectionId)) ??
+          baseSectionId,
+      };
+    });
+  }
+
+  it('제목과 타입이 완전히 동일한 문항 2개가 서로 다른 섹션에 있어도 각자의 섹션으로 정확히 배치된다', () => {
+    const sectionKeyToId = new Map([
+      ['section_a', 'section-id-a'],
+      ['section_b', 'section-id-b'],
+    ]);
+    const rawQuestions = [
+      { id: 'q1', title: '만족하십니까?', type: 'singleChoice', options: ['예', '아니오'], sectionKey: 'section_a' },
+      { id: 'q2', title: '만족하십니까?', type: 'singleChoice', options: ['예', '아니오'], sectionKey: 'section_b' },
+    ];
+
+    const result = resolveSectionIdLikeApplyTemplate(rawQuestions, sectionKeyToId, 'section-id-a');
+
+    expect(result[0].sectionId).toBe('section-id-a');
+    // 수정 전 title+type find() 방식이었다면 두 문항 모두 첫 번째 일치(section_a)로
+    // 배치되어 아래 assertion이 실패했을 것이다.
+    expect(result[1].sectionId).toBe('section-id-b');
+  });
+
+  it('실제 2026 욕구조사 템플릿에도 index 매칭이 정상 적용된다(회귀 없음 확인)', () => {
+    const sectionKeyToId = new Map(template.sections.map((s, i) => [s.key, `section-id-${i}`]));
+    const result = resolveSectionIdLikeApplyTemplate(template.questions, sectionKeyToId, 'section-id-0');
+
+    // 모든 문항이 유효한 섹션 id를 받아야 한다(빈 값 없음)
+    expect(result.every((q) => q.sectionId)).toBe(true);
+    // 문항 개수는 원본과 동일해야 한다(순서 보존 확인)
+    expect(result.length).toBe(template.questions.length);
+  });
+});

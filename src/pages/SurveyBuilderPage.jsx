@@ -1107,10 +1107,13 @@ function SurveyBuilderPage() {
       result.set(question.id, createQuestionId());
       return result;
     }, new Map());
-    const templateQuestionsWithNewIds = normalizedTemplateQuestions.map((question) => {
-      const sourceQuestion = (template.questions ?? []).find(
-        (item) => item.title === question.title && item.type === question.type,
-      );
+    const rawTemplateQuestions = template.questions ?? [];
+    const templateQuestionsWithNewIds = normalizedTemplateQuestions.map((question, index) => {
+      // normalizeQuestions()는 questions.map(...)으로 배열 순서·개수를 그대로 보존하므로
+      // index로 원본 문항을 직접 찾는다. 이전에는 title+type으로 find()했는데, 같은
+      // 제목+타입의 문항이 템플릿에 2개 이상 있으면 항상 첫 번째 항목만 매칭되어 뒤
+      // 문항이 잘못된 섹션에 배치될 수 있었다(현재 템플릿엔 중복이 없어 미발현이었음).
+      const sourceQuestion = rawTemplateQuestions[index];
 
       return {
         ...question,

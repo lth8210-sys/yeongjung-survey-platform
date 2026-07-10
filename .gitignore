@@ -8,3 +8,5 @@ dist/
 .DS_Store
 .vscode/
 firebase-debug.log
+firestore-debug.log
+ui-debug.log

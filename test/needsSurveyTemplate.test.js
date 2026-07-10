@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { FORM_TEMPLATES } from '../src/data/formTemplates.js';
 import { buildVisibleQuestionFlow } from '../src/utils/responseFlow.js';
 import { QUESTION_TYPES } from '../src/firebase/surveyConstants.js';
-import { getQuotaField, isConsentRequiredButMissing } from '../src/pages/SurveyResponsePage.jsx';
+import {
+  getQuotaField,
+  isConsentRequiredButMissing,
+  filterDraftAnswers,
+} from '../src/pages/SurveyResponsePage.jsx';
 
 // "2026 영중 지역주민 욕구조사" 템플릿(src/data/formTemplates.js)이 최신 설문지(DOCX)와
 // 실제로 일치하는지, Q45→Q46 조건부 표시가 실제 문항 id/보기 문자열로도 정상 동작하는지
@@ -285,5 +289,46 @@ describe('배포 전 최종 회귀테스트 — 실제 응답 흐름 기준', ()
     ['needs-q46-2', 'needs-q46-3', 'needs-q46-5', 'needs-q46-6', 'needs-q46-6-birthyear'].forEach((id) => {
       expect(flow.visibleQuestionIds).not.toContain(id);
     });
+  });
+});
+
+// 회귀 배경: 로컬 임시저장(localStorage draft)에 phone 타입 답변(연락처)이 평문으로
+// 저장되고 있었다. 공용 PC에서 작성 중 이탈하면 최대 7일(cleanupOldDrafts 주기)간
+// 개인정보가 남을 수 있어, 임시저장 payload를 만들 때 phone 답변을 제외하도록
+// 수정했다. 실제 설문에 존재하는 연락처 문항(needs-consent-contact, phone 타입)으로
+// 검증한다.
+describe('filterDraftAnswers — 로컬 임시저장에서 연락처(phone) 답변 제외', () => {
+  it('phone 타입 문항 답변은 임시저장 대상에서 제외된다', () => {
+    const answers = {
+      'needs-q01': '영등포구 양산로 232',
+      'needs-consent-contact': '010-1234-5678',
+    };
+    const visibleQuestionIds = ['needs-q01', 'needs-consent-contact'];
+
+    const result = filterDraftAnswers(answers, template.questions, visibleQuestionIds);
+
+    expect(result).toEqual({ 'needs-q01': '영등포구 양산로 232' });
+    expect(result['needs-consent-contact']).toBeUndefined();
+  });
+
+  it('보이지 않는(visible 아닌) 문항의 답변도 기존과 동일하게 제외된다(회귀 없음)', () => {
+    const answers = { 'needs-q01': '주소', 'needs-q02': '5년' };
+    const visibleQuestionIds = ['needs-q01'];
+
+    const result = filterDraftAnswers(answers, template.questions, visibleQuestionIds);
+
+    expect(result).toEqual({ 'needs-q01': '주소' });
+  });
+
+  it('phone 문항이 없는 설문에서는 기존 동작과 동일하다', () => {
+    const answers = { q1: 'a', q2: 'b' };
+    const questions = [
+      { id: 'q1', type: QUESTION_TYPES.SHORT_TEXT },
+      { id: 'q2', type: QUESTION_TYPES.SHORT_TEXT },
+    ];
+
+    const result = filterDraftAnswers(answers, questions, ['q1', 'q2']);
+
+    expect(result).toEqual({ q1: 'a', q2: 'b' });
   });
 });

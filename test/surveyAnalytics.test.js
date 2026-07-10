@@ -79,3 +79,85 @@ describe('buildSurveyAnalytics — 결과보고 생성 안정성', () => {
     expect(analytics.scoredRows.length).toBeGreaterThan(0);
   });
 });
+
+// 회귀 배경: buildSurveyAnalytics()의 분포(distribution) 버킷이 항상 score=index+1로
+// 생성되어(1부터 시작) settings.min이 0인 척도(예: Q42/Q43 0~10점)에서 0점 응답이
+// 분포표·전체평균·표준편차 계산에서 통째로 빠지는 버그가 있었다. 전체평균은
+// scoredRows.distribution을 다시 펼쳐(flatMap) 계산하므로, 문항별 평균(row.values
+// 기반, 0점 포함)과 전체평균이 서로 모순되는 값이 나왔다.
+describe('buildSurveyAnalytics — 0점 포함 척도(min=0) 분포·평균 정확성', () => {
+  const scaleSurvey = {
+    id: 'survey-scale',
+    questions: [
+      {
+        id: 'q42',
+        type: QUESTION_TYPES.LINEAR_SCALE,
+        title: 'Q42. 삶의 만족도',
+        settings: { min: 0, max: 10 },
+      },
+    ],
+  };
+
+  it('0점 응답이 분포표에 정상적으로 집계된다', () => {
+    const responses = [
+      { id: 'r1', answers: [{ questionId: 'q42', answer: '0' }] },
+      { id: 'r2', answers: [{ questionId: 'q42', answer: '5' }] },
+      { id: 'r3', answers: [{ questionId: 'q42', answer: '10' }] },
+    ];
+
+    const analytics = buildSurveyAnalytics(scaleSurvey, responses);
+    const row = analytics.scoredRows[0];
+
+    expect(row.min).toBe(0);
+    expect(row.max).toBe(10);
+    expect(row.distribution).toHaveLength(11);
+    expect(row.distribution[0]).toEqual({ score: 0, count: 1 });
+    expect(row.distribution.find((d) => d.score === 5)?.count).toBe(1);
+    expect(row.distribution.find((d) => d.score === 10)?.count).toBe(1);
+  });
+
+  it('0점 응답이 전체평균(totalAverage) 계산에 포함된다(분포 재구성 방식이므로 분포 누락 시 평균도 왜곡됨)', () => {
+    const responses = [
+      { id: 'r1', answers: [{ questionId: 'q42', answer: '0' }] },
+      { id: 'r2', answers: [{ questionId: 'q42', answer: '10' }] },
+    ];
+
+    const analytics = buildSurveyAnalytics(scaleSurvey, responses);
+    // (0 + 10) / 2 = 5. 수정 전 버그였다면 0점이 분포에서 빠져 평균이 10으로 왜곡됐다.
+    expect(analytics.totalAverage).toBe(5);
+  });
+
+  it('문항별 평균(row.average, 0점 포함 원본 값 기반)과 전체평균이 일치한다(단일 문항 기준)', () => {
+    const responses = [
+      { id: 'r1', answers: [{ questionId: 'q42', answer: '0' }] },
+      { id: 'r2', answers: [{ questionId: 'q42', answer: '4' }] },
+    ];
+
+    const analytics = buildSurveyAnalytics(scaleSurvey, responses);
+    expect(analytics.scoredRows[0].average).toBe(analytics.totalAverage);
+  });
+
+  it('singleChoice 숫자형 옵션(1~5점, min=1 고정) 문항은 기존과 동일하게 1부터 분포가 생성된다', () => {
+    const agreementSurvey = {
+      id: 'survey-agreement',
+      questions: [
+        {
+          id: 'q1',
+          type: QUESTION_TYPES.SINGLE_CHOICE,
+          title: 'Q1. 동의 정도',
+          options: ['1. 전혀 그렇지 않다', '2.', '3.', '4.', '5. 매우 그렇다'],
+          meta: { scaleMax: 5 },
+        },
+      ],
+    };
+    const responses = [{ id: 'r1', answers: [{ questionId: 'q1', answer: '1. 전혀 그렇지 않다' }] }];
+
+    const analytics = buildSurveyAnalytics(agreementSurvey, responses);
+    const row = analytics.scoredRows[0];
+
+    expect(row.min).toBe(1);
+    expect(row.max).toBe(5);
+    expect(row.distribution).toHaveLength(5);
+    expect(row.distribution[0].score).toBe(1);
+  });
+});

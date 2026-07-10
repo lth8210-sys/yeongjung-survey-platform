@@ -120,6 +120,26 @@ export function isConsentRequiredButMissing({ triggerAnswer, consentAnswer }) {
   return triggerFilled && consentAnswer !== true;
 }
 
+/**
+ * 로컬 임시저장(localStorage)에 남길 답변만 걸러낸다. 현재 보이는(visible) 문항만
+ * 남기고, phone 타입 답변은 제외한다 — 공용 PC에서 작성 중 이탈하면 초안이
+ * cleanupOldDrafts 주기(최대 7일)까지 남을 수 있어 연락처를 평문으로 남기지 않는다.
+ */
+export function filterDraftAnswers(answers, questions, visibleQuestionIds) {
+  const visibleIdSet = new Set(visibleQuestionIds ?? []);
+  const phoneQuestionIds = new Set(
+    (questions ?? [])
+      .filter((question) => question.type === QUESTION_TYPES.PHONE)
+      .map((question) => question.id),
+  );
+
+  return Object.fromEntries(
+    Object.entries(answers ?? {}).filter(
+      ([questionId]) => visibleIdSet.has(questionId) && !phoneQuestionIds.has(questionId),
+    ),
+  );
+}
+
 function sanitizeFirestoreDocumentSegment(value) {
   const sanitizedValue = String(value ?? '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
   return sanitizedValue || 'doc';
@@ -1084,10 +1104,7 @@ function SurveyResponsePage() {
       return;
     }
 
-    const visibleIdSet = new Set(visibleFlow.visibleQuestionIds ?? []);
-    const draftAnswers = Object.fromEntries(
-      Object.entries(answers).filter(([questionId]) => visibleIdSet.has(questionId)),
-    );
+    const draftAnswers = filterDraftAnswers(answers, survey.questions, visibleFlow.visibleQuestionIds);
     const hasDraftContent = Object.values(draftAnswers).some((value) => {
       if (Array.isArray(value)) {
         return value.length > 0;

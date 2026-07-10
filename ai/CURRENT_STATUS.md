@@ -143,9 +143,12 @@
   행정동 선택형에서 주소 자유 입력형으로 바뀌며 응답값을 권역으로 자동 매핑할 수 없기 때문입니다.
   `resolveAgeQuota`/`buildAgeQuotaDashboard`(`src/firebase/surveys.js`) 및
   `quotaConfig.targets`/`quotaCounts.cells`(연령대 flat 구조, [docs/DATA_SCHEMA.md](../docs/DATA_SCHEMA.md) 참고)를 사용합니다.
-- "2026 영중 지역주민 욕구조사" 템플릿(Q1 주소, Q45→Q46 세대별 조건부 표시 등)은 코드
-  저장소(`src/data/formTemplates.js`)에만 반영되어 있으며, 이미 운영 중인 라이브 Firestore
-  설문 문서는 별도로 갱신해야 합니다 — [docs/KNOWN_ISSUES.md](../docs/KNOWN_ISSUES.md)의 KI-013 참고.
+- "2026 영중 지역주민 욕구조사" 템플릿(Q1 주소, Q45→Q46 세대별 조건부 표시 등)은
+  2026-07-11 라이브 Firestore 설문 문서(`surveys/BUUry9Qt5sYZgDaZ8dSL`)에도 반영
+  완료되었습니다(기존 응답 13건의 Question ID를 유지하며 마이그레이션) —
+  [docs/KNOWN_ISSUES.md](../docs/KNOWN_ISSUES.md)의 KI-013 참고. 단, 동일 제목의
+  다른 published 설문 문서(`DDNMRm97DGGRIRBEU4a8`, 응답 0건)가 운영 DB에 남아 있어
+  공개 목록에 중복 노출되는 문제가 있으며, 이 정리는 아직 하지 않았습니다.
 - 2026-07-10 Release Audit에서 DOCX 마지막 페이지의 "설문 경품 제공 안내·개인정보
   수집·이용 동의" 블록(연락처 수집 + 동의 체크박스)이 누락되어 있던 것을 발견해
   추가했습니다(`needs-consent-contact`, `needs-consent-checkbox`, 둘 다 선택 항목). 이
@@ -169,9 +172,12 @@
 - 로그인·로그아웃 및 모든 설문 CRUD가 현재 감사로그 action 목록에 포함되는 것은 아닙니다.
 - 결과보고서 `final` 전환을 위한 별도 승인 UI는 아직 제공하지 않습니다.
 - 대량 응답의 Word/Excel 생성은 브라우저 메모리와 기기 성능에 영향을 받을 수 있습니다.
-- 운영 데이터 마이그레이션이나 Firestore 컬렉션 대개편은 현재 범위에서 제외합니다.
-- "2026 영중 지역주민 욕구조사" 라이브 설문 문서와 quotaConfig/quotaCounts를 새 구조(주소
-  자유입력, 연령대 전용 quota)로 이관하는 작업이 아직 남아 있습니다(KI-013).
+- Firestore 컬렉션 대개편은 현재 범위에서 제외합니다.
+- "2026 영중 지역주민 욕구조사" 동일 제목으로 운영 DB에 12개 문서가 존재합니다
+  (published 2개, draft 5개, deleted 5개). 실운영 설문은 `surveys/BUUry9Qt5sYZgDaZ8dSL`
+  하나뿐이지만, 응답 0건인 다른 published 문서(`DDNMRm97DGGRIRBEU4a8`)가 공개 설문
+  목록에 함께 노출되어 응답자가 혼동할 위험이 있습니다 — 마감 또는 삭제 처리가
+  필요합니다(코드 문제가 아닌 운영 데이터 정리 항목).
 
 ## 9. 관련 문서
 

@@ -41,8 +41,15 @@ Deploy
 다음 명령을 실행한다.
 
 ```bash
+npm run lint
 npm run build
 ```
+
+`npm run lint`는 2026-07-11부터 도입했다(ESLint, 오류만 실패로 처리하고 기존 코드의
+스타일성 warning은 허용). 새로 작성한 코드에서 error가 나면 반드시 수정한다.
+`main` 브랜치 push/PR 시 GitHub Actions(`.github/workflows/ci.yml`)가 lint+test+build를
+자동 실행한다 — `test:rules`는 Firestore 에뮬레이터(Java)가 필요해 아직 CI에는
+포함하지 않았고, 로컬에서 수동 실행한다.
 
 빌드 경고는 실패가 아니지만, 새 경고가 생겼다면 원인을 기록한다.
 
@@ -55,6 +62,18 @@ firebase deploy --only firestore:rules --dry-run --project yeongjung-survey-plat
 ```
 
 dry-run은 배포가 아니다. rules 컴파일과 프로젝트 접근 가능 여부를 확인하기 위한 검증이다.
+
+rules 로직 자체(권한 분기, 화이트리스트, 카운터 증분 검증 등)를 바꾼 경우 아래도 함께 실행한다.
+
+```bash
+npm run test:rules
+```
+
+Firestore 에뮬레이터를 자동으로 띄우고 종료하며(로컬에 Java 필요), 공개 응답 제출·
+응답 삭제 차단·사용자 권한 자가상승 방지·결과보고서 테넌트 격리 등 핵심 경로를
+검증한다. 전체 rules(924줄)의 100% 커버리지는 아니며, 과거 실제 장애로 이어졌던
+지점 위주다 — 새 규칙을 추가하면 `test/rules/firestoreRules.test.js`에 케이스를
+함께 추가한다.
 
 ## 6. QA
 

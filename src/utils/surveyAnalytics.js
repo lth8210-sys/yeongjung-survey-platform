@@ -693,14 +693,20 @@ export function buildSurveyAnalytics(survey, responses) {
       const sum = row.values.reduce((total, value) => total + value, 0);
       const average = row.values.length > 0 ? sum / row.values.length : null;
       const scaleConfig = getScaleQuestionConfig(row.question);
+      // singleChoice 숫자형 옵션(예: "1. 전혀 그렇지 않다")은 getNumericScore()의
+      // `^([1-5])\.` 정규식으로만 점수화되므로 min이 항상 1이다. 실제 척도형 문항
+      // (linearScale 등)은 settings.min을 따른다(0~10점 척도의 min=0 포함).
+      const min = scaleConfig?.min ?? 1;
       const max = row.question.meta?.scaleMax ?? scaleConfig?.max ?? 5;
+      const bucketCount = Math.max(0, max - min + 1);
       return {
         question: row.question,
         average,
         count: row.values.length,
         max,
-        distribution: Array.from({ length: max }, (_, index) => {
-          const score = index + 1;
+        min,
+        distribution: Array.from({ length: bucketCount }, (_, index) => {
+          const score = min + index;
           return { score, count: row.distribution.get(score) ?? 0 };
         }),
       };
