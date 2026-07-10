@@ -1,6 +1,6 @@
 # 영중폼 현재 운영 상태
 
-최종 업데이트: 2026-07-09
+최종 업데이트: 2026-07-10
 운영 기준: v0.36
 
 ## 1. 서비스 개요
@@ -146,6 +146,22 @@
 - "2026 영중 지역주민 욕구조사" 템플릿(Q1 주소, Q45→Q46 세대별 조건부 표시 등)은 코드
   저장소(`src/data/formTemplates.js`)에만 반영되어 있으며, 이미 운영 중인 라이브 Firestore
   설문 문서는 별도로 갱신해야 합니다 — [docs/KNOWN_ISSUES.md](../docs/KNOWN_ISSUES.md)의 KI-013 참고.
+- 2026-07-10 Release Audit에서 DOCX 마지막 페이지의 "설문 경품 제공 안내·개인정보
+  수집·이용 동의" 블록(연락처 수집 + 동의 체크박스)이 누락되어 있던 것을 발견해
+  추가했습니다(`needs-consent-contact`, `needs-consent-checkbox`, 둘 다 선택 항목). 이
+  누락 상태로는 게시된 설문을 Survey Builder에서 저장할 때 `validatePrivacyConsent()`
+  검증에 막혀 저장이 차단되었을 것입니다 — KI-013 참고.
+- `/admin/surveys/:id/preview` 미리보기는 정적 렌더링이며 조건부 분기/표시(branching,
+  `visibilityConditions`)를 시뮬레이션하지 않습니다(기존 Q28→Q29/Q30 분기부터 이미
+  동일). 조건부 표시는 반드시 공개 응답 화면에서 확인해야 합니다.
+- 2026-07-10 Question ID Remapping 전수검증에서, Survey Builder의 "템플릿 적용"
+  (`applyTemplate()`)과 "섹션 복제"(`duplicateSection()`)가 문항 ID를 재발급할 때
+  `branching`만 remap하고 `visibilityConditions.questionId`/`meta.conditionalConsentField`는
+  remap하지 않던 버그를 발견해 수정했습니다 — 그대로 두었다면 KI-013 해결 방법 1번
+  (Survey Builder 재구성)을 실행하는 순간 Q45→Q46 조건부 표시와 조건부 개인정보
+  동의가 실제 운영 설문에서 깨졌을 것입니다. 자세한 내용은
+  [docs/KNOWN_ISSUES.md](../docs/KNOWN_ISSUES.md)의 KI-016 참고. 이 수정으로
+  KI-013 해결 방법 1번을 안전하게 수행할 수 있습니다.
 
 ## 8. 현재 확인된 제한 및 후속 과제
 

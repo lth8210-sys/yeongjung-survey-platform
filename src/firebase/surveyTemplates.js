@@ -130,7 +130,15 @@ export function buildSurveyTemplateData(survey = {}) {
   });
 }
 
-function remapStructureIds(value, idMap) {
+/**
+ * value가 idMap의 key(예전 문항/섹션 ID)와 일치하는 문자열이면 새 ID로 치환하고,
+ * 배열/객체는 재귀적으로 순회한다. 필드 이름을 하드코딩하지 않으므로 branching,
+ * visibilityConditions, meta.conditionalConsentField, templateMetadata 등 문항/섹션
+ * ID를 참조하는 모든 구조(현재 존재하는 것과 향후 추가되는 것 포함)에 동일하게 적용된다.
+ * instantiateSurveyTemplate()에서 쓰던 방식을 다른 ID 재발급 지점(SurveyBuilderPage의
+ * applyTemplate, duplicateSection)에서도 재사용하기 위해 export한다.
+ */
+export function remapStructureIds(value, idMap) {
   if (Array.isArray(value)) {
     return value.map((item) => remapStructureIds(item, idMap));
   }

@@ -26,6 +26,7 @@
 | `buildAgeQuotaDashboard()` | quota dashboard | 부족 현황 공유 | 연령대 목표(2026-07부터 지역 quota 폐지, 연령 전용) |
 | `resolveAgeQuota()` | quota 매칭 | 제출 차단, count 증가 | 생년 응답(2026-07부터 지역 응답 매칭 없음) |
 | `buildVisibleQuestionFlow()` question-level `visibilityConditions` | 문항 단위 조건부 표시 | 진행률, 제출 payload, 결과보고 문항 매핑 | 숨겨진 문항이 통계/보고서 집계에서 안전하게 제외되는지(질문 id 불일치 포함) |
+| `applyTemplate()`(SurveyBuilderPage), `duplicateSection()`(SurveyBuilderPage) | 문항 ID 재발급 | branching, visibilityConditions, meta.conditionalConsentField, templateMetadata 등 문항 ID를 참조하는 모든 필드 | remap 누락 시 조건부 표시·조건부 동의가 새 ID로 저장된 설문에서 silently 깨짐(KI-016) — `remapStructureIds()`를 거치지 않는 새 ID 재발급 지점을 추가하지 않는다 |
 | `saveSurveyReport()` | 보고서 저장 | survey_reports, audit_logs | 보고서 저장/재열람 |
 | `fetchSurveyReport()` | 보고서 열람 | 인쇄, DOCX | reportId/surveyId 일치 |
 | `fetchManagedSurveyReports()` | 보고서 목록 | 권한, 목록 화면 | surveyId별 report query |

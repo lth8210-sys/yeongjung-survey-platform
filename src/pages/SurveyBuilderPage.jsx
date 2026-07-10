@@ -42,6 +42,7 @@ import {
   fetchSurveyTemplates,
   incrementSurveyTemplateUsage,
   instantiateSurveyTemplate,
+  remapStructureIds,
 } from '../firebase/surveyTemplates';
 import {
   BRANCH_ACTIONS,
@@ -811,29 +812,22 @@ function SurveyBuilderPage() {
     const duplicatedQuestionIds = new Map(
       sourceQuestions.map((question) => [question.id, createQuestionId()]),
     );
-    const duplicatedQuestions = sourceQuestions.map((question) => ({
-      ...question,
-      id: duplicatedQuestionIds.get(question.id),
-      sectionId: duplicatedSectionId,
-      branching: question.branching
-        ? {
-            ...question.branching,
-            rules: (question.branching.rules ?? []).map((rule) => ({
-              ...rule,
-              targetQuestionId:
-                duplicatedQuestionIds.get(rule.targetQuestionId) ?? rule.targetQuestionId,
-            })),
-            fallbackTargetQuestionId:
-              duplicatedQuestionIds.get(question.branching.fallbackTargetQuestionId) ??
-              question.branching.fallbackTargetQuestionId,
-          }
-        : question.branching,
-    }));
+    // remapStructureIds가 branching.targetQuestionId 외에 visibilityConditions.questionId,
+    // meta.conditionalConsentField 등 문항 ID를 참조하는 모든 필드를 함께 치환한다 — 특정
+    // 필드만 골라 remap하면 이 섹션 복제 시에도 applyTemplate()과 동일한 누락이 재발한다.
+    const duplicatedQuestions = remapStructureIds(
+      sourceQuestions.map((question) => ({
+        ...question,
+        id: duplicatedQuestionIds.get(question.id),
+        sectionId: duplicatedSectionId,
+      })),
+      duplicatedQuestionIds,
+    );
 
     setSections((current) => {
       const nextSections = [...current];
       nextSections.splice(index + 1, 0, {
-        ...sourceSection,
+        ...remapStructureIds(sourceSection, duplicatedQuestionIds),
         id: duplicatedSectionId,
         title: sourceSection.title?.trim() ? `${sourceSection.title} 복사본` : '',
       });
@@ -1091,7 +1085,6 @@ function SurveyBuilderPage() {
     const templateQuotaConfig = normalizeAgeQuotaConfig(
       template.quotaConfig ?? template.settings?.quotaConfig ?? createDefaultAgeQuotaConfig(),
     );
-    const nextTemplateMetadata = template.templateMetadata ?? { templateId: template.id, templateVersion: 1 };
     const rawTemplateSections =
       Array.isArray(template.sections) && template.sections.length > 0
         ? template.sections
@@ -1114,7 +1107,7 @@ function SurveyBuilderPage() {
       result.set(question.id, createQuestionId());
       return result;
     }, new Map());
-    const templateQuestions = normalizedTemplateQuestions.map((question) => {
+    const templateQuestionsWithNewIds = normalizedTemplateQuestions.map((question) => {
       const sourceQuestion = (template.questions ?? []).find(
         (item) => item.title === question.title && item.type === question.type,
       );
@@ -1126,22 +1119,17 @@ function SurveyBuilderPage() {
           sectionKeyToId.get(sourceQuestion?.sectionKey) ??
           (question.sectionId && sectionKeyToId.get(question.sectionId)) ??
           baseSectionId,
-        branching: question.branching
-          ? {
-              ...question.branching,
-              rules: (question.branching.rules ?? []).map((rule) => ({
-                ...rule,
-                targetQuestionId:
-                  duplicatedQuestionIds.get(rule.targetQuestionId) ?? rule.targetQuestionId ?? '',
-              })),
-              fallbackTargetQuestionId:
-                duplicatedQuestionIds.get(question.branching.fallbackTargetQuestionId) ??
-                question.branching.fallbackTargetQuestionId ??
-                '',
-            }
-          : question.branching,
       };
     });
+    // remapStructureIds가 branching.targetQuestionId뿐 아니라 visibilityConditions.questionId,
+    // meta.conditionalConsentField, templateMetadata.quotaBirthYearQuestionId 등 문항 ID를
+    // 참조하는 모든 필드를 함께 치환한다(instantiateSurveyTemplate()과 동일한 방식). 특정
+    // 필드만 골라 remap하면 새 문항 ID 참조 구조가 추가될 때마다 같은 누락이 재발한다.
+    const templateQuestions = remapStructureIds(templateQuestionsWithNewIds, duplicatedQuestionIds);
+    const nextTemplateMetadata = remapStructureIds(
+      template.templateMetadata ?? { templateId: template.id, templateVersion: 1 },
+      duplicatedQuestionIds,
+    );
 
     setSelectedTemplateId(template.id);
     setTemplateMetadata(nextTemplateMetadata);

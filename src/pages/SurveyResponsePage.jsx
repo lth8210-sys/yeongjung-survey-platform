@@ -85,11 +85,16 @@ function normalizeSearchText(value) {
   return String(value ?? '').replace(/\s+/g, '').toLowerCase();
 }
 
-function getQuotaField(question = {}) {
+export function getQuotaField(question = {}) {
   const explicitField = question?.meta?.quotaField;
 
-  if (explicitField === 'birthYear') {
-    return explicitField;
+  // 명시적으로 quotaField가 설정된 문항은 그 값을 그대로 신뢰한다(빈 값이면 이 문항은
+  // quota 매칭 대상이 아니라는 뜻). 예: "[노년] 함께 살고 있는 노년 가족의 출생연도"처럼
+  // 응답자 본인이 아닌 다른 사람의 출생연도를 묻는 문항이 아래 텍스트 폴백에 걸려 Q4(본인
+  // 출생연도)의 quotaInput.birthYear 값을 덮어쓰는 사고를 막기 위함 — 폴백은 quotaField가
+  // 아예 없는(레거시) 문항에서만 사용해야 한다.
+  if (typeof explicitField === 'string' && explicitField) {
+    return explicitField === 'birthYear' ? 'birthYear' : '';
   }
 
   const searchableText = normalizeSearchText([
@@ -103,6 +108,16 @@ function getQuotaField(question = {}) {
   }
 
   return '';
+}
+
+/**
+ * 조건부 개인정보 동의 규칙: "트리거" 문항(예: 경품 연락처)에 값이 입력됐는데
+ * 짝을 이루는 동의 체크박스가 체크되지 않은 경우에만 true(=검증 실패)를 반환한다.
+ * 트리거가 비어 있으면 동의 여부와 무관하게 항상 통과(false)한다.
+ */
+export function isConsentRequiredButMissing({ triggerAnswer, consentAnswer }) {
+  const triggerFilled = Boolean(String(triggerAnswer ?? '').trim());
+  return triggerFilled && consentAnswer !== true;
 }
 
 function sanitizeFirestoreDocumentSegment(value) {
@@ -1203,6 +1218,22 @@ function SurveyResponsePage() {
 
       if (question.required && isAnswerEmpty(question, resolvedAnswer)) {
         nextErrors[questionKey] = '필수 응답 항목입니다.';
+        return;
+      }
+
+      // 조건부 동의: meta.conditionalConsentField에 지정된 다른 문항(예: 연락처)이
+      // 실제로 입력된 경우에만 이 동의 체크박스를 필수로 취급한다. 마커가 없는 기존
+      // 동의 문항(예: createPrivacyConsentQuestion 기반 필수 동의)은 아래 무조건
+      // 필수 규칙을 그대로 따른다 — 기존 설문 동작에 영향 없음.
+      if (normalizedType === QUESTION_TYPES.CONSENT_CHECKBOX && question.meta?.conditionalConsentField) {
+        const triggerId = question.meta.conditionalConsentField;
+        const triggerIndex = survey.questions.findIndex((item) => item.id === triggerId);
+        const triggerQuestion = triggerIndex >= 0 ? survey.questions[triggerIndex] : null;
+        const triggerAnswer = triggerQuestion ? resolveAnswer(triggerQuestion, triggerIndex) : '';
+
+        if (isConsentRequiredButMissing({ triggerAnswer, consentAnswer: resolvedAnswer })) {
+          nextErrors[questionKey] = '연락처를 입력하신 경우 개인정보 수집 및 이용에 동의해주세요.';
+        }
         return;
       }
 

@@ -823,10 +823,10 @@ export const FORM_TEMPLATES = [
     questions: [
       createNeedsQuestion(1, '현재 거주하는 곳의 주소는 무엇입니까?', {
         description:
-          '도로명 주소를 우선으로 기입하고, 모르는 경우 지번 주소로 기입해주세요.',
+          '도로명 주소를 우선으로 기입하고, 모르는 경우 지번 주소로 기입해주세요. (도로명 예: 영등포구 양산로 232 / 지번 예: 영등포구 영등포동2가 466)',
         type: QUESTION_TYPES.SHORT_TEXT,
         required: true,
-        placeholder: '예: 영등포구 양산로 232 (도로명) 또는 영등포구 영등포동2가 466 (지번)',
+        placeholder: '도로명 예: 영등포구 양산로 232 / 지번 예: 영등포구 영등포동2가 466',
         sectionKey: 'basic_info',
         meta: { addressField: true },
       }),
@@ -1038,7 +1038,7 @@ export const FORM_TEMPLATES = [
         required: true,
         sectionKey: 'welfare_center',
       }),
-      createNeedsQuestion(34, '최근 1년 내 복지관 프로그램·행사·공간 이용 경험이 있습니까?', {
+      createNeedsQuestion(34, '최근 1년 내 영중종합사회복지관 프로그램·행사·공간 이용 경험이 있습니까?', {
         type: QUESTION_TYPES.SINGLE_CHOICE,
         options: ['예', '아니오'],
         required: true,
@@ -1052,8 +1052,8 @@ export const FORM_TEMPLATES = [
           fallbackAction: BRANCH_ACTIONS.NEXT,
         },
       }),
-      createNeedsQuestion(35, '[Q34=아니오] 이용하지 않은 이유는 무엇입니까?', {
-        type: QUESTION_TYPES.SINGLE_CHOICE,
+      createNeedsQuestion(35, '[Q34=아니오] 이용하지 않은 이유는 무엇입니까? (해당 모두 선택)', {
+        type: QUESTION_TYPES.MULTIPLE_CHOICE,
         options: ['시간 없음', '관심 프로그램 없음', '정보 부족', '이용가능한 시간대가 없음', '같이 갈 사람 없음', '비용 부담', '건강상 이유', '필요성 못 느낌', '거리 멀어서', '기타'],
         allowOther: true,
         required: true,
@@ -1076,7 +1076,7 @@ export const FORM_TEMPLATES = [
           fallbackTargetQuestionId: 'needs-q41',
         },
       }),
-      createNeedsQuestion(36, '복지관은 전반적으로 이용하기 편리하다고 생각하십니까?', {
+      createNeedsQuestion(36, '[Q34=예] 복지관은 전반적으로 이용하기 편리하다고 생각하십니까?', {
         type: QUESTION_TYPES.SINGLE_CHOICE,
         options: YEONGJUNG_NEEDS_5_POINT_OPTIONS,
         required: true,
@@ -1196,6 +1196,10 @@ export const FORM_TEMPLATES = [
         validation: { min: 1900, max: 2026 },
         required: false,
         sectionKey: 'lifecycle_needs',
+        // 응답자 본인이 아닌 동거 노년 가족의 출생연도이므로 quota(Q4, 본인 출생연도)
+        // 매칭 대상이 아니다. 제목에 "출생연도"가 들어가 SurveyResponsePage.jsx의
+        // getQuotaField() 텍스트 폴백에 걸리지 않도록 명시적으로 제외한다.
+        meta: { quotaField: 'none' },
         ...needsGenerationVisibility(YEONGJUNG_NEEDS_GEN_SENIOR),
       }),
       createNeedsQuestion('46-6', '[노년] 현재 또는 향후 1~2년 안에 필요한 서비스 또는 지원은 무엇입니까? 2개까지 선택', {
@@ -1239,6 +1243,45 @@ export const FORM_TEMPLATES = [
         type: QUESTION_TYPES.LONG_TEXT,
         sectionKey: 'lifecycle_needs',
       }),
+      // DOCX 마지막 페이지의 "설문 경품 제공 안내 · 개인정보 수집·이용 동의" 블록.
+      // 원문에 문항 번호가 없어(Q1~Q52 목록 밖) createNeedsQuestion을 쓰지 않는다.
+      // 동의 거부가 설문 제출 자체를 막지 않는다는 DOCX 명시 문구에 따라 두 문항 모두
+      // required: false로 설정한다(다른 템플릿의 필수 동의 패턴과 다름).
+      {
+        id: 'needs-consent-contact',
+        title: '■ 설문 경품 제공 안내 — 연락처(휴대전화)',
+        description:
+          '경품(커피쿠폰) 발송을 위한 연락처를 남겨주세요. 입력하신 연락처는 경품 발송 목적으로만 사용되며, 발송 완료 후 즉시 파기됩니다. 작성하지 않아도 설문 제출에는 영향이 없습니다.',
+        type: QUESTION_TYPES.PHONE,
+        required: false,
+        sectionKey: 'lifecycle_needs',
+        meta: { analyticsGroup: 'yeongjung_needs_2026', analyticsKey: 'prize_contact' },
+      },
+      {
+        id: 'needs-consent-checkbox',
+        title: '■ 개인정보 수집·이용 동의 — 위 개인정보 수집 및 이용에 동의합니다.',
+        description:
+          '경품(커피쿠폰) 발송을 위해 아래와 같이 귀하의 개인정보를 수집·이용하고자 합니다. 내용을 확인하신 후 동의 여부에 체크해 주시기 바랍니다. 위 연락처를 입력하지 않으셨다면 이 동의는 선택 사항입니다.',
+        type: QUESTION_TYPES.CONSENT_CHECKBOX,
+        options: [],
+        required: false,
+        settings: {
+          collectionItems: '연락처',
+          usagePurpose: '설문 참여자 대상 경품(커피쿠폰) 발송',
+          retentionPeriod: '경품 발송 완료 후 즉시 파기',
+          restrictionNotice:
+            '동의하지 않으실 권리가 있으며, 동의하지 않으셔도 설문 제출 자체에는 영향이 없습니다. 다만 위 연락처를 입력하신 경우에는 경품 발송을 위해 이 동의가 필요합니다.',
+        },
+        sectionKey: 'lifecycle_needs',
+        meta: {
+          analyticsGroup: 'yeongjung_needs_2026',
+          analyticsKey: 'prize_consent',
+          consentApproval: true,
+          // 연락처(needs-consent-contact)를 입력한 경우에만 이 동의 체크가 필수가 된다.
+          // SurveyResponsePage.jsx의 validateAnswers()가 이 필드를 읽어 조건부로 검증한다.
+          conditionalConsentField: 'needs-consent-contact',
+        },
+      },
     ],
   },
 ];

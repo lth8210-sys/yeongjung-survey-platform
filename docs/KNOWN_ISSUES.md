@@ -38,6 +38,8 @@
 | KI-012 | 응답 삭제 시 중복신청 lock 미해제 | 완료 | 중간 | 중간 | P2 | 2026-07 | 2026-07 |
 | KI-013 | 욕구조사 설문 개편 시 라이브 Firestore 문서 미자동반영 | 진행중 | 높음 | 높음 | P1 | 2026-07 | - |
 | KI-014 | 결과보고서 분석 계산 실패 시 페이지 전체 크래시 | 완료 | 중간 | 중간 | P2 | 2026-07 | 2026-07 |
+| KI-015 | Q4 출생연도 정상 입력해도 quota 검증 실패로 다음 페이지 진행 차단 | 완료 | 치명 | 중간 | P1 | 2026-07 | 2026-07 |
+| KI-016 | 템플릿 적용/섹션 복제 시 문항 ID 재발급 후 visibilityConditions·conditionalConsentField remap 누락 | 완료 | 치명 | 높음 | P1 | 2026-07 | 2026-07 |
 
 ## KI-001 Creator Permission
 
@@ -312,6 +314,20 @@
   전제조건이 아니라 별도 운영 단계(Push/Deploy 이후, 운영 승인 필요)로 처리하기로
   확정했다. 코드 저장소 변경은 이 이슈와 무관하게 커밋 가능하며, 이 항목은
   "코드 완료, 라이브 반영 대기 중"으로 계속 추적한다.
+- Release Audit 추가 발견(2026-07-10): 해결 방법 1번(Survey Builder에서 직접
+  재구성)은 `SurveyBuilderPage.jsx:1458~1465`의 `validatePrivacyConsent()` 검증에
+  막힐 뻔했다 — 게시(`published`) 상태 설문을 저장할 때 PII 문항(Q1 주소 등)이
+  있는데 개인정보 동의(`CONSENT_CHECKBOX`) 문항이 하나도 없으면 저장 자체가
+  차단된다. 개편 직후의 `formTemplates.js`에는 DOCX 마지막 페이지의 "설문 경품
+  제공 안내·개인정보 수집·이용 동의" 블록(연락처 수집 + 동의 체크박스)이
+  누락되어 있었다 — 이번 Release Audit에서 발견해 `needs-consent-contact`/
+  `needs-consent-checkbox` 두 문항을 추가해 해결했다(DOCX 원문의 "동의하지
+  않아도 설문 제출에는 영향이 없다" 문구에 따라 둘 다 `required: false`).
+  이 수정으로 해결 방법 1번이 더 이상 막히지 않는다.
+- Release Audit 추가 발견(2026-07-10, 2차): 해결 방법 1번(Survey Builder에서 직접
+  재구성)을 실제로 실행하면 `applyTemplate()`의 문항 ID 재발급 remap 누락 때문에
+  Q45→Q46 조건부 표시와 조건부 개인정보 동의가 깨진 채로 배포될 뻔했다 — KI-016
+  참고. KI-016 수정 이후에는 해결 방법 1번을 그대로 수행해도 안전하다.
 
 ## KI-014 결과보고서 분석 계산 실패 시 페이지 전체 크래시
 
@@ -359,3 +375,101 @@
   전체에서 유일하게 보호되지 않은 지점이었다 — "보고서 화면을 열자마자 나는
   오류(생성 오류)"라는 증상과 정확히 일치해 근본 원인일 가능성이 높다는 근거를
   추가로 확보했다.
+
+## KI-015 Q4 출생연도 정상 입력해도 quota 검증 실패로 다음 페이지 진행 차단
+
+- 상태: 완료
+- 영향도: 치명(응답자 전원이 1페이지 이후로 진행 불가능한 제출 차단 버그)
+- 재발 가능성: 중간
+- 우선순위: P1
+- 관련 파일: `src/pages/SurveyResponsePage.jsx`(`getQuotaField`), `src/data/formTemplates.js`
+- 원인: `getQuotaField()`는 문항에 명시적 `meta.quotaField`가 없으면 제목/설명
+  텍스트에 "출생연도"/"출생년도"가 포함되는지로 quotaField를 **추정**한다(레거시
+  데이터 호환용 폴백). `quotaInput` 계산은 `survey.questions`를 순서대로 훑으며
+  `quotaField === 'birthYear'`로 판정된 **모든** 문항의 답을 계속 덮어쓰는 구조라,
+  가장 나중에 순회되는 문항의 값(설문 앞부분에서는 대부분 미응답=빈 값)이 최종
+  값이 된다. 이번 개편에서 추가한 Q46-6 직전 문항("[노년] 함께 살고 있는 노년
+  가족의 출생연도를 작성해주세요")도 제목에 "출생연도"가 포함되어 있어 동일하게
+  `birthYear`로 오판정되었고, Q4(응답자 본인 출생연도, `needs-q04`)보다 배열
+  뒤쪽에 위치해 **Q4에 정상적으로 1974를 입력해도 quotaInput.birthYear가 빈
+  문자열로 덮어써져** `resolveAgeQuota`가 항상 invalid를 반환, "Q4 출생연도를
+  확인해주세요." 메시지와 함께 다음 페이지 진행이 영구적으로 차단되었다. 이
+  버그는 Q46 문항이 아직 화면에 나타나지 않은 1페이지 시점에도 발생한다 —
+  `quotaInput`이 `survey.questions` 전체(현재 보이는 문항이 아니라)를 순회하기
+  때문이다.
+- 해결:
+  1. `getQuotaField()`를 수정해 문항에 **어떤 값이든** 명시적 `meta.quotaField`가
+     있으면(빈 문자열이 아닌 한) 텍스트 폴백을 건너뛰고 그 값을 그대로 신뢰하도록
+     했다 — `'birthYear'`가 아닌 다른 명시값은 quotaField 없음(`''`)으로 처리된다.
+     `meta.quotaField`가 아예 없는 문항만 기존처럼 텍스트 폴백을 사용한다(레거시
+     호환 유지).
+  2. `src/data/formTemplates.js`의 `needs-q46-6-birthyear` 문항에
+     `meta: { quotaField: 'none' }`을 추가해 텍스트 폴백에 걸리지 않도록
+     명시적으로 제외했다.
+- 재발방지: `test/needsSurveyTemplate.test.js`에 (a) Q4가 `birthYear`로 정확히
+  분류되는지, (b) Q46-6-birthyear가 분류되지 않는지, (c) 실제 `survey.questions`
+  순서로 quotaInput 계산을 재현했을 때 Q4 값이 보존되는지, (d) 1974가 실제로
+  연령대 매칭에 성공하는지 4건의 회귀 테스트를 추가했다. 향후 제목에 "출생연도"가
+  들어가는 문항을 추가할 때는(예: 동거 가족, 자녀 등 본인이 아닌 대상의 출생연도)
+  반드시 `meta.quotaField: 'none'`으로 명시적으로 제외해야 한다.
+- 운영 영향: 이 버그는 새로 추가된 Q46-6-birthyear 문항이 실제 라이브 설문에
+  반영된 이후에만(KI-013 참고) 응답자에게 나타난다 — 현재 라이브 Firestore 문서는
+  아직 구설문 상태라 이 문항이 없으므로 지금 당장 운영 중인 공개 응답에는 영향이
+  없다. 그러나 KI-013의 라이브 반영을 이 수정 없이 진행했다면 반영 직후 모든
+  응답자의 제출이 100% 차단되는 치명적 장애로 이어졌을 것이다.
+
+## KI-016 템플릿 적용/섹션 복제 시 문항 ID 재발급 후 visibilityConditions·conditionalConsentField remap 누락
+
+- 상태: 완료
+- 영향도: 치명(개인정보 컴플라이언스 — 동의 없이 PII가 저장될 수 있었음)
+- 재발 가능성: 높음(문항 ID를 참조하는 새 필드가 추가될 때마다 반복될 수 있는 구조적 문제였음)
+- 우선순위: P1
+- 관련 파일: `src/pages/SurveyBuilderPage.jsx`(`applyTemplate()`, `duplicateSection()`),
+  `src/firebase/surveyTemplates.js`(`remapStructureIds()`, `instantiateSurveyTemplate()`)
+- 원인: 템플릿을 새 설문으로 저장하거나(`applyTemplate()`) 섹션을 복제할 때
+  (`duplicateSection()`) 문항 ID가 전부 새로 발급되는데, 두 함수 모두
+  `branching.rules[].targetQuestionId`/`fallbackTargetQuestionId`만 새 ID로
+  remap하고 그 외 문항 ID를 참조하는 필드(`visibilityConditions[].questionId`,
+  `meta.conditionalConsentField`, `templateMetadata.quotaBirthYearQuestionId`,
+  섹션의 `pageEndTargetSectionId`/`terminationConditions[].questionId`)는 remap하지
+  않았다. 그 결과 "2026 영중 지역주민 욕구조사" 템플릿을 실제 Survey Builder에서
+  적용·게시하면(KI-013 해결 방법 1번) 다음 두 가지가 실제 응답 화면에서 항상
+  깨진다는 것을 로컬 Firebase 에뮬레이터로 전체 플로우(템플릿 적용→저장→게시→
+  실제 응답 제출→관리자 확인)를 재현해 확인했다.
+  1. Q45→Q46 조건부 표시가 전혀 동작하지 않는다 — `visibilityConditions[].questionId`가
+     구식 리터럴 ID(`needs-q45`)를 그대로 가리키는데 실제 저장된 문항 ID는
+     `question-<uuid>` 형태로 바뀌어 있어 조건이 항상 거짓으로 평가된다.
+  2. "연락처를 입력하면 개인정보 동의가 필수"라는 이번 릴리즈의 조건부 동의 정책이
+     항상 무력화된다 — `meta.conditionalConsentField`가 구식 리터럴 ID
+     (`needs-consent-contact`)를 가리켜 `SurveyResponsePage.jsx`의
+     `validateAnswers()`가 연락처 문항을 찾지 못하고(`triggerQuestion === null`)
+     항상 `triggerAnswer=''`로 처리해, 연락처를 입력하고 동의를 체크하지 않아도
+     제출이 그대로 성공한다. 에뮬레이터에서 실제로 `{contactAnswer: "010-1234-5678",
+     consentAnswer: false}`가 저장되는 것을 확인했다.
+  한편 `src/firebase/surveyTemplates.js`의 `instantiateSurveyTemplate()`(저장된
+  DB 템플릿 적용 경로)는 필드 이름을 하드코딩하지 않고 데이터 구조 전체를 재귀
+  순회하며 idMap에 매칭되는 문자열 값을 전부 치환하는 `remapStructureIds()`를
+  이미 쓰고 있어 이 문제가 없었다 — 즉 같은 저장소 안에 올바른 구현과 잘못된
+  구현이 공존했다.
+- 해결: `remapStructureIds()`를 `surveyTemplates.js`에서 export해
+  `applyTemplate()`과 `duplicateSection()` 양쪽에서 재사용하도록 교체했다.
+  필드 이름을 나열해 개별 remap하는 대신, 문항(및 섹션) old-id→new-id 맵을 만든
+  뒤 해당 데이터 구조 전체(질문 배열, 섹션 객체, `templateMetadata`)를
+  `remapStructureIds()`로 한 번에 치환한다 — 새로운 ID 참조 필드가 앞으로
+  추가되더라도(필드명이 무엇이든) 별도 코드 수정 없이 자동으로 안전하게 remap된다.
+  기존 branching remap 동작은 그대로 유지되며 회귀는 없다.
+- 재발방지: `test/applyTemplateIdRemap.test.js`에 (a) applyTemplate() 재현 시
+  visibilityConditions.questionId가 새 Q45 ID를 정확히 가리키는지, (b) 그 결과로
+  `buildVisibleQuestionFlow()`가 실제로 Q46-1을 노출하는지, (c)
+  `meta.conditionalConsentField`가 새 연락처 문항 ID를 가리키고 그 ID로 실제 문항을
+  찾을 수 있는지, (d) branching remap이 회귀 없이 계속 동작하는지, (e)
+  `templateMetadata.quotaBirthYearQuestionId`가 remap되는지, (f) `remapStructureIds()`
+  자체가 섹션 복제 시나리오(`pageEndTargetSectionId`, `terminationConditions` 포함)에서
+  범용적으로 동작하는지 검증하는 회귀 테스트를 추가했다. 앞으로 문항 ID를 참조하는
+  새 필드를 추가할 때는 이 파일에 해당 필드의 remap 검증 케이스를 함께 추가한다.
+- 운영 영향: 이 버그는 라이브 Firestore 설문 문서가 아직 구설문 상태라(KI-013 참고)
+  지금 당장 운영 중인 공개 응답에는 영향이 없다. 그러나 KI-013의 해결 방법 1번
+  (Survey Builder에서 직접 재구성)을 이 수정 없이 그대로 수행했다면, 반영 직후
+  Q45→Q46 조건부 표시와 조건부 개인정보 동의가 실제 운영 설문에서 항상 깨진
+  상태로 배포됐을 것이다 — 특히 후자는 사용자가 동의하지 않았는데도 연락처(PII)가
+  저장되는 컴플라이언스 문제로 이어졌을 것이다.
