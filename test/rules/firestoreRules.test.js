@@ -96,34 +96,82 @@ function submitResponseBatch(firestore, surveyId, nextResponseCount, payloadOver
   return batch.commit();
 }
 
-describe('responses — 공개 제출(create) 규칙', () => {
-  it('게시된 설문에 responseCount가 정확히 +1 증가하는 제출은 성공한다', async () => {
+// 2026-07 Structure A 전환: 응답 생성 전체가 submitProtectedSurveyResponse 서버 콜러블(Admin SDK,
+// Rules 영향 밖)로 이전됨에 따라 클라이언트 SDK의 직접 create는 형태·내용과 무관하게 전면 차단된다
+// (firestore.rules의 /responses/{responseId} allow create: if false — §4/§6 최종 보고 참조).
+// 예전에는 "필드 화이트리스트를 만족하는 제출은 성공해야 한다"를 검증했지만, 이제는 정반대로
+// "클라이언트가 아무리 올바른 모양으로 써도 반드시 막혀야 한다"를 검증한다 — 유일한 정상 경로는
+// Admin SDK를 쓰는 서버 콜러블이며, 그 경로는 Rules 에뮬레이터가 아니라
+// functions/test/submitResponse.test.js(인메모리 페이크 Firestore)가 별도로 검증한다.
+describe('responses — 클라이언트 직접 create는 전면 차단된다 (Structure A)', () => {
+  it('게시된 설문이라도 클라이언트가 직접 responses를 생성할 수 없다(정상적인 형태의 페이로드조차)', async () => {
     await seedPublishedSurvey('survey-a', { responseCount: 0 });
     const unauth = testEnv.unauthenticatedContext();
 
-    await assertSucceeds(submitResponseBatch(unauth.firestore(), 'survey-a', 1));
+    await assertFails(submitResponseBatch(unauth.firestore(), 'survey-a', 1));
   });
 
-  it('responseCount를 실제 증분(+1)과 다르게(+2) 조작하면 제출이 차단된다', async () => {
-    await seedPublishedSurvey('survey-b', { responseCount: 0 });
-    const unauth = testEnv.unauthenticatedContext();
+  it('로그인한 일반 사용자도 직접 create할 수 없다', async () => {
+    await seedPublishedSurvey('survey-a2', { responseCount: 0 });
+    const viewer = testEnv.authenticatedContext('viewer-uid', { email: 'viewer@yeongjung.or.kr' });
 
-    await assertFails(submitResponseBatch(unauth.firestore(), 'survey-b', 2));
+    await assertFails(submitResponseBatch(viewer.firestore(), 'survey-a2', 1));
   });
 
-  it('draft(미게시) 설문에는 응답 제출이 차단된다', async () => {
-    await seedPublishedSurvey('survey-draft', { status: 'draft', responseCount: 0 });
-    const unauth = testEnv.unauthenticatedContext();
-
-    await assertFails(submitResponseBatch(unauth.firestore(), 'survey-draft', 1));
-  });
-
-  it('화이트리스트에 없는 임의 필드가 포함된 제출은 차단된다', async () => {
-    await seedPublishedSurvey('survey-c', { responseCount: 0 });
+  it('레거시 평문 스키마(applicantName 등)로 위장해도 여전히 차단된다', async () => {
+    await seedPublishedSurvey('survey-bypass', { responseCount: 0 });
     const unauth = testEnv.unauthenticatedContext();
 
     await assertFails(
-      submitResponseBatch(unauth.firestore(), 'survey-c', 1, { secretInternalField: 'hack' }),
+      submitResponseBatch(unauth.firestore(), 'survey-bypass', 1, {
+        respondent: { submittedFrom: 'web', applicantName: '홍길동', applicantPhone: '010-1234-5678' },
+      }),
+    );
+  });
+
+  it('마스킹+KMS 암호문 스키마로 "올바르게" 흉내 내도 클라이언트 직접 쓰기는 차단된다', async () => {
+    await seedPublishedSurvey('survey-protected', { responseCount: 0 });
+    const unauth = testEnv.unauthenticatedContext();
+
+    await assertFails(
+      submitResponseBatch(unauth.firestore(), 'survey-protected', 1, {
+        respondent: {
+          submittedFrom: 'web',
+          applicantNameMasked: '홍*동',
+          applicantPii: { name: 'ciphertext', phone: null, birthDate: null, keyVersion: 'v1', encryptedAt: 'now' },
+          piiProtected: true,
+        },
+        respondentName: '홍*동',
+      }),
+    );
+  });
+
+  it('surveys.responseCount/optionQuotaCounts를 응답 문서 없이 직접 올리는 것도 차단된다', async () => {
+    await seedPublishedSurvey('survey-counter', { responseCount: 0 });
+    const unauth = testEnv.unauthenticatedContext();
+
+    await assertFails(
+      updateDoc(doc(unauth.firestore(), 'surveys', 'survey-counter'), { responseCount: 1 }),
+    );
+  });
+
+  it('clientSubmitLocks/applicationApplicantLocks를 클라이언트가 직접 생성할 수 없다', async () => {
+    await seedPublishedSurvey('survey-locks', { responseCount: 0 });
+    const unauth = testEnv.unauthenticatedContext();
+
+    await assertFails(
+      setDoc(doc(unauth.firestore(), 'surveys', 'survey-locks', 'clientSubmitLocks', 'lock-1'), {
+        surveyId: 'survey-locks',
+        clientSubmitIdHash: 'abc',
+      }),
+    );
+    await assertFails(
+      setDoc(doc(unauth.firestore(), 'surveys', 'survey-locks', 'applicationApplicantLocks', 'lock-2'), {
+        surveyId: 'survey-locks',
+        applicantHash: 'abc',
+        responseId: 'r1',
+        lockType: 'form_duplicate',
+      }),
     );
   });
 });

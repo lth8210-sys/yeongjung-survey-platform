@@ -1,6 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
+
+// functions/index.js와 동일한 리전을 사용해야 한다(SYNC REQUIRED).
+const FUNCTIONS_REGION = 'asia-northeast3';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -37,6 +41,7 @@ if (isFirebaseConfigured) {
 
 export const auth = firebaseApp ? getAuth(firebaseApp) : null;
 export const db = firebaseApp ? getFirestore(firebaseApp) : null;
+export const functionsClient = firebaseApp ? getFunctions(firebaseApp, FUNCTIONS_REGION) : null;
 export const googleProvider = firebaseApp ? new GoogleAuthProvider() : null;
 export const firebaseErrorMessage = firebaseInitError?.message ?? null;
 

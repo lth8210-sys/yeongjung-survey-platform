@@ -638,7 +638,11 @@ service cloud.firestore {
       allow list: if surveyStatusForRead(resource.data) || canListManagedSurveys(resource.data);
       allow create: if validManagedSurveyCreate();
       allow delete: if canEditManagedSurvey(resource.data);
-      allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
+      // ⚠️ Structure A 전환(2026-07) — 배포 순서·롤백은 /responses/{responseId} 규칙 주석 참조.
+      // validPublicSurveyCounterUpdate()는 삭제하지 않았다(롤백용) — responseCount/optionQuotaCounts를
+      // 클라이언트가 직접 올리는 경로였다. 응답 문서를 만들지 않고 이 카운터만 조작해 정원을 조기
+      // 마감시키는 별도 우회 경로였으므로, responses create 차단과 함께 막아야 의미가 있다.
+      allow update: if canEditManagedSurvey(resource.data);
     }
 
     match /surveys/{surveyId}/quotaConfig/{configId} {
@@ -648,20 +652,20 @@ service cloud.firestore {
 
     match /surveys/{surveyId}/quotaCounts/{countsId} {
       allow read: if canReadSurveySubdoc(surveyId);
-      allow create, update: if canEditSurveySubdoc(surveyId) || validPublicQuotaCountsWrite(surveyId);
+      // ⚠️ Structure A 전환(2026-07) — 배포 순서는 위 /responses/{responseId} 규칙 주석과 동일하게
+      // 지킬 것. validPublicQuotaCountsWrite()는 삭제하지 않았다(롤백용 — 아래 || 뒤에 그대로
+      // 복원하면 즉시 Structure B로 되돌아간다). Admin SDK는 이 규칙과 무관하게 계속 쓸 수 있다.
+      allow create, update: if canEditSurveySubdoc(surveyId);
       allow delete: if canEditSurveySubdoc(surveyId);
     }
 
     match /surveys/{surveyId}/applicationApplicantLocks/{lockId} {
       allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
-      allow create: if
-        request.resource.data.surveyId == surveyId &&
-        request.resource.data.applicantHash is string &&
-        request.resource.data.responseId is string &&
-        request.resource.data.lockType in ['form_duplicate', 'one_slot_per_person'] &&
-        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
-        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      // ⚠️ Structure A 전환(2026-07) — 배포 순서는 /responses/{responseId} 규칙 주석 참조.
+      // 롤백: 이전 조건(request.resource.data.surveyId == surveyId && ... surveyStatusForResponse(...))으로
+      // 되돌리면 즉시 Structure B로 복귀한다.
+      allow create: if false;
       allow update: if false;
       // 응답 삭제 시 lock을 함께 해제해 신청자가 재신청할 수 있도록 허용한다(KI-012).
       // 삭제 권한은 응답 삭제 권한과 같은 수준(설문 관리 권한)으로 제한한다.
@@ -671,14 +675,8 @@ service cloud.firestore {
     match /surveys/{surveyId}/applicationSlotLocks/{lockId} {
       allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
-      allow create: if
-        request.resource.data.surveyId == surveyId &&
-        request.resource.data.questionId is string &&
-        request.resource.data.slotValue is string &&
-        request.resource.data.applicantHash is string &&
-        request.resource.data.responseId is string &&
-        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
-        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      // ⚠️ Structure A 전환(2026-07) — 배포 순서·롤백은 위 applicationApplicantLocks와 동일.
+      allow create: if false;
       allow update: if false;
       // 응답 삭제 시 슬롯 lock을 함께 해제한다(KI-012). 권한 범위는 위 applicantLocks와 동일.
       allow delete: if canEditSurveySubdoc(surveyId);
@@ -687,11 +685,8 @@ service cloud.firestore {
     match /surveys/{surveyId}/clientSubmitLocks/{lockId} {
       allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
         surveyStatusForRead(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
-      allow create: if
-        request.resource.data.surveyId == surveyId &&
-        request.resource.data.clientSubmitIdHash is string &&
-        exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
-        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+      // ⚠️ Structure A 전환(2026-07) — 배포 순서·롤백은 위 applicationApplicantLocks와 동일.
+      allow create: if false;
       allow update, delete: if false;
     }
 
@@ -765,28 +760,36 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(["quota"]) ||
           request.resource.data.quota == null ||
           request.resource.data.quota is map
-        );
+        ) &&
+        // 2026-07 PII 보호 하드닝: 신규 응답의 클라이언트는 더 이상 이 필드들에 평문을 쓰지 않는다
+        // (src/firebase/surveys.js submitSurveyResponse() 참조 — applicantNameMasked/applicantPii로
+        // 대체됨). 레거시 평문 키 이름을 그대로 신규 문서에 써서 KMS 암호화 단계를 우회하는 것을
+        // 막는다. 주의: 이 검사는 "레거시 스키마로 위장한 평문 쓰기"만 차단하는 부분적 방어다 —
+        // Firestore Rules는 문자열 내용이 실제로 마스킹됐는지까지는 검증할 수 없으므로, 공격자가
+        // applicantNameMasked 같은 필드에 직접 평문을 채워 넣는 것 자체는 이 규칙으로 막지 못한다.
+        // 완전한 차단은 응답 생성을 서버 callable로 옮겨야 가능하다(문서화된 후속 과제).
+        !request.resource.data.respondent.keys().hasAny([
+          "applicantName",
+          "applicantPhone",
+          "applicantBirthDate"
+        ]);
     }
 
     match /responses/{responseId} {
-      allow create: if
-        validPublicResponseCreate() &&
-        exists(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)) &&
-        surveyStatusForResponse(
-          get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data
-        ) &&
-        (
-          (
-            !(get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount is int) &&
-            getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount == 1
-          ) ||
-          (
-            get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount is int &&
-            getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount ==
-              get(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.responseCount + 1
-          )
-        ) &&
-        getAfter(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId)).data.status in ["published", "closed"];
+      // ⚠️ 배포 순서 경고(Structure A 전환, 2026-07) — docs/pii-encryption-architecture.md §12 필독.
+      // 이 규칙을 "먼저" 배포하면 아직 서버 콜러블(submitProtectedSurveyResponse)로 전환되지 않은
+      // 운영 트래픽(VITE_USE_SERVER_RESPONSE_SUBMISSION=false, 기존 클라이언트 트랜잭션 경로)의
+      // 응답 제출이 전부 permission-denied로 즉시 막힌다. 반드시 다음 순서를 지킬 것:
+      //   1) functions 배포(submitProtectedSurveyResponse 포함) 완료
+      //   2) 콜러블 smoke test 통과
+      //   3) 클라이언트에 VITE_USE_SERVER_RESPONSE_SUBMISSION=true 배포, 정상 제출 확인
+      //   4) 그 다음에만 이 firestore.rules 배포
+      // 롤백: 이 규칙을 validPublicResponseCreate() 기반의 원래 조건으로 되돌리면 즉시 Structure B로
+      // 복귀한다(그 함수는 삭제하지 않고 그대로 남겨뒀다 — 아래 참조).
+      //
+      // Admin SDK(Cloud Functions)는 이 규칙의 영향을 받지 않는다 — Security Rules는 클라이언트
+      // SDK 요청에만 적용되므로, 서버 콜러블의 Firestore 쓰기는 이 "if false"와 무관하게 계속 동작한다.
+      allow create: if false;
       allow read: if canReadManagedResponse(resource.data);
       allow update: if canEditManagedResponse(resource.data);
       allow delete: if false;

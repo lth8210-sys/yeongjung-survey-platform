@@ -44,6 +44,7 @@ import {
   updateResponseProcessing,
   updateResponseStatus,
 } from '../firebase/surveys';
+import { revealResponsePii } from '../firebase/piiReveal';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
 import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
 import {
@@ -794,6 +795,11 @@ function SurveyResponsesAdminPage() {
   const [pendingDownload, setPendingDownload] = useState(null);
   const [pendingAnonymize, setPendingAnonymize] = useState(null);
   const [pendingDeleteResponse, setPendingDeleteResponse] = useState(null);
+  // 2026-07 PII 보호 하드닝: responseId -> { name, phone, birthDate } (서버에서 방금 복호화한 값).
+  // 새로고침하면 사라진다 — 어디에도 영구 저장하지 않는다.
+  const [revealedPiiByResponseId, setRevealedPiiByResponseId] = useState({});
+  const [revealingResponseId, setRevealingResponseId] = useState(null);
+  const [revealPiiError, setRevealPiiError] = useState('');
   const [responseLastDoc, setResponseLastDoc] = useState(null);
   const [hasMoreResponses, setHasMoreResponses] = useState(false);
   const [loadingMoreResponses, setLoadingMoreResponses] = useState(false);
@@ -1214,6 +1220,24 @@ function SurveyResponsesAdminPage() {
   const shouldMaskDownload =
     !['super_admin', 'admin'].includes(role) && !isSurveyOwner(survey);
 
+  // 2026-07 PII 보호 하드닝: 서버(revealResponsePii)에 원문 복호화를 요청한다. 서버가 역할을
+  // 다시 검증하고 감사로그(audit_logs, action: 'pii_reveal')를 남긴다. 결과는 state에만 보관하고
+  // Firestore에 다시 쓰지 않는다.
+  const handleRevealPii = async (responseId) => {
+    if (!responseId || revealingResponseId) return;
+    setRevealPiiError('');
+    setRevealingResponseId(responseId);
+    try {
+      const result = await revealResponsePii(responseId);
+      setRevealedPiiByResponseId((current) => ({ ...current, [responseId]: result }));
+    } catch (error) {
+      logger.error('[SurveyResponsesAdminPage] handleRevealPii failed', { code: error?.code ?? 'unknown' });
+      setRevealPiiError(getFirestoreErrorMessage(error, '실명 정보를 불러오지 못했습니다.'));
+    } finally {
+      setRevealingResponseId(null);
+    }
+  };
+
   const handleAnonymize = async (responseId) => {
     if (!responseId || !surveyHasPii) return;
     try {
@@ -1387,6 +1411,23 @@ function SurveyResponsesAdminPage() {
     });
   };
 
+  // 2026-07 PII 보호 하드닝: 보호된(신규) 응답은 summary.name/phone이 이미 마스킹 미리보기이거나
+  // (관리자가 그 응답을 개별적으로 "실명 보기"한 경우) 복호화된 원문이다 — 여기서 다시
+  // maskName/maskPhone을 적용하면 안 된다. 레거시(비보호) 응답만 종전처럼 다운로드 시점에 마스킹한다.
+  // 후속 과제: 지금은 CSV 대량 다운로드가 개별적으로 "실명 보기"하지 않은 보호된 응답을 자동으로
+  // 일괄 복호화하지 않는다 — shouldMaskDownload가 false여도 그 행은 마스킹 값으로 내려간다
+  // (평문이 새로 노출되는 방향이 아니라 더 보호되는 방향의 변경이라 안전하지만, 완전한 원문 CSV가
+  // 필요하면 각 응답을 먼저 "실명 보기"해야 한다 — 46번 문서 후속 과제로 남김).
+  const resolveCsvNameAndPhone = (summary) => {
+    if (summary.isPiiProtected) {
+      return [summary.name, summary.phone];
+    }
+    return [
+      shouldMaskDownload ? maskName(summary.name) : summary.name,
+      shouldMaskDownload ? maskPhone(summary.phone) : summary.phone,
+    ];
+  };
+
   const handleApplicantCsvDownload = () => {
     if (!survey) {
       return;
@@ -1396,11 +1437,14 @@ function SurveyResponsesAdminPage() {
     const rows = [
       ['제출일', '이름', '연락처', '주요 항목', '처리 상태', '비고'],
       ...exportSource.map((response) => {
-        const summary = extractApplicationResponseSummary(survey.questions, response);
+        const summary = extractApplicationResponseSummary(survey.questions, response, {
+          revealedPii: revealedPiiByResponseId[response.id],
+        });
+        const [name, phone] = resolveCsvNameAndPhone(summary);
         return [
           formatFirestoreDate(response.submittedAt),
-          shouldMaskDownload ? maskName(summary.name) : summary.name,
-          shouldMaskDownload ? maskPhone(summary.phone) : summary.phone,
+          name,
+          phone,
           summary.primaryValue,
           getResponseStatusMeta(response.status).label,
           response.adminNote ?? '',
@@ -1444,11 +1488,14 @@ function SurveyResponsesAdminPage() {
     const rows = [
       ['제출일', '이름', '연락처', '슬롯', '처리 상태', '비고'],
       ...slotExport.map((response) => {
-        const summary = extractApplicationResponseSummary(survey.questions, response);
+        const summary = extractApplicationResponseSummary(survey.questions, response, {
+          revealedPii: revealedPiiByResponseId[response.id],
+        });
+        const [name, phone] = resolveCsvNameAndPhone(summary);
         return [
           formatFirestoreDate(response.submittedAt),
-          shouldMaskDownload ? maskName(summary.name) : summary.name,
-          shouldMaskDownload ? maskPhone(summary.phone) : summary.phone,
+          name,
+          phone,
           selectedSlotFilter.title,
           getResponseStatusMeta(response.status).label,
           response.adminNote ?? '',
@@ -1544,8 +1591,22 @@ function SurveyResponsesAdminPage() {
     }
 
     return responses.map((response) => {
-      const answerItems = getOrderedResponseAnswerItems(survey.questions, response.answers);
-      const summary = extractApplicationResponseSummary(survey.questions, response);
+      const rawAnswerItems = getOrderedResponseAnswerItems(survey.questions, response.answers);
+      // 관리자가 이 응답에 대해 "실명 보기"를 실행했다면 그 결과를 요약에 반영한다.
+      // 실행하지 않았다면 summary.name/phone은 마스킹 미리보기(신규) 또는 기존 평문(레거시)이다.
+      const revealed = revealedPiiByResponseId[response.id];
+      const summary = extractApplicationResponseSummary(survey.questions, response, {
+        revealedPii: revealed,
+      });
+      // answers[]의 자유서술형 PII 문항도 "실명 보기" 결과가 있으면 원문으로 대체한다(revealed:true
+      // 표시 — 아래 렌더링에서 이미 원문인 값을 다시 마스킹하지 않도록 구분하는 용도).
+      const answerItems = revealed?.answers
+        ? rawAnswerItems.map((item) =>
+            revealed.answers[item.questionId] !== undefined
+              ? { ...item, answer: revealed.answers[item.questionId], revealed: true }
+              : item,
+          )
+        : rawAnswerItems;
       const searchableText = [
         response.id,
         summary.name,
@@ -1569,7 +1630,7 @@ function SurveyResponsesAdminPage() {
         normalizedResponseStatus: response.status ?? RESPONSE_STATUSES.SUBMITTED,
       };
     });
-  }, [responses, survey]);
+  }, [responses, survey, revealedPiiByResponseId]);
 
   const filteredResponses = useMemo(() => {
     return responseItems.filter((response) => {
@@ -2567,11 +2628,22 @@ function SurveyResponsesAdminPage() {
                     adminNote: response.adminNote ?? '',
                   };
 
+                  // 신규(보호된) 응답은 summary.name/phone이 이미 마스킹 미리보기 또는(실명 보기
+                  // 실행 후) 복호화된 원문이므로 여기서 다시 maskName/maskPhone을 적용하면 안 된다
+                  // (적용하면 실명 보기를 눌러도 화면에 다시 마스킹된 값이 나오는 버그가 생긴다).
+                  // 레거시(비보호) 응답만 종전처럼 렌더링 시점에 마스킹한다.
+                  const displayName = response.summary.isPiiProtected
+                    ? response.summary.name
+                    : maskName(response.summary.name);
+                  const displayPhone = response.summary.isPiiProtected
+                    ? response.summary.phone
+                    : maskPhone(response.summary.phone);
+
                   return (
                     <tr key={response.id}>
                       <td>{formatFirestoreDate(response.submittedAt)}</td>
-                      <td>{maskName(response.summary.name)}</td>
-                      <td>{maskPhone(response.summary.phone)}</td>
+                      <td>{displayName}</td>
+                      <td>{displayPhone}</td>
                       <td>{response.summary.primaryValue}</td>
                       <td>
                         <div className="response-status-panel response-status-panel-compact">
@@ -2617,6 +2689,19 @@ function SurveyResponsesAdminPage() {
                           >
                             메모 저장
                           </button>
+                          {!shouldMaskDownload &&
+                            response.summary.isPiiProtected &&
+                            !revealedPiiByResponseId[response.id] && (
+                              <button
+                                className="secondary-button"
+                                disabled={revealingResponseId === response.id}
+                                onClick={() => handleRevealPii(response.id)}
+                                type="button"
+                                title="이름·연락처 원문을 서버에서 복호화합니다(감사로그 기록됨)"
+                              >
+                                {revealingResponseId === response.id ? '확인 중…' : '실명 보기'}
+                              </button>
+                            )}
                           {canDeleteResponses && (
                             <button
                               className="secondary-button danger-button"
@@ -2635,6 +2720,7 @@ function SurveyResponsesAdminPage() {
               </tbody>
             </table>
           </div>
+          {revealPiiError && <p className="form-error">{revealPiiError}</p>}
         </div>
       ) : (
         <div className="response-admin-list">
@@ -2718,7 +2804,8 @@ function SurveyResponsesAdminPage() {
               <div className="response-answer-list">
                 {response.answerItems.map((answer) => {
                   const displayValue = formatSurveyAnswer(answer.answer, answer);
-                  const maskedValue = piiQuestionIds.has(answer.questionId)
+                  // answer.revealed === true면 "실명 보기"로 이미 복호화된 원문이다 — 다시 마스킹하지 않는다.
+                  const maskedValue = !answer.revealed && piiQuestionIds.has(answer.questionId)
                     ? maskAnswerByQuestion(displayValue, answer.questionTitle, answer.questionType)
                     : displayValue;
                   return (

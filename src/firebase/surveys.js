@@ -19,6 +19,8 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, getFirebaseStatusMessage, isFirebaseConfigured } from './config';
+import { protectRespondentPii, protectAnswerFields } from './piiProtection';
+import { submitSurveyResponseViaServer } from './submitResponseServer';
 import {
   BRANCH_ACTIONS,
   CONDITION_COMBINATORS,
@@ -1128,6 +1130,73 @@ export function detectPrivacyQuestions(questions = []) {
     hasConsentQuestion: consentQuestions.length > 0,
     consentQuestions,
   };
+}
+
+// answers[] 저장 시점 보호(마스킹+KMS 암호화) 대상 타입. detectPrivacyQuestions()의 판정 대상보다
+// 의도적으로 좁다 — 단일/다중선택형 인구통계 문항("연령대", "거주 지역" 등)은 surveyAnalytics.js/
+// statisticsExcel.js가 answers[]를 원문 그대로 읽어 분포를 계산하므로, 저장 시점에 마스킹하면
+// 통계가 조용히 깨진다. 자유서술형(신원 식별) 문항만 대상으로 좁혀 그 위험을 피한다.
+const ANSWER_PII_ELIGIBLE_TYPES = new Set([
+  QUESTION_TYPES.SHORT_TEXT,
+  QUESTION_TYPES.LONG_TEXT,
+  QUESTION_TYPES.EMAIL,
+  QUESTION_TYPES.PHONE,
+  QUESTION_TYPES.DATE,
+]);
+
+/**
+ * 자유서술형 신원 식별 문항(이름/연락처/생년월일/이메일/주소 등)의 questionId만 추려낸다.
+ * @returns {Set<string>}
+ */
+export function identifyAnswerPiiQuestionIds(questions = []) {
+  const questionList = Array.isArray(questions) ? questions : [];
+  return new Set(
+    questionList
+      .filter((q) => {
+        if (!q) return false;
+        const type = normalizeQuestionType(q.type);
+        if (!ANSWER_PII_ELIGIBLE_TYPES.has(type)) return false;
+        if (INHERENTLY_PII_TYPES.has(type)) return true;
+        const title = String(q.title ?? '').toLowerCase();
+        return PRIVACY_PII_KEYWORDS.some((kw) => title.includes(kw.toLowerCase()));
+      })
+      .map((q) => q.id),
+  );
+}
+
+/**
+ * identifyAnswerPiiQuestionIds()가 고른 문항 중 실제로 값이 채워진 답변만 골라
+ * piiProtection.js의 protectAnswerFields()에 넘길 평문 목록을 만든다.
+ * (piiProtection.js는 이 파일을 import하지 않는다 — surveys.js가 이미 piiProtection.js를
+ * import하므로, 반대 방향 import를 추가하면 순환 참조가 생긴다. 그래서 문항 스키마 조회는
+ * 항상 이 파일 쪽에서 미리 끝내고, 순수 값 목록만 넘긴다.)
+ */
+function buildAnswerPiiTargets(questions, piiQuestionIds, answers) {
+  if (!piiQuestionIds || piiQuestionIds.size === 0) return [];
+  const questionMap = new Map((Array.isArray(questions) ? questions : []).map((q) => [q.id, q]));
+  const targets = [];
+
+  (Array.isArray(answers) ? answers : []).forEach((answerItem) => {
+    if (!answerItem || !piiQuestionIds.has(answerItem.questionId)) return;
+
+    const rawAnswer = answerItem.answer;
+    const value = typeof rawAnswer === 'string'
+      ? rawAnswer.trim()
+      : Array.isArray(rawAnswer)
+        ? rawAnswer.join(', ').trim()
+        : '';
+    if (!value) return;
+
+    const question = questionMap.get(answerItem.questionId);
+    targets.push({
+      questionId: answerItem.questionId,
+      value,
+      questionTitle: question?.title ?? answerItem.questionTitle ?? '',
+      questionType: question?.type ?? answerItem.questionType ?? '',
+    });
+  });
+
+  return targets;
 }
 
 /**
@@ -2296,7 +2365,31 @@ async function markSurveyResponsesDeletedState(surveyId, state) {
   }
 }
 
-export async function submitSurveyResponse({
+// Structure A(서버 콜러블) 전환 feature flag. true면 submitSurveyResponse()가 응답 생성 전체를
+// submitProtectedSurveyResponse 콜러블(서버 트랜잭션)에 위임하고, 이 파일의 클라이언트
+// runTransaction 경로(submitSurveyResponseLegacyClient)는 호출되지 않는다.
+// 기본값 false(레거시 유지) — 운영 호환성 우선. 프로덕션 전환 목표값은 true이며, 전환 순서는
+// docs/pii-encryption-architecture.md §12(배포 순서)를 따른다: 서버 함수 배포·smoke test가 끝난
+// 뒤에만 이 플래그를 켜고, 그 다음에야 firestore.rules의 클라이언트 직접 create 차단을 배포한다
+// (순서를 바꾸면 레거시 경로를 쓰는 사용자의 제출이 막힌다).
+const USE_SERVER_RESPONSE_SUBMISSION =
+  typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_SERVER_RESPONSE_SUBMISSION === 'true';
+
+/**
+ * 익명 설문 응답 제출의 공개 진입점. USE_SERVER_RESPONSE_SUBMISSION 값에 따라 서버 콜러블
+ * (Structure A, submitProtectedSurveyResponse) 또는 기존 클라이언트 트랜잭션(Structure B,
+ * submitSurveyResponseLegacyClient)으로 위임한다 — 호출부(SurveyResponsePage.jsx)는 이 분기를
+ * 알 필요가 없다(반환 타입: responseId 문자열, 동일).
+ */
+export async function submitSurveyResponse(payload) {
+  if (USE_SERVER_RESPONSE_SUBMISSION) {
+    return submitSurveyResponseViaServer(payload);
+  }
+
+  return submitSurveyResponseLegacyClient(payload);
+}
+
+async function submitSurveyResponseLegacyClient({
   surveyId,
   surveyTitle,
   answers = [],
@@ -2333,6 +2426,25 @@ export async function submitSurveyResponse({
 
   const survey = mapSurveyDoc(surveySnapshot);
   const applicantIdentity = extractApplicantIdentity(survey.questions, answers);
+  // 트랜잭션 밖에서 1회만 호출한다 — KMS 네트워크 호출을 트랜잭션 재시도 루프에 넣지 않기 위함.
+  // applicantIdentity.key(중복 확인용 해시)는 이 값과 무관하게 answers에서 그대로 재계산되므로
+  // 정원·중복신청 로직에는 영향이 없다.
+  const respondentPii = await protectRespondentPii(applicantIdentity);
+  // answers[] 저장 시점 보호(Phase 2, 2026-07). 대상은 자유서술형 신원 식별 문항만(위 상수 참조) —
+  // 단일/다중선택형 인구통계 문항은 대상에서 제외해 surveyAnalytics.js/statisticsExcel.js의 분포
+  // 집계를 깨지 않는다. 이 값도 트랜잭션 밖에서 1회만 계산·암호화한다(위와 동일한 이유).
+  const answerPiiQuestionIds = identifyAnswerPiiQuestionIds(survey.questions);
+  const answerPiiTargets = buildAnswerPiiTargets(survey.questions, answerPiiQuestionIds, answers);
+  const answerFieldsPii = await protectAnswerFields(answerPiiTargets);
+  // 저장용 answers 사본만 마스킹한다 — 위에서 이미 끝난 applicantIdentity/slotSelections/quota 계산은
+  // 원본 answers(원문)를 그대로 썼으므로 이 치환과 무관하다(분기·정원·중복신청 로직 불변).
+  const protectedAnswers = answers.map((answerItem) => {
+    if (!answerItem || !answerPiiQuestionIds.has(answerItem.questionId)) return answerItem;
+    const masked = answerFieldsPii.maskedByQuestionId[answerItem.questionId];
+    if (masked === undefined) return answerItem;
+    const hasCiphertext = Boolean(answerFieldsPii.fields?.values?.[answerItem.questionId]);
+    return { ...answerItem, answer: masked, piiProtected: hasCiphertext };
+  });
   const slotSelections = extractSlotSelections(
     survey.questions,
     answers,
@@ -2581,25 +2693,37 @@ export async function submitSurveyResponse({
       surveyDeleted: false,
       surveyPermanentlyDeleted: false,
       hiddenFromDefaultList: false,
-      answers,
+      // 2026-07 PII 보호 하드닝 Phase 2: 자유서술형 신원 식별 문항(이름/연락처/생년월일/이메일 등)의
+      // 답변은 마스킹 미리보기로 대체하고, 원문 암호문은 respondent.answersPii에만 둔다.
+      // 단일/다중선택형 문항(연령대·거주 지역 등)은 대상에서 제외되어 원문 그대로 저장된다 — 통계
+      // 집계(surveyAnalytics.js/statisticsExcel.js)가 이 값을 그대로 읽는다.
+      answers: protectedAnswers,
       status: RESPONSE_STATUSES.SUBMITTED,
       responseMode: responseMode === 'paged' ? 'paged' : 'single',
       visibleQuestionIds: Array.isArray(visibleQuestionIds) ? visibleQuestionIds : [],
       visibleSectionIds: Array.isArray(visibleSectionIds) ? visibleSectionIds : [],
       skippedQuestionIds: Array.isArray(skippedQuestionIds) ? skippedQuestionIds : [],
       quota: responseQuota,
+      // 2026-07 PII 보호 하드닝(46번 문서 P0-1): 이름/전화/생년월일 원문은 더 이상 여기 저장하지 않는다.
+      // 마스킹 미리보기(*Masked)는 목록·CSV 기본 표시용, applicantPii는 Cloud KMS 암호문이며
+      // 서버(revealResponsePii)를 통해서만 복호화된다. applicantKey/applicantKeyLabel은 answers에서
+      // 매번 재계산되는 해시라 이 변경과 무관하게 그대로 유지한다(중복신청 판정 로직 불변).
       respondent: {
         ...(respondent ?? {}),
         clientSubmitId: normalizedClientSubmitId,
-        applicantName: applicantIdentity.name,
-        applicantPhone: applicantIdentity.phone,
-        applicantBirthDate: applicantIdentity.birthDate,
+        applicantNameMasked: respondentPii.nameMasked,
+        applicantPhoneMasked: respondentPii.phoneMasked,
+        applicantBirthDateMasked: respondentPii.birthDateMasked,
+        applicantPii: respondentPii.encrypted,
+        piiProtected: respondentPii.piiProtected,
+        // answers[] 내 자유서술형 PII 문항 암호문(questionId별). 없으면 null.
+        answersPii: answerFieldsPii.fields,
         applicantKey: applicantIdentity.key,
         applicantKeyLabel: applicantIdentity.keyLabel,
         slotSelections,
       },
-      respondentName: applicantIdentity.name,
-      respondentPhone: applicantIdentity.phone,
+      respondentName: respondentPii.nameMasked,
+      respondentPhone: respondentPii.phoneMasked,
       selectedSlotLabel: slotSelections[0]?.slotLabel ?? '',
       adminNote: '',
       submittedAt: serverTimestamp(),
@@ -3603,6 +3727,31 @@ export async function anonymizeResponsePii(responseId, targetQuestionIds = [], c
     // applicantKey는 "phone:010-..." 또는 "name-birth:홍길동::..." 형식으로 원본 PII 포함
     applicantKey: existingRespondent.applicantKey ? '[익명처리됨]' : existingRespondent.applicantKey,
     // applicantKeyLabel("연락처 기준" 등), slotSelections, clientSubmitId, submittedFrom 유지
+    // 2026-07 PII 보호 하드닝: 마스킹 미리보기와 KMS 암호문도 함께 지워야 한다 — 지우지 않으면
+    // "익명화 완료"로 표시된 응답을 revealResponsePii로 여전히 복호화할 수 있게 되어 익명화 자체가
+    // 무의미해진다.
+    applicantNameMasked: existingRespondent.applicantNameMasked ? '[익명처리됨]' : existingRespondent.applicantNameMasked,
+    applicantPhoneMasked: existingRespondent.applicantPhoneMasked ? '[익명처리됨]' : existingRespondent.applicantPhoneMasked,
+    applicantBirthDateMasked: existingRespondent.applicantBirthDateMasked
+      ? '[익명처리됨]'
+      : existingRespondent.applicantBirthDateMasked,
+    applicantPii: existingRespondent.applicantPii ? null : existingRespondent.applicantPii,
+    piiProtected: existingRespondent.applicantPii ? false : existingRespondent.piiProtected,
+    // answers[] PII 암호문도 대상 questionId만큼 함께 지운다 — 지우지 않으면 위에서 이미
+    // '[익명처리됨]'으로 바꾼 answers[].answer와 달리 respondent.answersPii.values에는
+    // 원문 암호문이 그대로 남아 revealResponsePii로 복호화할 수 있게 된다.
+    answersPii: existingRespondent.answersPii?.values
+      ? (() => {
+          const remaining = Object.fromEntries(
+            Object.entries(existingRespondent.answersPii.values).filter(
+              ([questionId]) => !targetIdSet.has(questionId),
+            ),
+          );
+          return Object.keys(remaining).length > 0
+            ? { ...existingRespondent.answersPii, values: remaining }
+            : null;
+        })()
+      : existingRespondent.answersPii,
   };
 
   await updateDoc(responseRef, {
@@ -3910,7 +4059,11 @@ export function getOrderedResponseAnswerItems(questions = [], answers = []) {
   return items.sort((first, second) => first.order - second.order);
 }
 
-export function extractApplicationResponseSummary(questions = [], response = {}) {
+// 2026-07 PII 보호 하드닝: response.respondent.piiProtected가 true인 응답(신규 제출분)은
+// answers에서 이름/연락처를 다시 뽑아내지 않고 마스킹된 미리보기 필드를 기본값으로 쓴다.
+// revealedPii가 주어지면(관리자가 명시적으로 원문보기를 실행한 경우) 그 값을 최우선 사용한다.
+// 기존(비보호) 응답은 종전과 동일하게 answers에서 직접 추출한다 — 동작 변경 없음.
+export function extractApplicationResponseSummary(questions = [], response = {}, { revealedPii } = {}) {
   const answerItems = getOrderedResponseAnswerItems(questions, response.answers);
 
   const findByType = (type) =>
@@ -3920,11 +4073,6 @@ export function extractApplicationResponseSummary(questions = [], response = {})
       patterns.some((pattern) => String(item.questionTitle ?? '').toLowerCase().includes(pattern)),
     );
 
-  const nameAnswer =
-    findByTitle(['이름', '성명', 'name']) ??
-    answerItems.find((item) => normalizeQuestionType(item.questionType) === QUESTION_TYPES.SHORT_TEXT);
-  const phoneAnswer =
-    findByType(QUESTION_TYPES.PHONE) ?? findByTitle(['연락처', '전화', '휴대폰', 'phone']);
   const primaryAnswer =
     answerItems.find((item) =>
       [
@@ -3935,10 +4083,31 @@ export function extractApplicationResponseSummary(questions = [], response = {})
       ].includes(normalizeQuestionType(item.questionType)),
     ) ?? answerItems[0];
 
+  const isPiiProtected = response?.respondent?.piiProtected === true;
+  let name;
+  let phone;
+
+  if (revealedPii) {
+    name = revealedPii.name ?? '';
+    phone = revealedPii.phone ?? '';
+  } else if (isPiiProtected) {
+    name = response.respondent?.applicantNameMasked ?? '';
+    phone = response.respondent?.applicantPhoneMasked ?? '';
+  } else {
+    const nameAnswer =
+      findByTitle(['이름', '성명', 'name']) ??
+      answerItems.find((item) => normalizeQuestionType(item.questionType) === QUESTION_TYPES.SHORT_TEXT);
+    const phoneAnswer =
+      findByType(QUESTION_TYPES.PHONE) ?? findByTitle(['연락처', '전화', '휴대폰', 'phone']);
+    name = formatSurveyAnswer(nameAnswer?.answer);
+    phone = formatSurveyAnswer(phoneAnswer?.answer);
+  }
+
   return {
     answerItems,
-    name: formatSurveyAnswer(nameAnswer?.answer),
-    phone: formatSurveyAnswer(phoneAnswer?.answer),
+    name,
+    phone,
+    isPiiProtected,
     primaryValue: formatSurveyAnswer(primaryAnswer?.answer),
   };
 }

@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import globals from 'globals';
 
 export default [
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**'] },
+  // functions/는 별도 Node.js 패키지(자체 package.json)라 이 브라우저 중심 설정이 아니라
+  // functions/eslint.config.js로 독립 린트한다(SYNC 불필요 — 서로 다른 런타임 대상).
+  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'functions/**'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx}'],
