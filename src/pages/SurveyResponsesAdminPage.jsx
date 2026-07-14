@@ -36,6 +36,7 @@ import {
   isDeletedSurvey,
   isNonResponseQuestionType,
   isOptionQuotaQuestion,
+  isOriginalPiiLost,
   isScaleQuestionType,
   normalizeSurveyStatus,
   QUESTION_TYPES,
@@ -1329,8 +1330,16 @@ function SurveyResponsesAdminPage() {
 
     const dataRows = exportSource.map((response) => {
       const answerItems = getOrderedResponseAnswerItems(survey.questions, response.answers);
+      // 2026-07-14: 원본이 이미 유실된 응답(isOriginalPiiLost, docs/admin-original-pii-export-fix.md
+      // 참고)은 저장된 answers[]의 PII 문항 값이 사실 마스킹 텍스트다 — 정상적으로 마스킹된
+      // 값처럼 보이면 관리자가 이를 실제로 확인 가능한 값으로 착각할 수 있으므로 명시적으로
+      // "[원본 확인 불가]"를 대신 내려보낸다(role/마스킹 여부와 무관하게 항상 적용).
+      const originalLost = isOriginalPiiLost(response.respondent);
       const answerMap = new Map(
         answerItems.map((item) => {
+          if (originalLost && piiQuestionIds.has(item.questionId)) {
+            return [item.questionId, '[원본 확인 불가]'];
+          }
           const formatted = formatSurveyAnswer(item.answer, item);
           const masked =
             shouldMaskDownload && piiQuestionIds.has(item.questionId)

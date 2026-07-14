@@ -6,7 +6,7 @@
 
 export function maskName(name) {
   const str = String(name ?? '').trim();
-  if (!str || str === '-' || str === '[익명처리됨]') return str;
+  if (!str || str === '-' || str === '[익명처리됨]' || str === '[원본 확인 불가]') return str;
   if (str.length === 1) return str;
   if (str.length === 2) return str[0] + '*';
   return str[0] + '*'.repeat(str.length - 2) + str[str.length - 1];
@@ -14,7 +14,7 @@ export function maskName(name) {
 
 export function maskPhone(phone) {
   const str = String(phone ?? '').trim();
-  if (!str || str === '-' || str === '[익명처리됨]') return str;
+  if (!str || str === '-' || str === '[익명처리됨]' || str === '[원본 확인 불가]') return str;
 
   const parts = str.split('-');
   if (parts.length === 3) {
@@ -35,7 +35,7 @@ export function maskPhone(phone) {
 
 export function maskAddress(address) {
   const str = String(address ?? '').trim();
-  if (!str || str === '-' || str === '[익명처리됨]') return str;
+  if (!str || str === '-' || str === '[익명처리됨]' || str === '[원본 확인 불가]') return str;
   const parts = str.split(/\s+/);
   if (parts.length <= 2) return str;
   return parts.slice(0, 2).join(' ') + ' ********';
@@ -44,7 +44,7 @@ export function maskAddress(address) {
 // SYNC REQUIRED: functions/src/masking.js의 maskBirthDate와 동일하게 유지한다.
 export function maskBirthDate(birthDate) {
   const str = String(birthDate ?? '').trim();
-  if (!str || str === '-' || str === '[익명처리됨]') return str;
+  if (!str || str === '-' || str === '[익명처리됨]' || str === '[원본 확인 불가]') return str;
   const match = str.match(/^(\d{4})/);
   if (!match) return '****';
   return `${match[1]}-**-**`;
@@ -56,7 +56,7 @@ const ADDRESS_KEYWORDS = ['주소', '거주지'];
 
 export function maskAnswerByQuestion(displayValue, questionTitle = '', questionType = '') {
   const str = String(displayValue ?? '').trim();
-  if (!str || str === '-' || str === '[익명처리됨]') return str;
+  if (!str || str === '-' || str === '[익명처리됨]' || str === '[원본 확인 불가]') return str;
 
   const titleLower = String(questionTitle).toLowerCase();
   const typeLower = String(questionType).toLowerCase();

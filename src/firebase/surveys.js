@@ -1200,6 +1200,53 @@ function buildAnswerPiiTargets(questions, piiQuestionIds, answers) {
 }
 
 /**
+ * answers[] 중 PII 대상 문항 하나를 저장용으로 변환한다(순수 함수, Firestore 의존 없음).
+ *
+ * 2026-07-14 수정: KMS 암호문(answerFieldsPii.fields.values[questionId])이 실제로 있을 때만
+ * 원문을 마스킹값으로 대체한다. Cloud Functions가 배포되지 않아(Spark 플랜) 암호화가 항상
+ * 실패하는 현재 상태에서 무조건 마스킹값으로 대체하면, 원문이 answers[]에도 answersPii
+ * 암호문에도 남지 않아 영구히 복구 불가능해진다(2026-07-12 커밋 이후 응답에서 실제 발생한
+ * 결함 — docs/admin-original-pii-export-fix.md 참고). 암호화가 안 됐을 때는 원문을 그대로
+ * 저장하고, 화면·다운로드 마스킹은 표시/다운로드 시점에 role 기반으로 적용한다.
+ * @param {{questionId: string, answer: unknown}} answerItem
+ * @param {Set<string>} answerPiiQuestionIds
+ * @param {{maskedByQuestionId: Record<string, string>, fields: {values?: Record<string,string>}|null}} answerFieldsPii
+ */
+export function resolveProtectedAnswerItem(answerItem, answerPiiQuestionIds, answerFieldsPii) {
+  if (!answerItem || !answerPiiQuestionIds.has(answerItem.questionId)) return answerItem;
+  const hasCiphertext = Boolean(answerFieldsPii.fields?.values?.[answerItem.questionId]);
+  if (!hasCiphertext) return { ...answerItem, piiProtected: false };
+  const masked = answerFieldsPii.maskedByQuestionId[answerItem.questionId];
+  if (masked === undefined) return { ...answerItem, piiProtected: false };
+  return { ...answerItem, answer: masked, piiProtected: true };
+}
+
+/**
+ * respondent 문서에 저장할 PII 관련 필드 묶음을 만든다(순수 함수, Firestore 의존 없음).
+ *
+ * 2026-07-14 수정: respondentPii.piiProtected(KMS 암호화 성공 여부)가 true일 때만 마스킹
+ * 미리보기를 최종 저장값으로 쓴다. false면(Cloud Functions 미배포로 암호화가 항상 실패하는
+ * 현재 상태 포함) applicantIdentity의 원문을 그대로 저장한다 — 기존(2026-07-12 이전) 동작과
+ * 동일. 화면 마스킹(목록)과 다운로드 마스킹(role 기반)은 이 값을 읽는 쪽에서 별도로 적용한다.
+ * @param {{name: string, phone: string, birthDate: string}} applicantIdentity
+ * @param {{nameMasked: string, phoneMasked: string, birthDateMasked: string, encrypted: object|null, piiProtected: boolean}} respondentPii
+ */
+export function buildRespondentPiiFields(applicantIdentity, respondentPii) {
+  return {
+    applicantNameMasked: respondentPii.nameMasked,
+    applicantPhoneMasked: respondentPii.phoneMasked,
+    applicantBirthDateMasked: respondentPii.birthDateMasked,
+    applicantName: respondentPii.piiProtected ? null : applicantIdentity.name,
+    applicantPhone: respondentPii.piiProtected ? null : applicantIdentity.phone,
+    applicantBirthDate: respondentPii.piiProtected ? null : applicantIdentity.birthDate,
+    applicantPii: respondentPii.encrypted,
+    piiProtected: respondentPii.piiProtected,
+    respondentName: respondentPii.piiProtected ? respondentPii.nameMasked : applicantIdentity.name,
+    respondentPhone: respondentPii.piiProtected ? respondentPii.phoneMasked : applicantIdentity.phone,
+  };
+}
+
+/**
  * 공개 전 개인정보 동의 문항 필수 검증.
  * PII 질문이 있는데 동의 문항이 없으면 invalid를 반환합니다.
  * @returns {{ valid: boolean, hasPii: boolean, hasConsent: boolean, warnings: string[] }}
@@ -2430,6 +2477,7 @@ async function submitSurveyResponseLegacyClient({
   // applicantIdentity.key(중복 확인용 해시)는 이 값과 무관하게 answers에서 그대로 재계산되므로
   // 정원·중복신청 로직에는 영향이 없다.
   const respondentPii = await protectRespondentPii(applicantIdentity);
+  const respondentPiiFields = buildRespondentPiiFields(applicantIdentity, respondentPii);
   // answers[] 저장 시점 보호(Phase 2, 2026-07). 대상은 자유서술형 신원 식별 문항만(위 상수 참조) —
   // 단일/다중선택형 인구통계 문항은 대상에서 제외해 surveyAnalytics.js/statisticsExcel.js의 분포
   // 집계를 깨지 않는다. 이 값도 트랜잭션 밖에서 1회만 계산·암호화한다(위와 동일한 이유).
@@ -2438,13 +2486,10 @@ async function submitSurveyResponseLegacyClient({
   const answerFieldsPii = await protectAnswerFields(answerPiiTargets);
   // 저장용 answers 사본만 마스킹한다 — 위에서 이미 끝난 applicantIdentity/slotSelections/quota 계산은
   // 원본 answers(원문)를 그대로 썼으므로 이 치환과 무관하다(분기·정원·중복신청 로직 불변).
-  const protectedAnswers = answers.map((answerItem) => {
-    if (!answerItem || !answerPiiQuestionIds.has(answerItem.questionId)) return answerItem;
-    const masked = answerFieldsPii.maskedByQuestionId[answerItem.questionId];
-    if (masked === undefined) return answerItem;
-    const hasCiphertext = Boolean(answerFieldsPii.fields?.values?.[answerItem.questionId]);
-    return { ...answerItem, answer: masked, piiProtected: hasCiphertext };
-  });
+  // 문항별 판단은 resolveProtectedAnswerItem()(순수 함수, 위쪽 정의) 참고.
+  const protectedAnswers = answers.map((answerItem) =>
+    resolveProtectedAnswerItem(answerItem, answerPiiQuestionIds, answerFieldsPii),
+  );
   const slotSelections = extractSlotSelections(
     survey.questions,
     answers,
@@ -2704,26 +2749,32 @@ async function submitSurveyResponseLegacyClient({
       visibleSectionIds: Array.isArray(visibleSectionIds) ? visibleSectionIds : [],
       skippedQuestionIds: Array.isArray(skippedQuestionIds) ? skippedQuestionIds : [],
       quota: responseQuota,
-      // 2026-07 PII 보호 하드닝(46번 문서 P0-1): 이름/전화/생년월일 원문은 더 이상 여기 저장하지 않는다.
-      // 마스킹 미리보기(*Masked)는 목록·CSV 기본 표시용, applicantPii는 Cloud KMS 암호문이며
-      // 서버(revealResponsePii)를 통해서만 복호화된다. applicantKey/applicantKeyLabel은 answers에서
+      // 2026-07 PII 보호 하드닝(46번 문서 P0-1) + 2026-07-14 수정(원본 유실 결함 대응,
+      // docs/admin-original-pii-export-fix.md 참고): PII 관련 필드는 buildRespondentPiiFields()
+      // (순수 함수, 위쪽 정의)가 결정한다 — piiProtected(KMS 암호화 성공 여부)가 true일 때만
+      // 마스킹 미리보기를 최종 저장값으로 쓰고, false면(Cloud Functions 미배포 포함) 원문을
+      // applicantName/applicantPhone/applicantBirthDate·respondentName/respondentPhone에 그대로
+      // 저장한다(기존 2026-07-12 이전 동작과 동일). applicantKey/applicantKeyLabel은 answers에서
       // 매번 재계산되는 해시라 이 변경과 무관하게 그대로 유지한다(중복신청 판정 로직 불변).
       respondent: {
         ...(respondent ?? {}),
         clientSubmitId: normalizedClientSubmitId,
-        applicantNameMasked: respondentPii.nameMasked,
-        applicantPhoneMasked: respondentPii.phoneMasked,
-        applicantBirthDateMasked: respondentPii.birthDateMasked,
-        applicantPii: respondentPii.encrypted,
-        piiProtected: respondentPii.piiProtected,
+        applicantNameMasked: respondentPiiFields.applicantNameMasked,
+        applicantPhoneMasked: respondentPiiFields.applicantPhoneMasked,
+        applicantBirthDateMasked: respondentPiiFields.applicantBirthDateMasked,
+        applicantName: respondentPiiFields.applicantName,
+        applicantPhone: respondentPiiFields.applicantPhone,
+        applicantBirthDate: respondentPiiFields.applicantBirthDate,
+        applicantPii: respondentPiiFields.applicantPii,
+        piiProtected: respondentPiiFields.piiProtected,
         // answers[] 내 자유서술형 PII 문항 암호문(questionId별). 없으면 null.
         answersPii: answerFieldsPii.fields,
         applicantKey: applicantIdentity.key,
         applicantKeyLabel: applicantIdentity.keyLabel,
         slotSelections,
       },
-      respondentName: respondentPii.nameMasked,
-      respondentPhone: respondentPii.phoneMasked,
+      respondentName: respondentPiiFields.respondentName,
+      respondentPhone: respondentPiiFields.respondentPhone,
       selectedSlotLabel: slotSelections[0]?.slotLabel ?? '',
       adminNote: '',
       submittedAt: serverTimestamp(),
@@ -4059,10 +4110,31 @@ export function getOrderedResponseAnswerItems(questions = [], answers = []) {
   return items.sort((first, second) => first.order - second.order);
 }
 
+/**
+ * 2026-07-14 원본 유실 판정(docs/admin-original-pii-export-fix.md 참고): piiProtected가
+ * false인데 applicantPii(KMS 암호문)도 없고 applicantName(원문 저장 필드) 자체가 아예 없는
+ * 경우 — 2026-07-12 커밋 배포 이후 이 수정이 배포되기 전까지 저장된 응답이다. answers[]의
+ * 이름/연락처 문항도 저장 시점에 이미 마스킹값으로 영구 대체되어 있어 어떤 코드로도 원본을
+ * 복구할 수 없다. applicantNameMasked가 존재해야만(2026-07-12 이후 코드가 실행됐다는 뜻)
+ * 판정 대상이다 — 그 이전(진짜 레거시) 응답은 애초에 이 필드가 없으므로 해당하지 않는다.
+ * @param {object} [respondent]
+ */
+export function isOriginalPiiLost(respondent) {
+  if (!respondent) return false;
+  return (
+    respondent.piiProtected === false &&
+    !respondent.applicantPii &&
+    respondent.applicantNameMasked !== undefined &&
+    respondent.applicantName === undefined
+  );
+}
+
 // 2026-07 PII 보호 하드닝: response.respondent.piiProtected가 true인 응답(신규 제출분)은
 // answers에서 이름/연락처를 다시 뽑아내지 않고 마스킹된 미리보기 필드를 기본값으로 쓴다.
 // revealedPii가 주어지면(관리자가 명시적으로 원문보기를 실행한 경우) 그 값을 최우선 사용한다.
 // 기존(비보호) 응답은 종전과 동일하게 answers에서 직접 추출한다 — 동작 변경 없음.
+// 2026-07-14 수정: isOriginalPiiLost()가 true인 응답은 마스킹값을 원문인 것처럼 조용히 보여주지
+// 않고 "[원본 확인 불가]"를 반환한다 — 원본 유실과 정상 마스킹 표시를 화면에서 구분하기 위함.
 export function extractApplicationResponseSummary(questions = [], response = {}, { revealedPii } = {}) {
   const answerItems = getOrderedResponseAnswerItems(questions, response.answers);
 
@@ -4084,12 +4156,16 @@ export function extractApplicationResponseSummary(questions = [], response = {},
     ) ?? answerItems[0];
 
   const isPiiProtected = response?.respondent?.piiProtected === true;
+  const isOriginalLost = isOriginalPiiLost(response?.respondent);
   let name;
   let phone;
 
   if (revealedPii) {
     name = revealedPii.name ?? '';
     phone = revealedPii.phone ?? '';
+  } else if (isOriginalLost) {
+    name = '[원본 확인 불가]';
+    phone = '[원본 확인 불가]';
   } else if (isPiiProtected) {
     name = response.respondent?.applicantNameMasked ?? '';
     phone = response.respondent?.applicantPhoneMasked ?? '';
@@ -4108,6 +4184,7 @@ export function extractApplicationResponseSummary(questions = [], response = {},
     name,
     phone,
     isPiiProtected,
+    isOriginalLost,
     primaryValue: formatSurveyAnswer(primaryAnswer?.answer),
   };
 }
