@@ -300,8 +300,29 @@ describe('handleSubmitProtectedSurveyResponse', () => {
     expect(JSON.stringify(docWithoutCiphertext)).not.toContain('홍길동');
   });
 
-  it('fails the entire submission (no response document written) when KMS encryption fails', async () => {
-    encryptField.mockRejectedValueOnce(new Error('kms down'));
+  it('retries KMS encryption automatically and succeeds after one transient failure', async () => {
+    // 2026-07-14: 즉시 실패가 아니라 자동 재시도(1~2회) 후에도 실패할 때만 저장을 중단한다.
+    // 첫 시도만 실패하고 재시도에서 성공하면 정상적으로 저장돼야 한다.
+    encryptField.mockRejectedValueOnce(new Error('transient kms error'));
+    const db = createFakeFirestore({
+      'surveys/s1': publishedSurvey({ questions: [{ id: 'q-name', title: '이름', type: 'shortText' }] }),
+    });
+
+    const result = await handleSubmitProtectedSurveyResponse({
+      data: { surveyId: 's1', clientSubmitId: 'c1', answers: [{ questionId: 'q-name', answer: '홍길동' }] },
+      auth: null,
+      db,
+      keyName: KEY_NAME,
+    });
+
+    expect(result.responseId).toBeTruthy();
+    const responseDoc = db._store.get(`responses/${result.responseId}`);
+    expect(responseDoc.respondent.piiProtected).toBe(true);
+    expect(responseDoc.respondent.applicantPii).toBeTruthy();
+  });
+
+  it('fails the entire submission (no response document written) when KMS encryption keeps failing after retries', async () => {
+    encryptField.mockRejectedValue(new Error('kms down'));
     const db = createFakeFirestore({
       'surveys/s1': publishedSurvey({ questions: [{ id: 'q-name', title: '이름', type: 'shortText' }] }),
     });
@@ -313,9 +334,58 @@ describe('handleSubmitProtectedSurveyResponse', () => {
         db,
         keyName: KEY_NAME,
       }),
-    ).rejects.toThrow('PII 암호화에 실패해 응답을 저장하지 못했습니다.');
+    ).rejects.toThrow('일시적인 오류가 발생했습니다. 입력 내용은 유지되어 있습니다. 잠시 후 다시 제출해 주세요.');
 
+    // 즉시 포기(1회)가 아니라 재시도했는지 확인한다. 이 픽스처는 "이름" 문항이 applicantIdentity
+    // (신원 요약)와 answers[] PII 문항(자유서술형) 양쪽에서 동시에 암호화 대상이 되므로
+    // (기존 설계 — 다른 테스트("masks and encrypts identity fields...")가 이미 이 이중 암호화를
+    // 정상 동작으로 검증한다) 두 개의 독립된 재시도 루프가 병렬로 실행되어 정확한 호출 횟수는
+    // 타이밍에 따라 달라진다 — 재시도가 일어났다는 사실(1회 초과)만 확인한다.
+    expect(encryptField.mock.calls.length).toBeGreaterThan(1);
     expect([...db._store.keys()].some((path) => path.startsWith('responses/'))).toBe(false);
     expect(db._store.get('surveys/s1').responseCount).toBe(0);
+  });
+});
+
+describe('verifyPiiPreservedBeforeSave', () => {
+  it('passes when identity PII exists but is fully ciphertext-backed', async () => {
+    const { verifyPiiPreservedBeforeSave } = await import('../src/submitResponse.js');
+    const result = verifyPiiPreservedBeforeSave({
+      applicantIdentity: { name: '홍길동', phone: '010-1234-5678', birthDate: '' },
+      answerPiiQuestionIds: new Set(['q-name']),
+      rawAnswers: [{ questionId: 'q-name', answer: '홍길동' }],
+      piiResult: {
+        applicantPii: { name: 'ct-name', phone: 'ct-phone' },
+        protectedAnswers: [{ questionId: 'q-name', answer: '홍*동', piiProtected: true }],
+      },
+    });
+    expect(result).toEqual({ ok: true, violations: [] });
+  });
+
+  it('fails when identity PII existed but no ciphertext was produced (Structure A forbids plaintext fallback)', async () => {
+    const { verifyPiiPreservedBeforeSave } = await import('../src/submitResponse.js');
+    const result = verifyPiiPreservedBeforeSave({
+      applicantIdentity: { name: '홍길동', phone: '', birthDate: '' },
+      answerPiiQuestionIds: new Set(),
+      rawAnswers: [],
+      piiResult: { applicantPii: null, protectedAnswers: [] },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('applicantName');
+  });
+
+  it('fails when an answers[] PII question had an original value but was not marked piiProtected', async () => {
+    const { verifyPiiPreservedBeforeSave } = await import('../src/submitResponse.js');
+    const result = verifyPiiPreservedBeforeSave({
+      applicantIdentity: {},
+      answerPiiQuestionIds: new Set(['q-addr']),
+      rawAnswers: [{ questionId: 'q-addr', answer: '서울시 종로구' }],
+      piiResult: {
+        applicantPii: null,
+        protectedAnswers: [{ questionId: 'q-addr', answer: '서*시 **구', piiProtected: false }],
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('answers.q-addr');
   });
 });

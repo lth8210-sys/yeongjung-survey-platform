@@ -1247,6 +1247,72 @@ export function buildRespondentPiiFields(applicantIdentity, respondentPii) {
 }
 
 /**
+ * 저장 직전 최종 검증(순수 함수, Firestore 의존 없음).
+ *
+ * 최상위 원칙: "마스킹값만 저장하고 제출 성공은 절대 허용하지 않는다." 원본 입력(이름/
+ * 연락처/생년월일/answers[] PII 문항 — 주소 포함)이 존재했다면, 저장 객체에도 다음 둘 중
+ * 하나로 반드시 보존되어야 한다:
+ *   (a) 평문 그대로 저장됨(piiProtected가 false인 현재 Hosting 경로의 기본 동작), 또는
+ *   (b) KMS 암호문(applicantPii/answers[].piiProtected)으로 복구 가능하게 보존됨
+ *       (piiProtected가 true인 향후 Functions 경로)
+ * 둘 중 어느 쪽도 아니면(원본은 있었는데 마스킹값 또는 결측만 남았다면) violations에
+ * 기록한다 — 호출부는 이 경우 Firestore 쓰기를 아예 진행하지 않아야 한다.
+ *
+ * @param {{name: string, phone: string, birthDate: string}} applicantIdentity - 저장 전 추출한 원문
+ * @param {ReturnType<typeof buildRespondentPiiFields>} respondentPiiFields - 저장하려는 respondent 필드
+ * @param {Array<{questionId: string, answer: unknown}>} rawAnswers - 마스킹 적용 전 원문 answers[]
+ * @param {Array<{questionId: string, answer: unknown, piiProtected?: boolean}>} protectedAnswers - 저장하려는 answers[]
+ * @param {Set<string>} answerPiiQuestionIds
+ * @returns {{ ok: boolean, violations: string[] }}
+ */
+export function verifyOriginalPreservedBeforeSave({
+  applicantIdentity,
+  respondentPiiFields,
+  rawAnswers,
+  protectedAnswers,
+  answerPiiQuestionIds,
+}) {
+  const violations = [];
+  const isCiphertextBacked = respondentPiiFields.piiProtected === true && Boolean(respondentPiiFields.applicantPii);
+
+  const checkIdentityField = (label, originalValue, savedPlainValue) => {
+    const hadOriginal = Boolean(String(originalValue ?? '').trim());
+    if (!hadOriginal) return;
+    const preservedAsPlain = String(savedPlainValue ?? '') === String(originalValue);
+    if (!preservedAsPlain && !isCiphertextBacked) violations.push(label);
+  };
+
+  checkIdentityField('applicantName', applicantIdentity?.name, respondentPiiFields.applicantName);
+  checkIdentityField('applicantPhone', applicantIdentity?.phone, respondentPiiFields.applicantPhone);
+  checkIdentityField('applicantBirthDate', applicantIdentity?.birthDate, respondentPiiFields.applicantBirthDate);
+
+  const savedByQuestionId = new Map(
+    (Array.isArray(protectedAnswers) ? protectedAnswers : [])
+      .filter((item) => item?.questionId)
+      .map((item) => [item.questionId, item]),
+  );
+
+  (Array.isArray(rawAnswers) ? rawAnswers : []).forEach((originalItem) => {
+    if (!originalItem || !answerPiiQuestionIds?.has(originalItem.questionId)) return;
+    const originalAnswer = originalItem.answer;
+    const hadOriginal = Array.isArray(originalAnswer)
+      ? originalAnswer.length > 0
+      : Boolean(String(originalAnswer ?? '').trim());
+    if (!hadOriginal) return;
+
+    const savedItem = savedByQuestionId.get(originalItem.questionId);
+    const preservedAsPlain =
+      Boolean(savedItem) && JSON.stringify(savedItem.answer) === JSON.stringify(originalAnswer);
+    const preservedAsCiphertext = Boolean(savedItem?.piiProtected);
+    if (!preservedAsPlain && !preservedAsCiphertext) {
+      violations.push(`answers.${originalItem.questionId}`);
+    }
+  });
+
+  return { ok: violations.length === 0, violations };
+}
+
+/**
  * 공개 전 개인정보 동의 문항 필수 검증.
  * PII 질문이 있는데 동의 문항이 없으면 invalid를 반환합니다.
  * @returns {{ valid: boolean, hasPii: boolean, hasConsent: boolean, warnings: string[] }}
@@ -2490,6 +2556,28 @@ async function submitSurveyResponseLegacyClient({
   const protectedAnswers = answers.map((answerItem) =>
     resolveProtectedAnswerItem(answerItem, answerPiiQuestionIds, answerFieldsPii),
   );
+
+  // 최상위 원칙 5(제출 전 최종 검증): 원본이 있었는데 저장 객체에는 마스킹값/결측만 남았다면
+  // Firestore 쓰기를 아예 진행하지 않는다 — 여기서 중단하면 이 시점까지 어떤 트랜잭션도
+  // 시작되지 않았으므로(runTransaction은 아래에서 처음 호출됨) 부분 저장이 발생할 수 없다.
+  const preservationCheck = verifyOriginalPreservedBeforeSave({
+    applicantIdentity,
+    respondentPiiFields,
+    rawAnswers: answers,
+    protectedAnswers,
+    answerPiiQuestionIds,
+  });
+  if (!preservationCheck.ok) {
+    logger.error('[submitSurveyResponseLegacyClient] PII preservation check failed', {
+      violationCount: preservationCheck.violations.length,
+    });
+    const error = new Error(
+      '일시적인 오류가 발생했습니다. 입력 내용은 유지되어 있습니다. 잠시 후 다시 제출해 주세요.',
+    );
+    error.code = 'pii-preservation-check-failed';
+    throw error;
+  }
+
   const slotSelections = extractSlotSelections(
     survey.questions,
     answers,

@@ -4,6 +4,7 @@ import {
   buildRespondentPiiFields,
   isOriginalPiiLost,
   extractApplicationResponseSummary,
+  verifyOriginalPreservedBeforeSave,
 } from '../src/firebase/surveys.js';
 import { QUESTION_TYPES } from '../src/firebase/surveyConstants.js';
 import { maskName, maskPhone } from '../src/utils/privacy.js';
@@ -176,5 +177,99 @@ describe('maskName/maskPhone — "[원본 확인 불가]" passthrough', () => {
   it('does not mangle the original-lost marker when a non-admin download re-applies masking', () => {
     expect(maskName('[원본 확인 불가]')).toBe('[원본 확인 불가]');
     expect(maskPhone('[원본 확인 불가]')).toBe('[원본 확인 불가]');
+  });
+});
+
+// 2026-07-14 최상위 원칙 5 회귀 테스트: "마스킹값만 저장하고 제출 성공은 절대 허용하지 않는다."
+// verifyOriginalPreservedBeforeSave()는 submitSurveyResponseLegacyClient()가 Firestore에 쓰기
+// 전에 호출하는 마지막 안전장치다 — 앞단(resolveProtectedAnswerItem/buildRespondentPiiFields)
+// 로직이 미래에 실수로 깨지더라도, 이 게이트가 여전히 "원본 유실" 상태를 잡아내야 한다.
+describe('verifyOriginalPreservedBeforeSave', () => {
+  const answerPiiQuestionIds = new Set(['q-name', 'q-phone', 'q-addr']);
+
+  it('passes when identity fields and answers are preserved as plaintext (current Hosting path)', () => {
+    const result = verifyOriginalPreservedBeforeSave({
+      applicantIdentity: { name: '홍길동', phone: '010-1234-5678', birthDate: '1990-01-01' },
+      respondentPiiFields: {
+        applicantName: '홍길동',
+        applicantPhone: '010-1234-5678',
+        applicantBirthDate: '1990-01-01',
+        piiProtected: false,
+        applicantPii: null,
+      },
+      rawAnswers: [{ questionId: 'q-name', answer: '홍길동' }, { questionId: 'q-addr', answer: '서울시 종로구' }],
+      protectedAnswers: [{ questionId: 'q-name', answer: '홍길동' }, { questionId: 'q-addr', answer: '서울시 종로구' }],
+      answerPiiQuestionIds,
+    });
+    expect(result).toEqual({ ok: true, violations: [] });
+  });
+
+  it('passes when identity fields are ciphertext-backed instead of plaintext (future KMS success path)', () => {
+    const result = verifyOriginalPreservedBeforeSave({
+      applicantIdentity: { name: '홍길동', phone: '010-1234-5678', birthDate: '' },
+      respondentPiiFields: {
+        applicantName: null,
+        applicantPhone: null,
+        applicantBirthDate: null,
+        piiProtected: true,
+        applicantPii: { name: 'ct-name', phone: 'ct-phone' },
+      },
+      rawAnswers: [{ questionId: 'q-name', answer: '홍길동' }],
+      protectedAnswers: [{ questionId: 'q-name', answer: '홍*동', piiProtected: true }],
+      answerPiiQuestionIds,
+    });
+    expect(result).toEqual({ ok: true, violations: [] });
+  });
+
+  it('fails when an identity field had an original value but the saved object has neither plaintext nor ciphertext (the actual 2026-07-12 bug)', () => {
+    const result = verifyOriginalPreservedBeforeSave({
+      applicantIdentity: { name: '홍길동', phone: '010-1234-5678', birthDate: '' },
+      respondentPiiFields: {
+        applicantName: undefined, // 버그 재현: 원본 필드 자체가 사라짐
+        applicantPhone: undefined,
+        applicantBirthDate: undefined,
+        piiProtected: false, // 암호화도 실패
+        applicantPii: null,
+      },
+      rawAnswers: [],
+      protectedAnswers: [],
+      answerPiiQuestionIds,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual(expect.arrayContaining(['applicantName', 'applicantPhone']));
+  });
+
+  it('fails when an answers[] PII question had an original value but the saved copy is masked without ciphertext', () => {
+    const result = verifyOriginalPreservedBeforeSave({
+      applicantIdentity: {},
+      respondentPiiFields: { piiProtected: false, applicantPii: null },
+      rawAnswers: [{ questionId: 'q-addr', answer: '서울시 종로구 1번지' }],
+      protectedAnswers: [{ questionId: 'q-addr', answer: '서*시 **구 1번지', piiProtected: false }],
+      answerPiiQuestionIds,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('answers.q-addr');
+  });
+
+  it('does not flag questions the applicant left blank (no original to preserve)', () => {
+    const result = verifyOriginalPreservedBeforeSave({
+      applicantIdentity: { name: '', phone: '', birthDate: '' },
+      respondentPiiFields: { applicantName: '', applicantPhone: '', applicantBirthDate: '', piiProtected: false, applicantPii: null },
+      rawAnswers: [{ questionId: 'q-addr', answer: '' }],
+      protectedAnswers: [{ questionId: 'q-addr', answer: '' }],
+      answerPiiQuestionIds,
+    });
+    expect(result).toEqual({ ok: true, violations: [] });
+  });
+
+  it('does not flag non-PII answer questions even if their saved value differs (out of scope for this gate)', () => {
+    const result = verifyOriginalPreservedBeforeSave({
+      applicantIdentity: {},
+      respondentPiiFields: { piiProtected: false, applicantPii: null },
+      rawAnswers: [{ questionId: 'q-agegroup', answer: '20대' }],
+      protectedAnswers: [{ questionId: 'q-agegroup', answer: '20대' }],
+      answerPiiQuestionIds, // q-agegroup은 대상 Set에 없음
+    });
+    expect(result).toEqual({ ok: true, violations: [] });
   });
 });

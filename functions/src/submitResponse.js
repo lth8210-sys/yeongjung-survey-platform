@@ -63,6 +63,87 @@ const MAX_ANSWER_STRING_LENGTH = 5000;
 const MAX_ARRAY_FIELD_LENGTH = 500;
 const MAX_ID_LENGTH = 300;
 
+// 암호화 실패 처리 정책: 즉시 제출 실패가 아니라 자동 재시도(1~2회) 후에도 실패하면 그때
+// 저장을 진행하지 않는다. KMS_ENCRYPT_MAX_ATTEMPTS=3은 최초 시도 1회 + 재시도 최대 2회를 뜻한다.
+const KMS_ENCRYPT_MAX_ATTEMPTS = 3;
+const KMS_ENCRYPT_RETRY_DELAY_MS = 300;
+const SUBMIT_FAILURE_MESSAGE =
+  '일시적인 오류가 발생했습니다. 입력 내용은 유지되어 있습니다. 잠시 후 다시 제출해 주세요.';
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * encryptField를 자동 재시도(최대 KMS_ENCRYPT_MAX_ATTEMPTS-1회)와 함께 호출한다.
+ * 마지막 시도까지 전부 실패하면 마지막 오류를 그대로 던진다 — 호출부(handleSubmit...)가
+ * 이를 잡아 트랜잭션을 아예 시작하지 않는다(평문/마스킹 fallback 없음, 8/9번 불변조건 유지).
+ */
+async function encryptFieldWithRetry(plaintext, keyName) {
+  let lastError;
+  for (let attempt = 1; attempt <= KMS_ENCRYPT_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await encryptField(plaintext, keyName);
+    } catch (error) {
+      lastError = error;
+      console.error('[submitProtectedSurveyResponse] KMS encrypt attempt failed', {
+        attempt,
+        maxAttempts: KMS_ENCRYPT_MAX_ATTEMPTS,
+        message: error?.message ?? String(error),
+      });
+      if (attempt < KMS_ENCRYPT_MAX_ATTEMPTS) {
+        await delay(KMS_ENCRYPT_RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * 저장 직전 최종 검증(순수 함수) — 최상위 원칙 5: "마스킹값만 저장하고 제출 성공은 절대
+ * 허용하지 않는다." Structure A는 이미 암호화 실패 시 트랜잭션 자체를 시작하지 않도록
+ * 설계되어 있지만(8/9번 불변조건), 이 게이트를 별도로 두어 이 파일이 향후 리팩토링되더라도
+ * 같은 사고가 재발하지 않게 한다. Structure A는 평문 저장을 허용하지 않으므로(클라이언트
+ * 레거시 경로와의 유일한 의도적 차이) "원본이 있었다면 반드시 암호문으로 보존됐는가"만 본다.
+ * @param {{name: string, phone: string, birthDate: string}} applicantIdentity
+ * @param {Set<string>} answerPiiQuestionIds
+ * @param {Array<{questionId: string, answer: unknown}>} rawAnswers
+ * @param {{applicantPii: object|null, protectedAnswers: Array<{questionId: string, piiProtected?: boolean}>}} piiResult
+ * @returns {{ ok: boolean, violations: string[] }}
+ */
+export function verifyPiiPreservedBeforeSave({ applicantIdentity, answerPiiQuestionIds, rawAnswers, piiResult }) {
+  const violations = [];
+  const isCiphertextBacked = Boolean(piiResult?.applicantPii);
+
+  const checkIdentityField = (label, originalValue) => {
+    const hadOriginal = Boolean(String(originalValue ?? '').trim());
+    if (hadOriginal && !isCiphertextBacked) violations.push(label);
+  };
+  checkIdentityField('applicantName', applicantIdentity?.name);
+  checkIdentityField('applicantPhone', applicantIdentity?.phone);
+  checkIdentityField('applicantBirthDate', applicantIdentity?.birthDate);
+
+  const savedByQuestionId = new Map(
+    (Array.isArray(piiResult?.protectedAnswers) ? piiResult.protectedAnswers : [])
+      .filter((item) => item?.questionId)
+      .map((item) => [item.questionId, item]),
+  );
+
+  (Array.isArray(rawAnswers) ? rawAnswers : []).forEach((originalItem) => {
+    if (!originalItem || !answerPiiQuestionIds?.has(originalItem.questionId)) return;
+    const originalAnswer = originalItem.answer;
+    const hadOriginal = Array.isArray(originalAnswer)
+      ? originalAnswer.length > 0
+      : Boolean(String(originalAnswer ?? '').trim());
+    if (!hadOriginal) return;
+
+    const savedItem = savedByQuestionId.get(originalItem.questionId);
+    if (!savedItem?.piiProtected) violations.push(`answers.${originalItem.questionId}`);
+  });
+
+  return { ok: violations.length === 0, violations };
+}
+
 function toTrimmedString(value, maxLength) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
@@ -155,14 +236,15 @@ async function encryptIdentityAndAnswerPii({ questions, answers, keyName }) {
   let answersPii = null;
 
   if (hasIdentityPii || hasAnswerPii) {
-    // 8/9번 원칙: 암호화 실패 시 응답 전체 저장 실패, 평문 fallback 금지.
-    // 그래서 이 블록 전체를 try 없이 그대로 둔다 — encryptField가 던지면 handleSubmit이
-    // 그대로 HttpsError로 전파해 트랜잭션을 아예 시작하지 않는다.
+    // 8/9번 원칙: 자동 재시도(encryptFieldWithRetry, 최초 1회+재시도 최대 2회) 후에도 암호화가
+    // 실패하면 응답 전체 저장 실패, 평문 fallback 금지. 그래서 이 블록 전체를 try 없이 그대로
+    // 둔다 — 재시도가 모두 실패해 encryptFieldWithRetry가 던지면 handleSubmit이 그대로
+    // HttpsError로 전파해 트랜잭션을 아예 시작하지 않는다.
     const [nameCt, phoneCt, birthDateCt, ...answerCiphertexts] = await Promise.all([
-      applicantIdentity.name ? encryptField(applicantIdentity.name, keyName) : Promise.resolve(null),
-      applicantIdentity.phone ? encryptField(applicantIdentity.phone, keyName) : Promise.resolve(null),
-      applicantIdentity.birthDate ? encryptField(applicantIdentity.birthDate, keyName) : Promise.resolve(null),
-      ...answerPiiTargets.map((target) => encryptField(target.value, keyName)),
+      applicantIdentity.name ? encryptFieldWithRetry(applicantIdentity.name, keyName) : Promise.resolve(null),
+      applicantIdentity.phone ? encryptFieldWithRetry(applicantIdentity.phone, keyName) : Promise.resolve(null),
+      applicantIdentity.birthDate ? encryptFieldWithRetry(applicantIdentity.birthDate, keyName) : Promise.resolve(null),
+      ...answerPiiTargets.map((target) => encryptFieldWithRetry(target.value, keyName)),
     ]);
 
     const encryptedAt = new Date().toISOString();
@@ -239,16 +321,35 @@ export async function handleSubmitProtectedSurveyResponse({ data, auth, db, keyN
     );
   }
 
-  // KMS 호출은 트랜잭션 재시도 루프 밖에서 1회만 수행한다(기존 클라이언트 구현과 동일한 이유 —
-  // 네트워크 호출을 트랜잭션 안에 넣지 않기 위함). 실패하면 여기서 그대로 던져 트랜잭션 자체를
-  // 시작하지 않는다(8/9번 원칙).
+  // KMS 호출은 트랜잭션 재시도 루프 밖에서 1회(자동 재시도 포함)만 수행한다(기존 클라이언트
+  // 구현과 동일한 이유 — 네트워크 호출을 트랜잭션 안에 넣지 않기 위함). encryptFieldWithRetry가
+  // 자동 재시도(최대 2회) 후에도 실패하면 여기서 그대로 던져 트랜잭션 자체를 시작하지 않는다
+  // (8/9번 원칙 — 즉시 실패가 아니라 재시도 후 실패, 평문/마스킹 fallback 없이 저장 자체를
+  // 진행하지 않는다).
   let piiResult;
   try {
     piiResult = await encryptIdentityAndAnswerPii({ questions: survey.questions, answers: input.answers, keyName });
   } catch (error) {
     if (error instanceof HttpsError) throw error;
-    console.error('[submitProtectedSurveyResponse] PII encryption failed', { message: error?.message ?? String(error) });
-    throw new HttpsError('internal', 'PII 암호화에 실패해 응답을 저장하지 못했습니다.');
+    console.error('[submitProtectedSurveyResponse] PII encryption failed after retries', {
+      message: error?.message ?? String(error),
+    });
+    throw new HttpsError('internal', SUBMIT_FAILURE_MESSAGE);
+  }
+
+  // 저장 직전 최종 검증(verifyPiiPreservedBeforeSave, 위쪽 정의) — 위 try/catch가 이미 이
+  // 상태를 막고 있지만, 별도 게이트로 다시 확인해 향후 리팩토링에도 안전망을 유지한다.
+  const preservationCheck = verifyPiiPreservedBeforeSave({
+    applicantIdentity,
+    answerPiiQuestionIds: identifyAnswerPiiQuestionIds(survey.questions),
+    rawAnswers: input.answers,
+    piiResult,
+  });
+  if (!preservationCheck.ok) {
+    console.error('[submitProtectedSurveyResponse] PII preservation check failed', {
+      violationCount: preservationCheck.violations.length,
+    });
+    throw new HttpsError('internal', SUBMIT_FAILURE_MESSAGE);
   }
 
   const slotSelections = extractSlotSelections(survey.questions, input.answers, survey.optionQuotaCounts);
