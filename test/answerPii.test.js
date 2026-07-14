@@ -27,6 +27,20 @@ describe('identifyAnswerPiiQuestionIds', () => {
     expect(ids.has('q-addr')).toBe(true);
   });
 
+  // 2026-07-14 장애 재현: 실제 운영 설문("2026 지역주민 욕구조사")의 Q1 문항 제목을 그대로 사용한다.
+  // 이 테스트가 통과한다는 것은 분류 자체는 처음부터 정상이었다는 뜻이다 — 실제 장애 원인은
+  // firestore.rules였다(§4/§6 최종 보고 참조), 이 분류 함수가 아니었다.
+  it('flags the exact production address question title (SHORT_TEXT) from the 2026-07-14 incident', () => {
+    const ids = identifyAnswerPiiQuestionIds([
+      {
+        id: 'q-address-real',
+        type: QUESTION_TYPES.SHORT_TEXT,
+        title: 'Q1. 현재 거주하는 곳의 주소는 무엇입니까?',
+      },
+    ]);
+    expect(ids.has('q-address-real')).toBe(true);
+  });
+
   it('does NOT flag single/multiple-choice demographic questions even if the title matches a keyword', () => {
     const ids = identifyAnswerPiiQuestionIds([
       { id: 'q-agegroup', type: QUESTION_TYPES.SINGLE_CHOICE, title: '연령대', options: ['20대', '30대'] },
