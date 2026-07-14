@@ -13,6 +13,8 @@ import {
   collection,
   getDoc,
   getDocs,
+  query,
+  where,
   serverTimestamp,
   updateDoc,
   writeBatch,
@@ -278,5 +280,164 @@ describe('survey_reports — creator 테넌트 격리 (KI-004 회귀 방지)', (
 
     await assertSucceeds(getDoc(doc(creatorA.firestore(), 'survey_reports', 'report-1')));
     await assertFails(getDoc(doc(creatorB.firestore(), 'survey_reports', 'report-1')));
+  });
+});
+
+// 2026-07-14: organization visibility(설문 "양식" 공유 범위)가 응답 "원문" 열람 권한으로
+// 잘못 재사용되던 결함(docs/pii-encryption-architecture.md 참고)에 대한 회귀 테스트.
+// canReadManagedResponse()가 canReadSurveyByIdWithAccess()(양식 조회, organization 포함)
+// 대신 canReadSurveyResponsesById()(응답 조회, organization 미포함)를 쓰도록 고쳤다 —
+// 아래는 그 수정이 실제로 유효한지, 그리고 기존 정상 경로(admin/super_admin/설문 소유자,
+// 설문 양식 조회, 응답 create 차단)를 깨지 않았는지를 함께 검증한다. get과 list(query) 양쪽을
+// 전부 검증한다 — 단일 문서 get만 막고 컬렉션 조회는 새는 실수를 잡기 위함이다.
+describe('responses — organization visibility가 응답 원문 열람 권한으로 오용되지 않는다 (2026-07-14)', () => {
+  const OWNER_UID = 'org-owner-uid';
+  const OWNER_EMAIL = 'org-owner@yeongjung.or.kr';
+  const OTHER_CREATOR_UID = 'org-other-creator-uid';
+  const OTHER_CREATOR_EMAIL = 'org-other-creator@yeongjung.or.kr';
+  const ADMIN_UID = 'org-admin-uid';
+  const ADMIN_EMAIL = 'org-admin@yeongjung.or.kr';
+  // 보호된 super_admin 이메일 — firestore.rules의 isProtectedSuperAdminEmailValue()와 동일한
+  // 하드코딩 목록 중 하나를 그대로 사용한다(테스트 전용 실제 값이 아님, users 문서 없이도
+  // 즉시 super_admin으로 해석되는지까지 함께 검증하기 위함).
+  const SUPER_ADMIN_EMAIL = 'lth8210@yeongjung.or.kr';
+  const NO_DOC_INTERNAL_EMAIL = 'org-nodoc-internal@yeongjung.or.kr';
+  const EXTERNAL_EMAIL = 'org-external@gmail.com';
+
+  async function seedOrgVisibleSurveyWithResponse(surveyId, responseId) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'surveys', surveyId), {
+        title: '조직 공유 설문(개인정보 문항 포함 가정)',
+        status: 'published',
+        visibility: 'organization',
+        ownerUid: OWNER_UID,
+        ownerEmail: OWNER_EMAIL,
+        responseCount: 1,
+      });
+      await setDoc(
+        doc(ctx.firestore(), 'responses', responseId),
+        minimalResponsePayload(surveyId, {
+          surveyOwnerUid: OWNER_UID,
+          surveyOwnerEmail: OWNER_EMAIL,
+        }),
+      );
+      await setDoc(doc(ctx.firestore(), 'users', OWNER_UID), {
+        uid: OWNER_UID,
+        email: OWNER_EMAIL,
+        role: 'creator',
+        status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', OTHER_CREATOR_UID), {
+        uid: OTHER_CREATOR_UID,
+        email: OTHER_CREATOR_EMAIL,
+        role: 'creator',
+        status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', ADMIN_UID), {
+        uid: ADMIN_UID,
+        email: ADMIN_EMAIL,
+        role: 'admin',
+        status: 'active',
+      });
+    });
+  }
+
+  function listBySurveyId(firestore, surveyId) {
+    return getDocs(query(collection(firestore, 'responses'), where('surveyId', '==', surveyId)));
+  }
+
+  it('1) 비로그인 사용자는 organization 설문 응답을 get/list할 수 없다', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-1', 'org-response-1');
+    const unauth = testEnv.unauthenticatedContext();
+
+    await assertFails(getDoc(doc(unauth.firestore(), 'responses', 'org-response-1')));
+    await assertFails(listBySurveyId(unauth.firestore(), 'org-survey-1'));
+  });
+
+  it('2) 외부(비기관 도메인) 로그인 사용자는 읽을 수 없다', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-2', 'org-response-2');
+    const external = testEnv.authenticatedContext('org-external-uid', { email: EXTERNAL_EMAIL });
+
+    await assertFails(getDoc(doc(external.firestore(), 'responses', 'org-response-2')));
+    await assertFails(listBySurveyId(external.firestore(), 'org-survey-2'));
+  });
+
+  it('3) users 문서가 없는 기관 도메인 계정(기본 creator 자동 부여)은 읽을 수 없다 — 발견된 결함의 핵심 케이스', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-3', 'org-response-3');
+    const noDocInternal = testEnv.authenticatedContext('org-nodoc-uid', { email: NO_DOC_INTERNAL_EMAIL });
+
+    await assertFails(getDoc(doc(noDocInternal.firestore(), 'responses', 'org-response-3')));
+    await assertFails(listBySurveyId(noDocInternal.firestore(), 'org-survey-3'));
+  });
+
+  it('4) 다른 설문의 creator는 organization 설문의 응답을 읽을 수 없다 — 발견된 결함의 핵심 케이스', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-4', 'org-response-4');
+    const otherCreator = testEnv.authenticatedContext(OTHER_CREATOR_UID, { email: OTHER_CREATOR_EMAIL });
+
+    await assertFails(getDoc(doc(otherCreator.firestore(), 'responses', 'org-response-4')));
+    await assertFails(listBySurveyId(otherCreator.firestore(), 'org-survey-4'));
+  });
+
+  it('5) 해당 설문의 owner(creator)는 응답을 읽을 수 있다', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-5', 'org-response-5');
+    const owner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+
+    await assertSucceeds(getDoc(doc(owner.firestore(), 'responses', 'org-response-5')));
+    await assertSucceeds(listBySurveyId(owner.firestore(), 'org-survey-5'));
+  });
+
+  it('6) admin은 읽을 수 있다(다운로드 화면이 사용하는 것과 동일한 role)', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-6', 'org-response-6');
+    const admin = testEnv.authenticatedContext(ADMIN_UID, { email: ADMIN_EMAIL });
+
+    await assertSucceeds(getDoc(doc(admin.firestore(), 'responses', 'org-response-6')));
+    await assertSucceeds(listBySurveyId(admin.firestore(), 'org-survey-6'));
+  });
+
+  it('7) super_admin은 읽을 수 있다', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-7', 'org-response-7');
+    const superAdmin = testEnv.authenticatedContext('org-super-uid', { email: SUPER_ADMIN_EMAIL });
+
+    await assertSucceeds(getDoc(doc(superAdmin.firestore(), 'responses', 'org-response-7')));
+    await assertSucceeds(listBySurveyId(superAdmin.firestore(), 'org-survey-7'));
+  });
+
+  it('8) organization 설문 "양식" 자체는 기존 정책대로 무관한 creator도 조회 가능하다(응답 조회와는 분리된 정책)', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-8', 'org-response-8');
+    const otherCreator = testEnv.authenticatedContext(OTHER_CREATOR_UID, { email: OTHER_CREATOR_EMAIL });
+
+    await assertSucceeds(getDoc(doc(otherCreator.firestore(), 'surveys', 'org-survey-8')));
+  });
+
+  it('9) 응답 create는 이번 변경과 무관하게 여전히 전면 차단된다(Structure A 회귀 확인 — 정상 제출 경로는 서버 콜러블뿐)', async () => {
+    await seedOrgVisibleSurveyWithResponse('org-survey-9', 'org-response-9-existing');
+    const owner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+
+    await assertFails(submitResponseBatch(owner.firestore(), 'org-survey-9', 2));
+  });
+
+  it('10) private(organization 아닌) 설문에서도 소유자가 아닌 creator는 여전히 응답을 읽을 수 없다(기존 동작 회귀 확인)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'surveys', 'private-survey-10'), {
+        title: '비공개 설문',
+        status: 'published',
+        ownerUid: OWNER_UID,
+        ownerEmail: OWNER_EMAIL,
+        responseCount: 1,
+      });
+      await setDoc(
+        doc(ctx.firestore(), 'responses', 'private-response-10'),
+        minimalResponsePayload('private-survey-10'),
+      );
+      await setDoc(doc(ctx.firestore(), 'users', OTHER_CREATOR_UID), {
+        uid: OTHER_CREATOR_UID,
+        email: OTHER_CREATOR_EMAIL,
+        role: 'creator',
+        status: 'active',
+      });
+    });
+    const otherCreator = testEnv.authenticatedContext(OTHER_CREATOR_UID, { email: OTHER_CREATOR_EMAIL });
+
+    await assertFails(getDoc(doc(otherCreator.firestore(), 'responses', 'private-response-10')));
   });
 });

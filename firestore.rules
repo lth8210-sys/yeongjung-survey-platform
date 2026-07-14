@@ -306,6 +306,33 @@ service cloud.firestore {
       return surveyExists && canReadManagedSurveyWithAccess(surveyData, role, status);
     }
 
+    // 2026-07-14 최소 수정: 설문 "양식" 조회 권한(canReadManagedSurveyWithAccess, 위)과 설문
+    // "응답" 조회 권한을 분리한다. isOrganizationVisibleSurvey(양식을 기관 내부에 공유하는
+    // 설문 빌더 기능)는 설문 양식 자체의 조회·참여 범위를 뜻할 뿐, 그 설문에 제출된 개인정보
+    // 포함 응답 원문까지 열람할 권한을 뜻하지 않는다. 기존 canReadManagedResponse()가
+    // canReadSurveyByIdWithAccess()(양식 조회 함수)를 그대로 재사용하고 있었기 때문에,
+    // organization으로 공유된 설문은 그 설문과 아무 관계가 없는 내부 직원(users 문서가 없어
+    // 기본 'creator' 역할이 자동 부여된 계정 포함)도 응답 원문(이름·연락처 등)을 Firestore
+    // SDK로 직접 읽을 수 있었다(발견 경위: docs/pii-encryption-architecture.md 참고).
+    // 응답 조회는 super_admin/admin 또는 "해당 설문"의 소유자(creator)로만 한정한다 —
+    // canEditManagedSurveyWithAccess와 동일한 조건이지만, 편집 권한 함수를 응답 조회에
+    // 재사용하면 이후 편집 정책이 바뀔 때 응답 조회 정책이 의도치 않게 함께 바뀔 수 있어
+    // 별도 함수로 분리했다.
+    function canReadSurveyResponsesWithAccess(data, role, status) {
+      return status == 'active' && (
+        role in ['super_admin', 'admin'] ||
+        (role == 'creator' && isSurveyOwner(data))
+      );
+    }
+
+    function canReadSurveyResponsesById(surveyId, role, status) {
+      let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+      let surveyExists = surveyId is string && exists(surveyPath);
+      let surveyData = surveyExists ? get(surveyPath).data : {};
+
+      return surveyExists && canReadSurveyResponsesWithAccess(surveyData, role, status);
+    }
+
     function canEditSurveyByIdWithAccess(surveyId, role, status) {
       let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
       let surveyExists = surveyId is string && exists(surveyPath);
@@ -474,7 +501,7 @@ service cloud.firestore {
       ) || (
         data.surveyId is string &&
         (
-          canReadSurveyByIdWithAccess(data.surveyId, role, status) ||
+          canReadSurveyResponsesById(data.surveyId, role, status) ||
           (
             status == 'active' &&
             role == 'creator' &&

@@ -605,9 +605,12 @@ function SurveyResponsePage() {
       return;
     }
 
+    // 2026-07-14: 이 경고는 DEV 게이트 없이 운영에서도 그대로 실행된다 — 응답자의 실제
+    // 출생년도(rawBirthYear)를 그대로 로그에 남기면 안 된다("브라우저 콘솔에 개인정보 원문이
+    // 남지 않아야 한다"는 원칙). 값 자체가 아니라 "입력이 있었는지/형식이 유효한지"만 남긴다.
     console.warn('[SurveyResponsePage] quota precheck failed', {
       source,
-      rawBirthYear: quotaInput.birthYear,
+      hasBirthYearInput: Boolean(quotaInput.birthYear),
       birthYearInvalid: !resolvedQuota.birthYear,
       surveyId: survey?.id ?? '',
     });
