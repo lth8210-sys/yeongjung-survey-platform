@@ -96,6 +96,7 @@ audit_logs/{logId}
 | `response_admin_note_updated` | 메모 수정 | 관리자 메모 저장 |
 | `response_anonymized` | 익명화 | 개인정보 응답 익명화 |
 | `response_delete` | 영문 action 또는 응답 삭제 | 응답 soft delete 트랜잭션 |
+| `response_cancelled` | 신청 취소 | 신청 응답을 `cancelled`로 보존하고 정원·lock을 반환하는 transaction |
 | `responses_csv_downloaded` | CSV 다운로드 | 원본형·명단형·슬롯형 CSV 다운로드 |
 | `statistics_excel_downloaded` | 통계 Excel 다운로드 | 통계 Excel 생성 완료 |
 
@@ -110,7 +111,7 @@ audit_logs/{logId}
 | `survey_template_disabled` | 설문 템플릿 비활성화 | 관리자가 템플릿을 비활성화 |
 | `template_list_opened` | 설문 템플릿 목록 열람 | `/admin/templates` 최초 진입 |
 
-`response_delete`는 현재 관리자 화면의 action 선택 목록에 별도 라벨이 없을 수 있으나 Firestore에는 action이 기록됩니다.
+`response_delete`와 `response_cancelled`는 현재 관리자 화면의 action 선택 목록에 별도 라벨이 없을 수 있으나 Firestore에는 action이 기록됩니다. `response_cancelled` metadata에는 응답자 원문 PII를 복제하지 않습니다.
 
 ## 5. 주요 metadata
 

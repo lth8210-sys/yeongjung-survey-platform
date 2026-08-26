@@ -1,6 +1,6 @@
 # 영중폼 현재 운영 상태
 
-최종 업데이트: 2026-07-10
+최종 업데이트: 2026-08-26
 운영 기준: v0.36
 
 ## 1. 서비스 개요
@@ -84,11 +84,18 @@
 - 응답 검색과 상태 필터
 - 개인정보 문항 익명화
 - 응답 soft delete
+- 신청 취소 및 정원 반환(신청형 설문)
 - 원본형, 명단형, 슬롯형 CSV 다운로드
 - 통계 Excel 다운로드
 - 만족도, 응답자 특성, 자유의견 분석
 
 삭제된 응답은 `deleted: true`와 관련 필드로 관리하며 기본 목록, 통계 및 다운로드에서 제외됩니다. 원본 문서를 실제 삭제하지 않습니다.
+
+신청형 설문은 관리자 응답 화면에서 현재 신청(soft delete·`cancelled` 제외), 취소(`cancelled`),
+전체 접수(soft delete 제외)를 응답 건수 기준으로 구분합니다. 신청 취소는 응답을
+`cancelled`로 보존하고 하나의 transaction에서 `responseCount`, option quota, age quota,
+해당 response가 소유한 applicant/slot lock을 함께 반환합니다. `closed` 설문은 취소 후에도
+자동으로 `published`로 바뀌지 않으며, 재모집은 직원이 수동으로 재개합니다.
 
 ### 결과보고서
 
@@ -131,6 +138,14 @@
 ## 7. 현재 운영상 주의사항
 
 - Hosting 배포만으로 Firestore rules는 반영되지 않습니다.
+- `organization` visibility는 설문 양식 공유를 뜻하며, organization-only 계정에는 응답 원문
+  열람 권한이 자동으로 부여되지 않습니다. owner/legacy owner와 admin/super_admin만 해당
+  관리 범위의 응답을 열람합니다.
+- closed 신청 설문의 applicant/slot lock은 안전한 취소 처리의 소유권 확인을 위해
+  owner/legacy owner/admin/super_admin만 읽을 수 있습니다. anonymous, organization-only,
+  unrelated creator는 계속 차단됩니다.
+- Phase 2B 이전에 이미 `cancelled`인 응답은 자동 migration하지 않았습니다. 과거 데이터의
+  counter/quota/lock 정합성 보정은 별도 운영 점검과 승인 없이는 수행하지 않습니다.
 - `/admin/reports` 또는 감사로그에서 `permission-denied`가 발생하면 운영 rules 배포 상태를 먼저 확인합니다.
 - 관리자 전체 목록 조회와 달리 `creator`의 보고서 조회는 보고서 `surveyId`와 본인 소유 설문이 일치해야 합니다.
 - 기존 보고서 문서에 `deleted`가 없어도 관리자 조회는 허용되며 화면에서는 삭제되지 않은 문서로 처리합니다.

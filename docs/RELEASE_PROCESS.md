@@ -79,6 +79,10 @@ Firestore 에뮬레이터를 자동으로 띄우고 종료하며(로컬에 Java 
 
 [QA_CHECKLIST.md](./QA_CHECKLIST.md)를 기준으로 회귀 테스트를 수행한다. 수행하지 못한 항목은 "미확인"으로 표시하고 이유를 기록한다.
 
+기능·권한·데이터 계약·Rules·배포 절차가 바뀌는 release는 README와 관련 운영문서를 함께
+검토한다. 실제 설명이 달라졌다면 코드와 같은 release 범위에서 문서 commit을 만들고,
+변경이 없다면 빈 문서 commit은 만들지 않는다.
+
 ## 7. Commit
 
 QA 완료 후 의미 단위로 커밋한다. 커밋 메시지에는 변경 목적과 검증 결과를 포함한다.
@@ -90,6 +94,10 @@ QA 완료 후 의미 단위로 커밋한다. 커밋 메시지에는 변경 목�
 ## 9. Deploy
 
 운영 승인 후 배포한다. rules, hosting, functions 등 배포 대상이 무엇인지 명확히 한다.
+
+Rules와 Hosting을 함께 바꾸는 권한·응답 계약 release는 Rules를 먼저 배포하고, 기존 Hosting
+기능의 로그인·권한·공개 제출 smoke를 통과한 뒤 Hosting을 배포한다. 변경하지 않은
+Functions·인덱스·Storage는 함께 배포하지 않는다.
 
 ## 10. 운영 확인
 

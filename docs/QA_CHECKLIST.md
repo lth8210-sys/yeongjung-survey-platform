@@ -182,6 +182,18 @@
 - [ ] 관리자 초과 허용 모드
 - [ ] quota dashboard 표시
 - [ ] quotaCounts 음수 방지
+
+## 신청 취소와 정원 반환
+
+- [ ] 안전한 테스트 신청 설문에서 신청 생성
+- [ ] 관리자 취소 후 response가 `cancelled`로 보존되는지 확인
+- [ ] 현재 신청 -1, 취소 +1, 전체 접수 유지(모두 응답 건 기준) 확인
+- [ ] `responseCount`, option quota, age quota가 정확히 1 반환되는지 확인
+- [ ] 대상 response 소유 applicant/slot lock만 해제되는지 확인
+- [ ] `closed` 설문이 취소 후 자동으로 `published`가 되지 않는지 확인
+- [ ] 수동 재개 후 새 익명 신청이 가능한지 확인
+- [ ] owner/legacy owner/admin/super_admin의 closed lock read 허용 확인
+- [ ] anonymous, organization-only, unrelated creator의 closed lock read 차단 확인
 - [ ] 비공개 quota 설문 권한 제한
 - [ ] 직원공유 quota 설문 조회
 - [ ] quota 기반 부족 현황 공유
@@ -299,6 +311,7 @@
 - [ ] `/admin/reports` 결과보고서 관리 active
 - [ ] `/admin/templates` 설문 템플릿 관리 active
 - [ ] 배포 후 공개 응답 제출 smoke test
+- [ ] 신청형 설문의 현재 신청·취소·전체 접수 표시 확인
 - [ ] 배포 후 관리자 응답 조회 smoke test
 - [ ] 배포 후 보고서 조회 smoke test
 

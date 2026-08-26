@@ -37,6 +37,7 @@
 - 관리자 메모 작성
 - 개인정보 문항 익명화
 - 응답 soft delete
+- 신청 취소(신청형 설문)
 - CSV 및 통계 Excel 다운로드
 - 만족도·응답자 특성·자유의견 분석 확인
 - 결과보고서 생성
@@ -58,6 +59,19 @@
 - 삭제된 응답은 기본 목록, 분석 및 다운로드에서 제외됩니다.
 - 설문 응답 수와 선택지 정원 집계가 함께 조정됩니다.
 - `response_delete` 감사로그가 기록됩니다.
+
+#### 신청 취소와 재모집
+
+- 신청 취소는 generic 처리 상태 선택이 아니라 `신청 취소` 확인 절차로만 수행합니다.
+- 대상 응답은 삭제하지 않고 `cancelled`로 보존하며, 현재 신청 수·선택지 정원·연령 정원과
+  대상 response가 소유한 applicant/slot lock을 하나의 transaction에서 반환합니다.
+- lock은 lock 문서의 `responseId`가 취소 대상과 일치할 때만 해제합니다.
+- 이미 취소된 응답은 다시 submitted로 되돌리지 않습니다.
+- 설문이 `closed`여도 취소가 자동 재개하지 않습니다. 추가 모집이 필요하면 직원이 기존
+  재개 기능으로 `published` 상태로 전환한 뒤 새 신청을 받습니다.
+- counter 또는 quota가 0·누락·비정상인 경우 취소는 실패하며, 운영자는 데이터 점검 후
+  별도 승인된 정합성 조치를 수행합니다.
+- Phase 2B 이전 cancelled 응답은 자동 보정 대상이 아닙니다.
 
 #### 개인정보 익명화
 
@@ -224,6 +238,8 @@ npx firebase deploy
 - `audit_logs` 생성은 `admin`, `super_admin`, `creator`에게 허용되지만 조회는 `admin` 이상만 허용됩니다.
 - 슈퍼관리자 이메일 목록을 변경하면 `firestore.rules`와 `src/firebase/users.js`를 함께 변경하고 배포합니다.
 - rules 배포 후 기존 로그인 토큰이나 캐시가 남아 있으면 로그아웃·재로그인 및 강력 새로고침을 수행합니다.
+- closed 신청 설문의 applicant/slot lock read는 owner, legacy owner, admin, super_admin에게만
+  허용됩니다. anonymous, organization-only, unrelated creator에는 허용하지 않습니다.
 
 ## 8. 배포 후 점검
 
@@ -244,6 +260,8 @@ npx firebase deploy
     배포 직후에는, 라이브 Firestore 설문 문서가 새 템플릿과 자동 동기화되지 않는다는
     점을 반드시 확인합니다(KI-013, [docs/KNOWN_ISSUES.md](../docs/KNOWN_ISSUES.md)) —
     Survey Builder에서 직접 재구성하거나 별도 마이그레이션 스크립트로 반영해야 합니다.
+13. 신청형 설문 변경 배포 후에는 안전한 테스트 설문에서 취소 전후 현재 신청·취소·전체 접수,
+    `responseCount`, quota, lock, closed 유지와 수동 재개 후 새 익명 신청을 확인합니다.
 
 ## 9. 자주 발생하는 문제
 

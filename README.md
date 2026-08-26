@@ -25,6 +25,7 @@
 - 직원공유 설문
 - 공개 응답 제출
 - 설문별 응답 관리
+- 신청 취소와 정원 반환
 - 최근응답 확인
 - 결과보고서 관리
 - CSV 다운로드
@@ -33,6 +34,11 @@
 - 설문 템플릿
 - 감사로그
 - Firestore Security Rules 기반 권한 관리
+
+신청형 설문은 관리자 화면에서 현재 신청, 취소, 전체 접수를 **응답 건수**로 구분합니다.
+신청 취소는 응답을 삭제하지 않고 `cancelled`로 보존하며, 사용한 정원과 해당 응답의
+중복 신청 lock을 함께 반환합니다. 마감 설문은 취소 후에도 자동으로 다시 열리지 않으며,
+추가 모집은 직원이 기존 재개 기능으로 수행합니다.
 
 ## 시작 방법
 
@@ -80,6 +86,8 @@ Authentication > Settings > Authorized domains에는 아래 도메인을 등록�
 - `creator`는 본인이 만든 설문만 수정 가능
 - 응답 작성은 누구나 가능
 - 응답 조회는 관리자와 해당 설문 제작자만 가능
+- `organization` visibility는 설문 양식 공유이며, organization-only 사용자에게 응답 원문
+  열람 권한을 자동으로 부여하지 않음
 
 ## Firebase CLI 배포
 
@@ -94,7 +102,9 @@ npm run firestore:deploy
 
 ## 배포 체크리스트
 
-`firestore.rules`가 변경된 경우 Hosting 배포만으로는 권한 정책이 반영되지 않습니다. 배포 전 빌드를 확인하고 Firestore Rules와 Hosting을 함께 배포하세요.
+`firestore.rules`가 변경된 경우 Hosting 배포만으로는 권한 정책이 반영되지 않습니다.
+권한·응답 제출 계약 변경은 Rules를 먼저 배포하고 기존 기능 smoke를 통과한 뒤 Hosting을
+배포하세요.
 
 ```bash
 npm run build
@@ -102,17 +112,11 @@ firebase deploy --only firestore
 firebase deploy --only hosting
 ```
 
-전체 리소스를 한 번에 배포할 때는 아래 명령을 사용할 수 있습니다.
-
-```bash
-firebase deploy
-```
-
-배포 전에는 Firebase Console의 `Firestore Database > Rules` 화면과 로컬 `firestore.rules` 내용을 비교하고, 배포 후에는 관리자 계정과 일반 계정으로 권한 동작을 각각 테스트하는 것을 권장합니다.
+배포 전에는 Firebase Console의 `Firestore Database > Rules` 화면과 로컬 `firestore.rules` 내용을 비교하고, 배포 후에는 관리자 계정과 일반 계정으로 권한 동작을 각각 테스트합니다. Functions·인덱스 등 변경하지 않은 서비스는 함께 배포하지 않습니다.
 
 ## 운영 문서
 
-운영 문서는 `docs/` 폴더에서 관리합니다. 개발 전에는 프로젝트 가드레일과 QA 체크리스트를 먼저 확인하고, 데이터 구조나 권한을 건드릴 가능성이 있으면 관련 운영 문서를 함께 확인하세요.
+운영 문서는 `docs/` 폴더에서 관리합니다. 개발 전에는 프로젝트 가드레일과 QA 체크리스트를 먼저 확인하고, 데이터 구조나 권한을 건드릴 가능성이 있으면 관련 운영 문서를 함께 확인하세요. 기능·권한·데이터 계약·Rules·배포 절차가 바뀌면 완료 전에 README와 관련 운영문서의 정합성을 확인하고, 필요한 문서는 같은 release 범위에서 갱신합니다.
 
 - [프로젝트 가드레일](./docs/PROJECT_GUARDRAILS.md)
 - [QA 체크리스트](./docs/QA_CHECKLIST.md)

@@ -30,7 +30,7 @@
 | `visibility` | `private` 또는 `organization` |
 | `questions` | 운영 설문 문항 배열 |
 | `sections` | 페이지/섹션 구조 |
-| `responseCount` | 제출된 응답 수 |
+| `responseCount` | 현재 유효 응답 수. 신청 취소·soft delete 응답은 제외 |
 | `ownerUid` | 설문 소유자 UID |
 | `ownerEmail` | 설문 소유자 이메일 |
 | `createdBy` | 생성자 메타데이터 |
@@ -62,6 +62,7 @@
 | `surveyOwnerUid` | 설문 소유자 UID 스냅샷 |
 | `surveyOwnerEmail` | 설문 소유자 이메일 스냅샷 |
 | `applicationStatus` | 신청 처리 상태 |
+| `status` | 응답 상태. 신청 취소는 `cancelled`로 보존 |
 | `adminNote` | 관리자 메모 |
 
 ### Future
@@ -127,6 +128,9 @@
 | `deletedBy` | 삭제 관련 작업자 메타데이터 |
 | `deletedAt` | 삭제 관련 시각 |
 
+`response_cancelled` 감사로그는 신청 취소 transaction에서 기록하며, actor 식별 정보와
+식별자만 남기고 응답자 원문 PII를 복제하지 않는다.
+
 ## quotaConfig
 
 경로: `surveys/{surveyId}/quotaConfig/main`
@@ -155,6 +159,14 @@ Q1(거주지)이 행정동 선택형에서 주소 자유 입력형으로 바뀌�
 | `total` | 전체 누적 응답 수 |
 | `cells` | 연령대별 누적 응답 수(`{ [ageGroupId]: number }`) |
 | `updatedAt` | 수정 시각 |
+
+## application locks
+
+경로: `surveys/{surveyId}/applicationApplicantLocks/{lockId}`, `surveys/{surveyId}/applicationSlotLocks/{lockId}`
+
+신청형 설문의 중복 신청·동일 슬롯 중복을 막는 문서다. 취소 시에는 대상 lock의
+`responseId`가 취소 응답 ID와 일치할 때만 삭제한다. Phase 2B 이전 cancelled 응답의
+counter/quota/lock은 자동 migration하지 않는다.
 
 ## Collection 관계
 

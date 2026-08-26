@@ -27,7 +27,7 @@
 | 설문 복제 | 가능 | 가능 | 접근 가능한 설문 기준 | 불가 | 불가 |
 | 응답 제출 | 공개 설문 가능 | 공개 설문 가능 | 공개 설문 가능 | 공개 설문 가능 | 공개 설문 가능 |
 | 전체 responses 조회 | 가능 | 가능 | 불가 | 불가 | 불가 |
-| 설문별 responses 조회 | 가능 | 가능 | 본인 설문 가능 | organization 설문 가능 | 불가 |
+| 설문별 responses 조회 | 가능 | 가능 | 본인/legacy 소유 설문 가능 | 불가 | 불가 |
 | 응답 수정/처리상태 변경 | 가능 | 가능 | 본인 설문 가능 | 불가 | 불가 |
 | 응답 삭제 | 가능 | 가능 | 제한적 가능 여부 확인 필요 | 불가 | 불가 |
 | CSV 다운로드 | 가능 | 가능 | 본인 설문 가능 | 제한 | 불가 |
@@ -105,9 +105,21 @@ Firestore rules는 query 결과의 모든 문서가 허용된다는 것을 증�
 ### staff/viewer
 
 - organization surveys 조회 가능
-- 최근 응답은 organization surveyId별 responses 조회
-- 보고서는 organization surveyId별 survey_reports 조회
-- private 설문 응답, 보고서, 수정 기능 불가
+- organization 설문 **양식** 조회 가능
+- 응답 원문, 최근 응답, 보고서, 수정 기능 불가
+
+## 신청 취소 lock read 계약
+
+published 설문의 공개 응답 제출은 기존대로 applicant/slot lock을 읽고 생성할 수 있다.
+closed 설문에서는 안전한 신청 취소 transaction이 lock의 `responseId` 소유권을 확인해야
+하므로, `applicationApplicantLocks`와 `applicationSlotLocks`의 read를 아래 설문 관리자에게만
+추가로 허용한다.
+
+- owner 및 legacy owner
+- admin 및 super_admin
+
+anonymous, organization-only staff/viewer, unrelated creator는 closed lock을 읽을 수 없다.
+이 변경은 lock의 create/update/delete 공개 권한을 확대하지 않는다.
 
 ## Rules 변경 체크리스트
 
@@ -116,6 +128,8 @@ Firestore rules는 query 결과의 모든 문서가 허용된다는 것을 증�
 - collection list query가 rules에서 증명 가능한가
 - creator 권한이 타인 private 데이터로 확장되지 않았는가
 - staff/viewer가 private 응답을 볼 수 없게 유지되는가
+- organization-only 사용자가 응답 원문을 볼 수 없게 유지되는가
+- closed lock read가 owner/legacy owner/admin/super_admin에만 허용되는가
 - 응답 제출 create rule이 깨지지 않았는가
 - quotaCounts public write 조건이 응답 제출에 필요한 범위로만 제한되는가
 - dry-run을 수행했는가
