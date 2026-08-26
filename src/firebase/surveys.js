@@ -516,6 +516,20 @@ function normalizeQuotaNumber(value, fallback = 0) {
   return Number.isFinite(numericValue) ? Math.max(0, Math.floor(numericValue)) : fallback;
 }
 
+// 취소는 기존 사용량을 정확히 한 건 반환하는 작업이다. 0 미만을 0으로 보정하면
+// 이미 깨진 운영 데이터를 숨긴 채 응답만 취소할 수 있으므로, 정합성 오류로 중단한다.
+export function decrementCancellationCounter(value, label) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue < 1) {
+    const error = new Error(`${label} 값이 1 미만이거나 올바르지 않아 신청 취소를 중단했습니다.`);
+    error.code = 'failed-precondition';
+    throw error;
+  }
+
+  return Math.floor(numericValue) - 1;
+}
+
 function normalizeQuotaId(value, fallback) {
   const normalizedValue = String(value ?? '').trim();
   return normalizedValue || fallback;
@@ -3612,6 +3626,206 @@ export async function updateResponseProcessing(responseId, { adminNote }) {
   await updateDoc(doc(db, 'responses', responseId), {
     adminNote: typeof adminNote === 'string' ? adminNote.trim() : '',
     updatedAt: getIsoTimestamp(),
+  });
+}
+
+// 신청 취소는 단순 상태 변경이 아니다. 현재 정원, 선택지/연령 quota, 중복 신청 lock을
+// 같은 transaction에서 함께 반환해야 하므로 updateResponseStatus()와 분리한다.
+// 설문 status는 의도적으로 변경하지 않는다. closed 설문을 자동 재공개하면 수동 마감
+// 설문까지 다시 열릴 수 있기 때문이다.
+export async function cancelApplicationResponse(responseId, cancelledBy = {}) {
+  ensureFirestoreReady();
+
+  const responseRef = doc(db, 'responses', responseId);
+  const auditLogRef = doc(auditLogsCollection);
+  const actor = {
+    uid: String(cancelledBy?.uid ?? ''),
+    email: String(cancelledBy?.email ?? ''),
+    displayName: String(cancelledBy?.displayName ?? cancelledBy?.name ?? ''),
+  };
+
+  return runTransaction(db, async (transaction) => {
+    const responseSnapshot = await transaction.get(responseRef);
+
+    if (!responseSnapshot.exists()) {
+      const error = new Error('취소할 응답을 찾을 수 없습니다.');
+      error.code = 'not-found';
+      throw error;
+    }
+
+    const response = mapResponseDoc(responseSnapshot);
+
+    // 이미 취소된 과거/신규 응답은 기존 counter와 quota를 추측해 보정하지 않는다.
+    // 두 번의 취소 요청이 겹쳐도 첫 transaction만 반영되도록 하는 no-op 계약이다.
+    if (response.status === RESPONSE_STATUSES.CANCELLED) {
+      return { responseId: String(responseId), surveyId: String(response.surveyId ?? ''), cancelled: false };
+    }
+
+    if (response.deleted) {
+      const error = new Error('삭제된 응답은 취소할 수 없습니다.');
+      error.code = 'failed-precondition';
+      throw error;
+    }
+
+    const surveyId = String(response.surveyId ?? '').trim();
+
+    if (!surveyId) {
+      const error = new Error('응답에 연결된 설문 정보를 찾을 수 없습니다.');
+      error.code = 'failed-precondition';
+      throw error;
+    }
+
+    const surveyRef = doc(db, 'surveys', surveyId);
+    const quotaConfigRef = doc(db, 'surveys', surveyId, 'quotaConfig', 'main');
+    const quotaCountsRef = doc(db, 'surveys', surveyId, 'quotaCounts', 'main');
+    const [surveySnapshot, quotaConfigSnapshot, quotaCountsSnapshot] = await Promise.all([
+      transaction.get(surveyRef),
+      transaction.get(quotaConfigRef),
+      transaction.get(quotaCountsRef),
+    ]);
+
+    if (!surveySnapshot.exists()) {
+      const error = new Error('연결된 설문 정보를 찾을 수 없습니다.');
+      error.code = 'not-found';
+      throw error;
+    }
+
+    const survey = mapSurveyDoc(surveySnapshot);
+    const nextOptionQuotaCounts = { ...normalizeOptionQuotaCounts(survey.optionQuotaCounts) };
+
+    (response.answers ?? []).forEach((answerItem) => {
+      const matchedQuestion = (survey.questions ?? []).find(
+        (question) => question.id === answerItem.questionId,
+      );
+
+      if (!matchedQuestion || !isOptionQuotaQuestion(matchedQuestion)) {
+        return;
+      }
+
+      const selectedValues = getSelectedQuotaValues(answerItem.answer)
+        .filter((selectedValue) => matchedQuestion.options.includes(selectedValue));
+
+      selectedValues.forEach((selectedValue) => {
+        const quotaKey = buildOptionQuotaKey(matchedQuestion.id, selectedValue);
+        nextOptionQuotaCounts[quotaKey] = decrementCancellationCounter(
+          nextOptionQuotaCounts[quotaKey],
+          `선택지 정원(${matchedQuestion.title || matchedQuestion.id} / ${selectedValue})`,
+        );
+      });
+    });
+
+    const applicantKey = String(response.respondent?.applicantKey ?? '');
+    const canResolveLocks = applicantKey && applicantKey !== ANONYMIZED_PII_MARKER;
+    let applicantLockRefToDelete = null;
+    const slotLockRefsToDelete = [];
+
+    if (canResolveLocks) {
+      const applicantLockRef = doc(
+        db,
+        'surveys',
+        surveyId,
+        'applicationApplicantLocks',
+        buildApplicantLockDocumentId(applicantKey),
+      );
+      const applicantLockSnapshot = await transaction.get(applicantLockRef);
+
+      if (shouldReleaseLock(applicantLockSnapshot.data(), responseId)) {
+        applicantLockRefToDelete = applicantLockRef;
+      }
+
+      const slotSelections = Array.isArray(response.respondent?.slotSelections)
+        ? response.respondent.slotSelections
+        : [];
+
+      for (const slotSelection of slotSelections) {
+        if (!slotSelection?.questionId || !slotSelection?.slotValue) {
+          continue;
+        }
+
+        const slotLockRef = doc(
+          db,
+          'surveys',
+          surveyId,
+          'applicationSlotLocks',
+          buildApplicationSlotLockDocumentId(slotSelection.questionId, slotSelection.slotValue, applicantKey),
+        );
+        const slotLockSnapshot = await transaction.get(slotLockRef);
+
+        if (shouldReleaseLock(slotLockSnapshot.data(), responseId)) {
+          slotLockRefsToDelete.push(slotLockRef);
+        }
+      }
+    }
+
+    let nextQuotaCounts = null;
+
+    if (response.quota?.ageGroupId && !quotaCountsSnapshot.exists()) {
+      const error = new Error('연령 정원 집계 문서가 없어 신청 취소를 중단했습니다.');
+      error.code = 'failed-precondition';
+      throw error;
+    }
+
+    if (quotaCountsSnapshot.exists() && response.quota?.ageGroupId) {
+      const quotaConfig = normalizeAgeQuotaConfig(
+        quotaConfigSnapshot.exists() ? quotaConfigSnapshot.data() : createDefaultAgeQuotaConfig(),
+      );
+      const quotaCounts = normalizeAgeQuotaCounts(quotaCountsSnapshot.data(), quotaConfig);
+      const ageGroupId = String(response.quota.ageGroupId);
+
+      nextQuotaCounts = {
+        ...quotaCounts,
+        total: decrementCancellationCounter(quotaCounts.total, '연령 정원 전체 집계'),
+        cells: {
+          ...quotaCounts.cells,
+          [ageGroupId]: decrementCancellationCounter(
+            quotaCounts.cells?.[ageGroupId],
+            `연령 정원(${ageGroupId})`,
+          ),
+        },
+      };
+    }
+
+    const nextResponseCount = decrementCancellationCounter(survey.responseCount, '현재 신청 수');
+
+    transaction.update(responseRef, {
+      status: RESPONSE_STATUSES.CANCELLED,
+      statusUpdatedAt: getIsoTimestamp(),
+      statusUpdatedBy: actor.email || actor.uid,
+      updatedAt: getIsoTimestamp(),
+    });
+    transaction.update(surveyRef, {
+      responseCount: nextResponseCount,
+      optionQuotaCounts: nextOptionQuotaCounts,
+      updatedAt: serverTimestamp(),
+    });
+
+    if (nextQuotaCounts) {
+      transaction.set(quotaCountsRef, {
+        ...nextQuotaCounts,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    if (applicantLockRefToDelete) {
+      transaction.delete(applicantLockRefToDelete);
+    }
+    slotLockRefsToDelete.forEach((lockRef) => transaction.delete(lockRef));
+
+    transaction.set(auditLogRef, {
+      action: 'response_cancelled',
+      surveyId,
+      responseId: String(responseId),
+      actor,
+      metadata: {},
+      createdAt: serverTimestamp(),
+    });
+
+    return {
+      responseId: String(responseId),
+      surveyId,
+      cancelled: true,
+      responseCount: nextResponseCount,
+    };
   });
 }
 

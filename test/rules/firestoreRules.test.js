@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   initializeTestEnvironment,
   assertFails,
@@ -19,6 +19,7 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
+import { decrementCancellationCounter } from '../../src/firebase/surveys.js';
 
 // firestore.rules(924줄)는 이 앱의 실질적인 최종 권한 방어선이지만 자동 테스트가
 // 전혀 없었다. 과거 KI-001/003/004/008/010이 전부 권한 규칙 관련 장애였던 이력을
@@ -84,6 +85,17 @@ function minimalResponsePayload(surveyId, overrides = {}) {
     ...overrides,
   };
 }
+
+describe('application cancellation — counter 정합성 fail-safe', () => {
+  it('정상 값은 정확히 한 건만 반환하고 0·누락·비정상 값은 transaction 전에 중단한다', () => {
+    expect(decrementCancellationCounter(1, '현재 신청 수')).toBe(0);
+    expect(decrementCancellationCounter(7, '선택지 정원')).toBe(6);
+
+    [0, -1, undefined, null, 'not-a-number'].forEach((value) => {
+      expect(() => decrementCancellationCounter(value, '현재 신청 수')).toThrow(/취소를 중단/);
+    });
+  });
+});
 
 // 실제 앱(submitSurveyResponse, src/firebase/surveys.js)은 responses 문서 생성과
 // surveys.responseCount 증가를 runTransaction()으로 원자적으로 묶어 제출한다.
@@ -366,6 +378,267 @@ describe('legacy survey ownership — 제작자 관리·응답 열람 호환성'
         title: '레거시 소유자 설문 수정',
       }),
     );
+  });
+});
+
+describe('application cancellation — owner/admin 권한과 원자적 정원 반환 계약', () => {
+  const SURVEY_ID = 'cancellable-survey';
+  const RESPONSE_ID = 'cancellable-response';
+  const OWNER_UID = 'cancellation-owner';
+  const OWNER_EMAIL = 'cancellation-owner@yeongjung.or.kr';
+  const ADMIN_UID = 'cancellation-admin';
+  const ADMIN_EMAIL = 'cancellation-admin@yeongjung.or.kr';
+  const OTHER_UID = 'cancellation-other';
+  const OTHER_EMAIL = 'cancellation-other@yeongjung.or.kr';
+  const APPLICANT_LOCK_ID = 'applicant-lock';
+  const SLOT_LOCK_ID = 'slot-lock';
+
+  async function seedCancellableApplication() {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'surveys', SURVEY_ID), {
+        title: '취소 가능 신청',
+        status: 'closed',
+        responseCount: 10,
+        ownerUid: OWNER_UID,
+        ownerEmail: OWNER_EMAIL,
+        optionQuotaCounts: { 'slot-q::10:00': 6 },
+      });
+      await setDoc(doc(ctx.firestore(), 'surveys', SURVEY_ID, 'quotaCounts', 'main'), {
+        total: 4,
+        cells: { age_20_39: 4 },
+      });
+      await setDoc(doc(ctx.firestore(), 'responses', RESPONSE_ID), minimalResponsePayload(SURVEY_ID, {
+        status: 'submitted',
+        answers: [{ questionId: 'slot-q', answer: '10:00' }],
+        quota: { ageGroupId: 'age_20_39' },
+        respondent: {
+          submittedFrom: 'web',
+          applicantKey: '01012345678',
+          slotSelections: [{ questionId: 'slot-q', slotValue: '10:00' }],
+        },
+      }));
+      await setDoc(
+        doc(ctx.firestore(), 'surveys', SURVEY_ID, 'applicationApplicantLocks', APPLICANT_LOCK_ID),
+        { surveyId: SURVEY_ID, responseId: RESPONSE_ID, applicantHash: 'hash', lockType: 'form_duplicate' },
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'surveys', SURVEY_ID, 'applicationSlotLocks', SLOT_LOCK_ID),
+        { surveyId: SURVEY_ID, responseId: RESPONSE_ID, applicantHash: 'hash', questionId: 'slot-q', slotValue: '10:00' },
+      );
+      await setDoc(doc(ctx.firestore(), 'users', OWNER_UID), {
+        uid: OWNER_UID, email: OWNER_EMAIL, role: 'creator', status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', ADMIN_UID), {
+        uid: ADMIN_UID, email: ADMIN_EMAIL, role: 'admin', status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', OTHER_UID), {
+        uid: OTHER_UID, email: OTHER_EMAIL, role: 'creator', status: 'active',
+      });
+    });
+  }
+
+  function cancelResponseBatch(firestore, actor) {
+    const batch = writeBatch(firestore);
+    batch.update(doc(firestore, 'responses', RESPONSE_ID), { status: 'cancelled' });
+    batch.update(doc(firestore, 'surveys', SURVEY_ID), {
+      responseCount: 9,
+      optionQuotaCounts: { 'slot-q::10:00': 5 },
+      // 취소는 정원만 반환하며 수동/자동 마감 구분이 없는 status는 그대로 둔다.
+      status: 'closed',
+    });
+    batch.update(doc(firestore, 'surveys', SURVEY_ID, 'quotaCounts', 'main'), {
+      total: 3,
+      cells: { age_20_39: 3 },
+    });
+    batch.delete(doc(firestore, 'surveys', SURVEY_ID, 'applicationApplicantLocks', APPLICANT_LOCK_ID));
+    batch.delete(doc(firestore, 'surveys', SURVEY_ID, 'applicationSlotLocks', SLOT_LOCK_ID));
+    batch.set(doc(collection(firestore, 'audit_logs')), {
+      action: 'response_cancelled',
+      surveyId: SURVEY_ID,
+      responseId: RESPONSE_ID,
+      actor,
+      metadata: {},
+      createdAt: serverTimestamp(),
+    });
+    return batch.commit();
+  }
+
+  // 취소 후 설문을 수동으로 다시 열었을 때에는 이전 응답의 lock이 남아 재신청을
+  // 막지 않아야 한다. 실제 공개 제출처럼 response/counter/두 lock을 한 배치에 담는다.
+  function resubmitApplicationBatch(firestore) {
+    const batch = writeBatch(firestore);
+    const nextResponseRef = doc(collection(firestore, 'responses'));
+    batch.set(nextResponseRef, minimalResponsePayload(SURVEY_ID, {
+      respondent: { submittedFrom: 'web' },
+    }));
+    batch.update(doc(firestore, 'surveys', SURVEY_ID), { responseCount: 10 });
+    batch.set(doc(firestore, 'surveys', SURVEY_ID, 'applicationApplicantLocks', 'new-applicant-lock'), {
+      surveyId: SURVEY_ID,
+      responseId: nextResponseRef.id,
+      applicantHash: 'new-hash',
+      lockType: 'form_duplicate',
+    });
+    batch.set(doc(firestore, 'surveys', SURVEY_ID, 'applicationSlotLocks', 'new-slot-lock'), {
+      surveyId: SURVEY_ID,
+      responseId: nextResponseRef.id,
+      applicantHash: 'new-hash',
+      questionId: 'slot-q',
+      slotValue: '10:00',
+    });
+    return batch.commit();
+  }
+
+  it('owner 취소는 응답을 보존하고 counter/quota/lock을 함께 조정하며 closed 상태를 유지한다', async () => {
+    await seedCancellableApplication();
+    const owner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+    const actor = { uid: OWNER_UID, email: OWNER_EMAIL, displayName: '' };
+
+    await assertSucceeds(cancelResponseBatch(owner.firestore(), actor));
+
+    const survey = await getDoc(doc(owner.firestore(), 'surveys', SURVEY_ID));
+    const response = await getDoc(doc(owner.firestore(), 'responses', RESPONSE_ID));
+    const quotaCounts = await getDoc(doc(owner.firestore(), 'surveys', SURVEY_ID, 'quotaCounts', 'main'));
+    let applicantLockExists;
+    let slotLockExists;
+    // closed 설문에서는 production Rules가 공개 lock read를 막는다. 삭제 여부 검증은
+    // 권한 테스트와 분리해 rules-disabled 관리 컨텍스트로 확인한다.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      applicantLockExists = (await getDoc(
+        doc(ctx.firestore(), 'surveys', SURVEY_ID, 'applicationApplicantLocks', APPLICANT_LOCK_ID),
+      )).exists();
+      slotLockExists = (await getDoc(
+        doc(ctx.firestore(), 'surveys', SURVEY_ID, 'applicationSlotLocks', SLOT_LOCK_ID),
+      )).exists();
+    });
+
+    expect(survey.data().status).toBe('closed');
+    expect(survey.data().responseCount).toBe(9);
+    expect(survey.data().optionQuotaCounts['slot-q::10:00']).toBe(5);
+    expect(response.data().status).toBe('cancelled');
+    expect(response.data().deleted).not.toBe(true);
+    expect(quotaCounts.data()).toEqual({ total: 3, cells: { age_20_39: 3 } });
+    expect(applicantLockExists).toBe(false);
+    expect(slotLockExists).toBe(false);
+  });
+
+  it('admin은 취소 transaction을 수행할 수 있다', async () => {
+    await seedCancellableApplication();
+    const admin = testEnv.authenticatedContext(ADMIN_UID, { email: ADMIN_EMAIL });
+
+    await assertSucceeds(cancelResponseBatch(admin.firestore(), {
+      uid: ADMIN_UID, email: ADMIN_EMAIL, displayName: '',
+    }));
+  });
+
+  it('무관한 creator와 익명 사용자는 취소 transaction을 수행할 수 없다', async () => {
+    await seedCancellableApplication();
+    const otherCreator = testEnv.authenticatedContext(OTHER_UID, { email: OTHER_EMAIL });
+    const unauthenticated = testEnv.unauthenticatedContext();
+
+    await assertFails(cancelResponseBatch(otherCreator.firestore(), {
+      uid: OTHER_UID, email: OTHER_EMAIL, displayName: '',
+    }));
+    await assertFails(cancelResponseBatch(unauthenticated.firestore(), {
+      uid: '', email: '', displayName: '',
+    }));
+  });
+
+  it('취소 뒤 관리자가 수동 재공개하면 익명 신청자가 새 response/counter/lock을 원자적으로 생성할 수 있다', async () => {
+    await seedCancellableApplication();
+    const owner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+    const anonymous = testEnv.unauthenticatedContext();
+
+    await assertSucceeds(cancelResponseBatch(owner.firestore(), {
+      uid: OWNER_UID, email: OWNER_EMAIL, displayName: '',
+    }));
+    await assertSucceeds(updateDoc(doc(owner.firestore(), 'surveys', SURVEY_ID), { status: 'published' }));
+    await assertSucceeds(resubmitApplicationBatch(anonymous.firestore()));
+
+    const survey = await getDoc(doc(owner.firestore(), 'surveys', SURVEY_ID));
+    expect(survey.data().responseCount).toBe(10);
+  });
+});
+
+describe('closed application locks — 취소 관리자 ownership 확인 read 권한', () => {
+  const SURVEY_ID = 'closed-lock-survey';
+  const OWNER_UID = 'closed-lock-owner';
+  const OWNER_EMAIL = 'closed-lock-owner@yeongjung.or.kr';
+  const LEGACY_OWNER_UID = 'closed-lock-legacy-owner';
+  const LEGACY_OWNER_EMAIL = 'closed-lock-legacy-owner@yeongjung.or.kr';
+  const ADMIN_UID = 'closed-lock-admin';
+  const ADMIN_EMAIL = 'closed-lock-admin@yeongjung.or.kr';
+  const OTHER_UID = 'closed-lock-other';
+  const OTHER_EMAIL = 'closed-lock-other@yeongjung.or.kr';
+  const VIEWER_UID = 'closed-lock-viewer';
+  const VIEWER_EMAIL = 'closed-lock-viewer@yeongjung.or.kr';
+
+  async function seedClosedLocks({ legacyOwner = false } = {}) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'surveys', SURVEY_ID), {
+        title: '마감 신청',
+        status: 'closed',
+        responseCount: 1,
+        visibility: 'organization',
+        ...(legacyOwner
+          ? { ownerId: LEGACY_OWNER_UID, ownerEmail: LEGACY_OWNER_EMAIL }
+          : { ownerUid: OWNER_UID, ownerEmail: OWNER_EMAIL }),
+      });
+      await setDoc(doc(ctx.firestore(), 'surveys', SURVEY_ID, 'applicationApplicantLocks', 'applicant'), {
+        surveyId: SURVEY_ID, responseId: 'response-1', applicantHash: 'hash', lockType: 'form_duplicate',
+      });
+      await setDoc(doc(ctx.firestore(), 'surveys', SURVEY_ID, 'applicationSlotLocks', 'slot'), {
+        surveyId: SURVEY_ID, responseId: 'response-1', applicantHash: 'hash', questionId: 'q1', slotValue: '10:00',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', OWNER_UID), {
+        uid: OWNER_UID, email: OWNER_EMAIL, role: 'creator', status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', LEGACY_OWNER_UID), {
+        uid: LEGACY_OWNER_UID, email: LEGACY_OWNER_EMAIL, role: 'creator', status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', ADMIN_UID), {
+        uid: ADMIN_UID, email: ADMIN_EMAIL, role: 'admin', status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', OTHER_UID), {
+        uid: OTHER_UID, email: OTHER_EMAIL, role: 'creator', status: 'active',
+      });
+      await setDoc(doc(ctx.firestore(), 'users', VIEWER_UID), {
+        uid: VIEWER_UID, email: VIEWER_EMAIL, role: 'viewer', status: 'active',
+      });
+    });
+  }
+
+  function readBothLocks(firestore) {
+    return Promise.all([
+      getDoc(doc(firestore, 'surveys', SURVEY_ID, 'applicationApplicantLocks', 'applicant')),
+      getDoc(doc(firestore, 'surveys', SURVEY_ID, 'applicationSlotLocks', 'slot')),
+    ]);
+  }
+
+  it('closed 설문 owner, legacy owner, admin, super_admin은 두 lock을 읽을 수 있다', async () => {
+    await seedClosedLocks();
+    const owner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+    const admin = testEnv.authenticatedContext(ADMIN_UID, { email: ADMIN_EMAIL });
+    const superAdmin = testEnv.authenticatedContext('closed-lock-super', { email: 'lth8210@yeongjung.or.kr' });
+
+    await assertSucceeds(readBothLocks(owner.firestore()));
+    await assertSucceeds(readBothLocks(admin.firestore()));
+    await assertSucceeds(readBothLocks(superAdmin.firestore()));
+
+    await testEnv.clearFirestore();
+    await seedClosedLocks({ legacyOwner: true });
+    const legacyOwner = testEnv.authenticatedContext(LEGACY_OWNER_UID, { email: LEGACY_OWNER_EMAIL });
+    await assertSucceeds(readBothLocks(legacyOwner.firestore()));
+  });
+
+  it('closed 설문의 lock은 anonymous, organization-only viewer, unrelated creator에게 계속 차단된다', async () => {
+    await seedClosedLocks();
+    const anonymous = testEnv.unauthenticatedContext();
+    const viewer = testEnv.authenticatedContext(VIEWER_UID, { email: VIEWER_EMAIL });
+    const otherCreator = testEnv.authenticatedContext(OTHER_UID, { email: OTHER_EMAIL });
+
+    await assertFails(readBothLocks(anonymous.firestore()));
+    await assertFails(readBothLocks(viewer.firestore()));
+    await assertFails(readBothLocks(otherCreator.firestore()));
   });
 });
 

@@ -31,6 +31,7 @@ import {
   getOrderedResponseAnswerItems,
   getQuotaSummary,
   buildAgeQuotaDashboard,
+  cancelApplicationResponse,
   getResponseStatusMeta,
   getSurveyStatusMeta,
   isApplicationFormType,
@@ -90,6 +91,9 @@ const FILTER_RESPONSE_STATUSES = [
   RESPONSE_STATUSES.CANCELLED,
   RESPONSE_STATUSES.FOLLOW_UP,
 ];
+const EDITABLE_RESPONSE_STATUSES = FILTER_RESPONSE_STATUSES.filter(
+  (status) => status !== RESPONSE_STATUSES.CANCELLED,
+);
 
 const SHARE_TYPES = {
   PROGRESS: 'progress',
@@ -797,6 +801,7 @@ function SurveyResponsesAdminPage() {
   const [pendingDownload, setPendingDownload] = useState(null);
   const [pendingAnonymize, setPendingAnonymize] = useState(null);
   const [pendingDeleteResponse, setPendingDeleteResponse] = useState(null);
+  const [pendingCancellation, setPendingCancellation] = useState(null);
   // 2026-07 PII 보호 하드닝: responseId -> { name, phone, birthDate } (서버에서 방금 복호화한 값).
   // 새로고침하면 사라진다 — 어디에도 영구 저장하지 않는다.
   const [revealedPiiByResponseId, setRevealedPiiByResponseId] = useState({});
@@ -1112,6 +1117,13 @@ function SurveyResponsesAdminPage() {
     const previousStatus =
       responses.find((response) => response.id === responseId)?.status ?? RESPONSE_STATUSES.SUBMITTED;
 
+    if (
+      nextStatus === RESPONSE_STATUSES.CANCELLED ||
+      previousStatus === RESPONSE_STATUSES.CANCELLED
+    ) {
+      return;
+    }
+
     try {
       setActionLoading(true);
       handleProcessingDraftChange(responseId, 'responseStatus', nextStatus);
@@ -1138,6 +1150,45 @@ function SurveyResponsesAdminPage() {
       });
     } catch (actionError) {
       setError(actionError.message || '응답 처리 상태 저장에 실패했습니다.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApplicationCancellation = async (responseId) => {
+    try {
+      setActionLoading(true);
+      const result = await cancelApplicationResponse(responseId, auditActor);
+
+      if (!result.cancelled) {
+        return;
+      }
+
+      const cancelledResponse = (response) =>
+        response.id === responseId
+          ? {
+              ...response,
+              status: RESPONSE_STATUSES.CANCELLED,
+              applicationStatus: RESPONSE_STATUSES.CANCELLED,
+            }
+          : response;
+
+      setResponses((current) => current.map(cancelledResponse));
+      setAllResponses((current) => current.map(cancelledResponse));
+      setEditingStates((current) => ({
+        ...current,
+        [responseId]: {
+          responseStatus: RESPONSE_STATUSES.CANCELLED,
+          adminNote: current[responseId]?.adminNote ?? '',
+        },
+      }));
+      setSurvey((current) =>
+        current
+          ? { ...current, responseCount: result.responseCount }
+          : current,
+      );
+    } catch (actionError) {
+      setError(actionError.message || '신청 취소에 실패했습니다.');
     } finally {
       setActionLoading(false);
     }
@@ -2687,24 +2738,30 @@ function SurveyResponsesAdminPage() {
                       <td>{displayPhone}</td>
                       <td>{response.summary.primaryValue}</td>
                       <td>
-                        <div className="response-status-panel response-status-panel-compact">
-                          <label className="field response-status-select-field response-status-select-field-inline">
-                            <select
-                              className="response-status-select"
-                              disabled={actionLoading}
-                              value={draftState.responseStatus}
-                              onChange={(event) =>
-                                handleResponseStatusChange(response.id, event.target.value)
-                              }
-                            >
-                              {FILTER_RESPONSE_STATUSES.map((status) => (
-                                <option key={`${response.id}-${status}`} value={status}>
-                                  {getResponseStatusMeta(status).label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
+                        {response.normalizedResponseStatus === RESPONSE_STATUSES.CANCELLED ? (
+                          <span className={getResponseStatusMeta(response.normalizedResponseStatus).className}>
+                            {getResponseStatusMeta(response.normalizedResponseStatus).label}
+                          </span>
+                        ) : (
+                          <div className="response-status-panel response-status-panel-compact">
+                            <label className="field response-status-select-field response-status-select-field-inline">
+                              <select
+                                className="response-status-select"
+                                disabled={actionLoading}
+                                value={draftState.responseStatus}
+                                onChange={(event) =>
+                                  handleResponseStatusChange(response.id, event.target.value)
+                                }
+                              >
+                                {EDITABLE_RESPONSE_STATUSES.map((status) => (
+                                  <option key={`${response.id}-${status}`} value={status}>
+                                    {getResponseStatusMeta(status).label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                        )}
                       </td>
                       <td>
                         <input
@@ -2730,6 +2787,16 @@ function SurveyResponsesAdminPage() {
                           >
                             메모 저장
                           </button>
+                          {response.normalizedResponseStatus !== RESPONSE_STATUSES.CANCELLED && (
+                            <button
+                              className="secondary-button danger-button"
+                              disabled={actionLoading}
+                              onClick={() => setPendingCancellation(response.id)}
+                              type="button"
+                            >
+                              신청 취소
+                            </button>
+                          )}
                           {!shouldMaskDownload &&
                             response.summary.isPiiProtected &&
                             !revealedPiiByResponseId[response.id] && (
@@ -2779,25 +2846,34 @@ function SurveyResponsesAdminPage() {
                     <p>{formatFirestoreDate(response.submittedAt)}</p>
                   </div>
                   <div className="response-admin-meta response-status-controls">
-                    <div className="response-status-panel">
-                      <label className="field response-status-select-field">
+                    {response.normalizedResponseStatus === RESPONSE_STATUSES.CANCELLED ? (
+                      <div className="response-status-panel">
                         <span>응답 처리 상태</span>
-                        <select
-                          className="response-status-select"
-                          disabled={actionLoading}
-                          value={draftState.responseStatus}
-                          onChange={(event) =>
-                            handleResponseStatusChange(response.id, event.target.value)
-                          }
-                        >
-                          {FILTER_RESPONSE_STATUSES.map((status) => (
-                            <option key={`${response.id}-raw-${status}`} value={status}>
-                              {getResponseStatusMeta(status).label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
+                        <span className={getResponseStatusMeta(response.normalizedResponseStatus).className}>
+                          {getResponseStatusMeta(response.normalizedResponseStatus).label}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="response-status-panel">
+                        <label className="field response-status-select-field">
+                          <span>응답 처리 상태</span>
+                          <select
+                            className="response-status-select"
+                            disabled={actionLoading}
+                            value={draftState.responseStatus}
+                            onChange={(event) =>
+                              handleResponseStatusChange(response.id, event.target.value)
+                            }
+                          >
+                            {EDITABLE_RESPONSE_STATUSES.map((status) => (
+                              <option key={`${response.id}-raw-${status}`} value={status}>
+                                {getResponseStatusMeta(status).label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    )}
                     <label className="field response-admin-note-field">
                       <span>관리 메모</span>
                       <input
@@ -2818,6 +2894,16 @@ function SurveyResponsesAdminPage() {
                       >
                         메모 저장
                       </button>
+                      {isApplicationForm && response.normalizedResponseStatus !== RESPONSE_STATUSES.CANCELLED && (
+                        <button
+                          className="secondary-button danger-button"
+                          disabled={actionLoading}
+                          onClick={() => setPendingCancellation(response.id)}
+                          type="button"
+                        >
+                          신청 취소
+                        </button>
+                      )}
                       {canManageUsers && surveyHasPii && (
                         <button
                           className="secondary-button"
@@ -2987,6 +3073,19 @@ function SurveyResponsesAdminPage() {
           handleAnonymize(responseId);
         }}
         onCancel={() => setPendingAnonymize(null)}
+      />
+      <ConfirmModal
+        isOpen={pendingCancellation !== null}
+        title="이 신청을 취소하시겠습니까?"
+        message="취소하면 현재 신청 건수와 정원이 조정되며, 신청자는 다시 신청할 수 있습니다. 설문이 마감 상태인 경우 자동으로 다시 열리지는 않습니다."
+        confirmLabel="신청 취소"
+        cancelLabel="돌아가기"
+        onConfirm={() => {
+          const responseId = pendingCancellation;
+          setPendingCancellation(null);
+          handleApplicationCancellation(responseId);
+        }}
+        onCancel={() => setPendingCancellation(null)}
       />
       <ConfirmModal
         isOpen={pendingDeleteResponse !== null}

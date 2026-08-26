@@ -690,7 +690,10 @@ service cloud.firestore {
 
     match /surveys/{surveyId}/applicationApplicantLocks/{lockId} {
       allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
-        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+        (
+          surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data) ||
+          canEditSurveySubdoc(surveyId)
+        );
       // ⚠️ 2026-07-14 긴급 롤백(운영 장애 대응) — Structure A 준비 코드가 서버 콜러블 미배포
       // 상태에서 배포되어 중복신청 방지 잠금 생성이 막히고 제출 전체가 permission-denied로
       // 실패했다. 서버 콜러블 전환 완료 전까지 원래의 필드 검증 조건으로 되돌린다.
@@ -709,7 +712,10 @@ service cloud.firestore {
 
     match /surveys/{surveyId}/applicationSlotLocks/{lockId} {
       allow read: if exists(/databases/$(database)/documents/surveys/$(surveyId)) &&
-        surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data);
+        (
+          surveyStatusForResponse(get(/databases/$(database)/documents/surveys/$(surveyId)).data) ||
+          canEditSurveySubdoc(surveyId)
+        );
       // ⚠️ 2026-07-14 긴급 롤백 — 위 applicationApplicantLocks와 동일한 사유.
       allow create: if
         request.resource.data.surveyId == surveyId &&
