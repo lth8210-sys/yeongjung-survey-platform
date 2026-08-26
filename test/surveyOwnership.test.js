@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { isSurveyOwner, canReadManagedSurvey, canEditSurvey, USER_ROLES } from '../src/firebase/users.js';
+import {
+  isSurveyOwner,
+  canReadManagedSurvey,
+  canEditSurvey,
+  canViewSurveyResponses,
+  USER_ROLES,
+} from '../src/firebase/users.js';
 
 // "제작자가 자기 설문을 못 보는" 재발 버그(KI-001) 회귀 방지 테스트.
 // surveys 문서의 소유자 필드는 역사적으로 6종(ownerUid/createdByUid/ownerId/userId/
@@ -64,5 +70,16 @@ describe('canReadManagedSurvey / canEditSurvey — creator 권한 경계', () =>
   it('viewer는 조직공개 설문을 읽을 수 있지만 private 타인 설문은 읽을 수 없다', () => {
     expect(canReadManagedSurvey(USER_ROLES.VIEWER, orgSurvey, user)).toBe(true);
     expect(canReadManagedSurvey(USER_ROLES.VIEWER, otherPrivateSurvey, user)).toBe(false);
+  });
+
+  it('organization visibility만으로는 타 직원의 응답을 조회할 수 없다', () => {
+    expect(canViewSurveyResponses(USER_ROLES.CREATOR, orgSurvey, user)).toBe(false);
+    expect(canViewSurveyResponses(USER_ROLES.VIEWER, orgSurvey, user)).toBe(false);
+  });
+
+  it('제작자의 legacy 소유 설문과 admin의 타인 설문 응답 조회는 유지한다', () => {
+    expect(canViewSurveyResponses(USER_ROLES.CREATOR, { ownerId: 'user-1' }, user)).toBe(true);
+    expect(canViewSurveyResponses(USER_ROLES.ADMIN, otherPrivateSurvey, user)).toBe(true);
+    expect(canViewSurveyResponses(USER_ROLES.SUPER_ADMIN, otherPrivateSurvey, user)).toBe(true);
   });
 });

@@ -436,7 +436,9 @@ function SurveyPreviewContent({ survey, actions = null, compact = false }) {
             <div className="preview-section-heading">
               <span>{sectionIndex + 1}페이지</span>
               <h2>{section.title || `섹션 ${sectionIndex + 1}`}</h2>
-              {section.description && <p>{section.description}</p>}
+              {section.description && (
+                <p className="section-description">{section.description}</p>
+              )}
             </div>
             <div className="response-form">
               {section.questions.length > 0 ? (

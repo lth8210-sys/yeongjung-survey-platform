@@ -325,6 +325,50 @@ describe('responses — 비로그인 사용자는 응답 목록을 조회할 수
   });
 });
 
+describe('legacy survey ownership — 제작자 관리·응답 열람 호환성', () => {
+  const LEGACY_OWNER_UID = 'legacy-owner-uid';
+  const LEGACY_OWNER_EMAIL = 'legacy-owner@yeongjung.or.kr';
+
+  async function seedLegacyOwnedSurvey(ownerFields) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'surveys', 'legacy-owner-survey'), {
+        title: '레거시 소유자 설문',
+        status: 'published',
+        responseCount: 1,
+        ...ownerFields,
+      });
+      await setDoc(
+        doc(ctx.firestore(), 'responses', 'legacy-owner-response'),
+        minimalResponsePayload('legacy-owner-survey'),
+      );
+      await setDoc(doc(ctx.firestore(), 'users', LEGACY_OWNER_UID), {
+        uid: LEGACY_OWNER_UID,
+        email: LEGACY_OWNER_EMAIL,
+        role: 'creator',
+        status: 'active',
+      });
+    });
+  }
+
+  it.each([
+    ['createdByUid', { createdByUid: LEGACY_OWNER_UID }],
+    ['ownerId', { ownerId: LEGACY_OWNER_UID }],
+    ['userId', { userId: LEGACY_OWNER_UID }],
+    ['createdBy.email', { createdBy: { email: LEGACY_OWNER_EMAIL } }],
+  ])('legacy %s 제작자는 설문과 응답을 조회하고 설문을 수정할 수 있다', async (_label, ownerFields) => {
+    await seedLegacyOwnedSurvey(ownerFields);
+    const owner = testEnv.authenticatedContext(LEGACY_OWNER_UID, { email: LEGACY_OWNER_EMAIL });
+
+    await assertSucceeds(getDoc(doc(owner.firestore(), 'surveys', 'legacy-owner-survey')));
+    await assertSucceeds(getDoc(doc(owner.firestore(), 'responses', 'legacy-owner-response')));
+    await assertSucceeds(
+      updateDoc(doc(owner.firestore(), 'surveys', 'legacy-owner-survey'), {
+        title: '레거시 소유자 설문 수정',
+      }),
+    );
+  });
+});
+
 describe('users — 본인 role 자가상승(self-escalation) 방지', () => {
   it('일반 viewer가 본인 문서의 role을 super_admin으로 직접 바꿀 수 없다', async () => {
     await seedUserDoc('viewer-uid', {

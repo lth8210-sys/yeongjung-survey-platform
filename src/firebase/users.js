@@ -281,7 +281,12 @@ export function canEditSurvey(role, survey, user) {
 }
 
 export function canViewSurveyResponses(role, survey, user) {
-  return canReadManagedSurvey(role, survey, user);
+  // organization visibility는 설문 양식 공유 범위일 뿐, 개인정보가 포함될 수 있는
+  // 응답 원문 열람 권한은 아니다. Firestore Rules의
+  // canReadSurveyResponsesWithAccess()와 동일하게 admin 이상 또는 설문 소유자만 허용한다.
+  return hasRoleAtLeast(role, USER_ROLES.ADMIN) || (
+    role === USER_ROLES.CREATOR && isSurveyOwner(survey, user)
+  );
 }
 
 export function canChangeSurveyStatus(role, survey, user) {

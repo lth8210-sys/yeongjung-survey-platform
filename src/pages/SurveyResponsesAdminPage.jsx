@@ -27,6 +27,7 @@ import {
   getFormTypeMeta,
   getFirestoreErrorMessage,
   getQuestionOptionItems,
+  getApplicationResponseCounts,
   getOrderedResponseAnswerItems,
   getQuotaSummary,
   buildAgeQuotaDashboard,
@@ -1699,6 +1700,10 @@ function SurveyResponsesAdminPage() {
     () => (allResponses.length > 0 ? allResponses : responses),
     [allResponses, responses],
   );
+  const applicationResponseCounts = useMemo(
+    () => getApplicationResponseCounts(analyticsSource),
+    [analyticsSource],
+  );
   const surveyAnalytics = useMemo(
     () => buildSurveyAnalytics(survey, analyticsSource),
     [analyticsSource, survey],
@@ -1896,6 +1901,28 @@ function SurveyResponsesAdminPage() {
               ? ` / 최대 ${quotaSummary.maxResponses}건`
               : ' / 제한 없음'}
           </p>
+          {isApplicationForm && analyticsStatus === 'ready' && (
+            <div className="application-status-summary" aria-label="신청 현황">
+              <div>
+                <small>현재 신청</small>
+                <strong>{applicationResponseCounts.activeApplications}건</strong>
+              </div>
+              <div>
+                <small>취소</small>
+                <strong>{applicationResponseCounts.cancelled}건</strong>
+              </div>
+              <div>
+                <small>전체 접수</small>
+                <strong>{applicationResponseCounts.totalSubmitted}건</strong>
+              </div>
+            </div>
+          )}
+          {isApplicationForm && analyticsStatus === 'loading' && (
+            <p className="meta-description">신청 현황을 집계하고 있습니다.</p>
+          )}
+          {isApplicationForm && analyticsStatus === 'partial' && (
+            <p className="meta-description">신청 현황 전체 집계를 불러오지 못했습니다.</p>
+          )}
           <p className="meta-description">
             {normalizedStatus === SURVEY_STATUSES.DRAFT &&
               `임시저장 상태입니다. ${getDraftSurveyMessage(survey?.formType)} 관리자만 수정·검토할 수 있습니다.`}
@@ -1904,6 +1931,11 @@ function SurveyResponsesAdminPage() {
             {normalizedStatus === SURVEY_STATUSES.CLOSED &&
               `${getClosedSurveyMessage(survey?.formType)} 공개 페이지에서는 안내만 보이고 제출은 막힌 상태입니다.`}
           </p>
+          {isApplicationForm && (
+            <p className="meta-description">
+              취소 건은 현재 신청 집계에서만 제외되며, 정원 반영 방식은 기존 운영 기준을 따릅니다.
+            </p>
+          )}
         </div>
         {normalizedStatus !== SURVEY_STATUSES.DELETED && canChangeSurveyStatus(survey) && (
           <label className="field inline-field">

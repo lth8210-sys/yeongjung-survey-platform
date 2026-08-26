@@ -1030,9 +1030,11 @@ button:disabled {
   font-size: 1rem;
 }
 
-.section-block p {
+.section-description {
   margin: 0;
   color: #5e7082;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .response-progress-panel {
@@ -1216,9 +1218,8 @@ button:disabled {
   font-size: 1.35rem;
 }
 
-.preview-section-heading p {
+.preview-section-heading .section-description {
   margin: 0;
-  color: #5e7082;
 }
 
 .preview-question-card {
@@ -2030,6 +2031,35 @@ button:disabled {
 
 .application-summary-card strong,
 .application-info-card strong {
+  font-size: 1rem;
+}
+
+.application-status-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.application-status-summary div {
+  display: grid;
+  gap: 2px;
+  min-width: 96px;
+  padding: 10px 12px;
+  border: 1px solid rgba(24, 34, 47, 0.08);
+  border-radius: 12px;
+  background: #f7fbff;
+}
+
+.application-status-summary div:first-child {
+  background: #eef5ff;
+}
+
+.application-status-summary small {
+  color: #607080;
+}
+
+.application-status-summary strong {
   font-size: 1rem;
 }
 

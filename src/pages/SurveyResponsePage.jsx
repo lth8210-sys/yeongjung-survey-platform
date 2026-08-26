@@ -2292,7 +2292,9 @@ function SurveyResponsePage() {
               <div className="field">
                 <div className="section-block">
                   <strong>{currentSection.title}</strong>
-                  {currentSection.description && <p>{currentSection.description}</p>}
+                  {currentSection.description && (
+                    <p className="section-description">{currentSection.description}</p>
+                  )}
                 </div>
               </div>
 

@@ -341,6 +341,29 @@ export function getResponseStatusMeta(status) {
   }
 }
 
+// 신청형 화면에서만 사용하는 읽기 전용 현황 집계다. responseCount는 정원·제출
+// 트랜잭션의 기존 계약을 유지하므로 여기서 수정하거나 대체하지 않는다.
+export function getApplicationResponseCounts(responses = []) {
+  return (Array.isArray(responses) ? responses : []).reduce(
+    (counts, response) => {
+      if (!response || response.deleted === true) {
+        return counts;
+      }
+
+      counts.totalSubmitted += 1;
+
+      if (normalizeResponseStatus(response.status ?? response.applicationStatus) === RESPONSE_STATUSES.CANCELLED) {
+        counts.cancelled += 1;
+      } else {
+        counts.activeApplications += 1;
+      }
+
+      return counts;
+    },
+    { activeApplications: 0, cancelled: 0, totalSubmitted: 0 },
+  );
+}
+
 export function getDraftSurveyMessage(formType) {
   return isApplicationFormType(formType)
     ? '아직 공개되지 않은 신청서입니다.'
