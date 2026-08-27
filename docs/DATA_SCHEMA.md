@@ -10,6 +10,10 @@
 
 향후 직원 선택 UI용 최소 projection이다. `uid`, `displayName`, `active`, `updatedAt`만 저장하며 email·부서·역할 등 users 원본 필드는 복제하지 않는다. `active`는 directory UX용 값이며 실제 권한 정본은 users 상태다.
 
+## surveys/{surveyId}/viewerGrants/{uid}
+
+특정 설문의 결과 read/analyze/export grant다. 문서 ID와 `uid`는 대상 UID이며 `grantedByUid`, `createdAt`만 추가로 저장한다. users 정본이 active가 아니거나 grant가 삭제되면 접근은 즉시 사라진다.
+
 | Field | 의미 |
 | --- | --- |
 | `uid` | Firebase Auth 사용자 UID |

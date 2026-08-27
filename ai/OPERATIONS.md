@@ -14,6 +14,8 @@
 
 `staff_directory` 기존 active 직원 initial backfill은 완료됐다. 이후 projection 동기화에는 uid, displayName, active, updatedAt만 기록하며 users 원본을 일반 직원에게 공개하지 않는다.
 
+결과 같이 보기는 응답·통계·기존 결과 파일을 활용할 설문별 read/export 권한이다. 공유 전 개인정보 포함 가능성을 고지하고, 공유받은 직원에게 수정·취소·삭제·재공유 권한을 부여하지 않는다.
+
 ## 2. 관리자 메뉴별 사용 방법
 
 ### 설문 관리

@@ -325,12 +325,21 @@ service cloud.firestore {
       );
     }
 
+    // viewer grant는 users 정본의 active 상태를 매 read마다 다시 확인한다.
+    // staff_directory는 선택 UI 전용이며 권한 판단에 사용하지 않는다.
+    function isActiveSurveyViewerById(surveyId) {
+      return isSignedIn() && hasUserDoc() && currentStatus() == 'active' &&
+        surveyId is string &&
+        exists(/databases/$(database)/documents/surveys/$(surveyId)/viewerGrants/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/surveys/$(surveyId)/viewerGrants/$(request.auth.uid)).data.uid == request.auth.uid;
+    }
+
     function canReadSurveyResponsesById(surveyId, role, status) {
       let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
       let surveyExists = surveyId is string && exists(surveyPath);
       let surveyData = surveyExists ? get(surveyPath).data : {};
 
-      return surveyExists && canReadSurveyResponsesWithAccess(surveyData, role, status);
+      return surveyExists && (canReadSurveyResponsesWithAccess(surveyData, role, status) || isActiveSurveyViewerById(surveyId));
     }
 
     function canEditSurveyByIdWithAccess(surveyId, role, status) {
@@ -378,7 +387,8 @@ service cloud.firestore {
       return status == 'active' &&
         (
           role in ['super_admin', 'admin'] ||
-          canReadSurveyByIdWithAccess(surveyId, role, status)
+          canReadSurveyByIdWithAccess(surveyId, role, status) ||
+          isActiveSurveyViewerById(surveyId)
         );
     }
 
@@ -537,6 +547,15 @@ service cloud.firestore {
         canEditSurveyById(request.resource.data.surveyId);
     }
 
+    function canCreateViewerDownloadAudit() {
+      return request.resource.data.surveyId is string &&
+        isActiveSurveyViewerById(request.resource.data.surveyId) &&
+        request.resource.data.action in ['responses_csv_downloaded', 'statistics_excel_downloaded', 'report_docx_downloaded', 'report_print_clicked'] &&
+        request.resource.data.actor.uid == request.auth.uid &&
+        request.resource.data.metadata.keys().hasOnly(['downloadType', 'totalCount', 'surveyId', 'surveyTitle', 'responseCount', 'reportId', 'reportTitle']) &&
+        request.resource.data.createdAt == request.time;
+    }
+
     function validManagedSurveyCreate() {
       return isInternalUser() &&
         currentStatus() == 'active' &&
@@ -677,7 +696,7 @@ service cloud.firestore {
       // 방문자는 개별 설문 링크(get)는 볼 수 있어도 공개 설문 목록(list, "/surveys")은
       // 절대 조회할 수 없었다(2026-07-05 발견, list/get 분리 커밋부터 존재하던 기존 버그).
       // get과 동일하게 게시/마감(surveyStatusForRead) 상태면 비로그인도 목록 조회를 허용한다.
-      allow get: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data);
+      allow get: if surveyStatusForRead(resource.data) || canReadManagedSurvey(resource.data) || isActiveSurveyViewerById(surveyId);
       allow list: if surveyStatusForRead(resource.data) || canListManagedSurveys(resource.data);
       allow create: if validManagedSurveyCreate();
       allow delete: if canEditManagedSurvey(resource.data);
@@ -689,6 +708,23 @@ service cloud.firestore {
       // (§4/§6 최종 보고 참조) — 서버 콜러블 전환 완료 후 다시 이 줄을 canEditManagedSurvey()만
       // 남기고 제거할 것.
       allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
+    }
+
+    match /surveys/{surveyId}/viewerGrants/{targetUid} {
+      function validViewerGrant() {
+        return request.resource.data.keys().hasOnly(['uid', 'grantedByUid', 'createdAt']) &&
+          request.resource.data.uid == targetUid && request.resource.data.uid is string &&
+          request.resource.data.grantedByUid == request.auth.uid &&
+          request.resource.data.createdAt == request.time &&
+          targetUid != request.auth.uid &&
+          exists(/databases/$(database)/documents/users/$(targetUid)) &&
+          get(/databases/$(database)/documents/users/$(targetUid)).data.status == 'active';
+      }
+      allow get: if canEditSurveyById(surveyId) || isActiveSurveyViewerById(surveyId);
+      allow list: if canEditSurveyById(surveyId);
+      allow create: if canEditSurveyById(surveyId) && validViewerGrant();
+      allow update: if false;
+      allow delete: if canEditSurveyById(surveyId);
     }
 
     match /surveys/{surveyId}/quotaConfig/{configId} {
@@ -982,7 +1018,7 @@ service cloud.firestore {
     }
 
     match /audit_logs/{logId} {
-      allow create: if canCreateAuditLog() &&
+      allow create: if (canCreateAuditLog() || canCreateViewerDownloadAudit()) &&
         request.resource.data.keys().hasOnly([
           "action",
           "surveyId",

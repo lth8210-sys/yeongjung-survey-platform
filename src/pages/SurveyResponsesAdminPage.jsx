@@ -48,6 +48,8 @@ import {
   updateResponseStatus,
 } from '../firebase/surveys';
 import { revealResponsePii } from '../firebase/piiReveal';
+import { listActiveStaffDirectory } from '../firebase/staffDirectory';
+import { fetchViewerGrantUids, hasOwnActiveViewerGrant, searchStaffDirectory, syncViewerGrants } from '../firebase/viewerGrants';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
 import { buildRawExportColumns, keepStoredResponseAnswerItems } from '../utils/rawExportColumns';
 import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
@@ -807,6 +809,11 @@ function SurveyResponsesAdminPage() {
   // 새로고침하면 사라진다 — 어디에도 영구 저장하지 않는다.
   const [revealedPiiByResponseId, setRevealedPiiByResponseId] = useState({});
   const [revealingResponseId, setRevealingResponseId] = useState(null);
+  const [viewerMode, setViewerMode] = useState(false);
+  const [viewerGrantOpen, setViewerGrantOpen] = useState(false);
+  const [viewerGrantStaff, setViewerGrantStaff] = useState([]);
+  const [viewerGrantUids, setViewerGrantUids] = useState([]);
+  const [viewerGrantSearch, setViewerGrantSearch] = useState('');
   const [revealPiiError, setRevealPiiError] = useState('');
   const [responseLastDoc, setResponseLastDoc] = useState(null);
   const [hasMoreResponses, setHasMoreResponses] = useState(false);
@@ -848,10 +855,14 @@ function SurveyResponsesAdminPage() {
       setMissingSurveyNotice('');
       const surveyResult = await fetchSurveyById(surveyId);
 
-      if (surveyResult && !canViewSurveyResponses(surveyResult)) {
+      const viewerAllowed = surveyResult && !canViewSurveyResponses(surveyResult)
+        ? await hasOwnActiveViewerGrant(surveyId, user?.uid)
+        : false;
+      if (surveyResult && !canViewSurveyResponses(surveyResult) && !viewerAllowed) {
         setError('이 설문의 응답을 조회할 권한이 없습니다.');
         return;
       }
+      setViewerMode(Boolean(viewerAllowed));
 
       const responsePage = surveyResult
         ? await fetchResponsesForSurvey(surveyResult, {
@@ -921,6 +932,7 @@ function SurveyResponsesAdminPage() {
       } else {
         setSurvey({
           ...surveyResult,
+          viewerGrantActive: viewerAllowed,
           // 정원 사용량은 survey 문서의 responseCount가 정본이다. 취소 응답도
           // 포함하는 응답 이력 수를 합성하면 현재 신청 수가 부풀려진다.
           responseCount: surveyResult.responseCount,
@@ -1001,6 +1013,34 @@ function SurveyResponsesAdminPage() {
   useEffect(() => {
     loadPageData();
   }, [canViewSurveyResponses, role, surveyId, user?.email, user?.uid]);
+
+  const canManageViewerGrants = Boolean(survey && canEditSurvey(survey));
+  // 결과 공유 Viewer는 설문별 명시적 업무 권한으로 기존 결과 활용/다운로드를 사용할 수 있다.
+  // 설문·응답·grant 변경 권한은 canEdit/canDelete 경로로 계속 분리된다.
+  const canDownloadForCurrentAccess = canDownloadResponses || viewerMode;
+
+  const openViewerGrantModal = async () => {
+    try {
+      setActionLoading(true);
+      const [staff, grants] = await Promise.all([listActiveStaffDirectory(), fetchViewerGrantUids(surveyId)]);
+      setViewerGrantStaff(staff.filter((item) => item.uid !== user?.uid));
+      setViewerGrantUids(grants);
+      setViewerGrantSearch('');
+      setViewerGrantOpen(true);
+    } catch (grantError) {
+      setError(grantError.message || '공유 직원 목록을 불러오지 못했습니다.');
+    } finally { setActionLoading(false); }
+  };
+
+  const saveViewerGrants = async () => {
+    try {
+      setActionLoading(true);
+      await syncViewerGrants({ surveyId, ownerUid: user?.uid, currentUids: await fetchViewerGrantUids(surveyId), nextUids: viewerGrantUids, actor: { uid: user?.uid, email: user?.email, displayName: user?.displayName } });
+      setViewerGrantOpen(false);
+    } catch (grantError) {
+      setError(grantError.message || '결과 공유 저장에 실패했습니다.');
+    } finally { setActionLoading(false); }
+  };
 
   useEffect(() => {
     const handlePopState = () => {
@@ -1937,6 +1977,7 @@ function SurveyResponsesAdminPage() {
           <Link className="secondary-button" to="/admin">
             관리자 홈
           </Link>
+          {canManageViewerGrants && <button className="secondary-button" disabled={actionLoading} onClick={openViewerGrantModal} type="button">결과 같이 보기</button>}
         </div>
       </div>
 
@@ -2106,7 +2147,7 @@ function SurveyResponsesAdminPage() {
             </button>
           )}
 
-          {canDownloadResponses && (
+          {canDownloadForCurrentAccess && (
             <>
               <button className="secondary-button" onClick={handleRawCsvDownload} type="button">
                 CSV 다운로드
@@ -2121,12 +2162,12 @@ function SurveyResponsesAdminPage() {
               </button>
             </>
           )}
-          {isApplicationForm && canDownloadResponses && (
+          {isApplicationForm && canDownloadForCurrentAccess && (
             <button className="secondary-button" onClick={handleApplicantCsvDownload} type="button">
               명단 CSV
             </button>
           )}
-          {selectedSlotFilter && canDownloadResponses && (
+          {selectedSlotFilter && canDownloadForCurrentAccess && (
             <button className="secondary-button" onClick={handleSlotCsvDownload} type="button">
               슬롯 CSV
             </button>
@@ -2636,7 +2677,7 @@ function SurveyResponsesAdminPage() {
               </p>
             </div>
             <div className="card-actions">
-              {canDownloadResponses && (
+              {canDownloadForCurrentAccess && (
                 <button className="secondary-button" onClick={handleSlotCsvDownload} type="button">
                   슬롯 CSV
                 </button>
@@ -3050,6 +3091,19 @@ function SurveyResponsesAdminPage() {
         title={`${survey?.title ?? '설문'} QR`}
         url={publicUrl}
       />
+      {viewerGrantOpen && (
+        <div className="modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !actionLoading) setViewerGrantOpen(false); }}>
+          <div aria-modal="true" className="template-modal panel" role="dialog" aria-label="결과 같이 보기">
+            <div className="builder-header-row"><div><span className="eyebrow">결과 같이 보기</span><h2>함께 보는 직원</h2></div><button className="secondary-button" disabled={actionLoading} onClick={() => setViewerGrantOpen(false)} type="button">닫기</button></div>
+            <p className="inline-note">선택한 직원은 이 설문의 응답 내용과 결과를 확인하고 CSV·Excel·결과보고서 등을 다운로드할 수 있습니다. 응답에는 개인정보가 포함될 수 있습니다. 공유받은 직원은 설문이나 응답을 수정·취소·삭제하거나 다른 직원에게 다시 공유할 수 없습니다.</p>
+            <label className="field"><span>직원 검색</span><input value={viewerGrantSearch} onChange={(event) => setViewerGrantSearch(event.target.value)} placeholder="이름으로 검색" /></label>
+            <div className="stack-section">
+              {searchStaffDirectory(viewerGrantStaff, viewerGrantSearch).map((staff) => <label key={staff.uid} className="checkbox-row"><input type="checkbox" checked={viewerGrantUids.includes(staff.uid)} onChange={(event) => setViewerGrantUids((current) => event.target.checked ? [...current, staff.uid] : current.filter((uid) => uid !== staff.uid))} />{staff.displayName}</label>)}
+            </div>
+            <div className="report-settings-actions"><button className="secondary-button" disabled={actionLoading} onClick={() => setViewerGrantOpen(false)} type="button">취소</button><button className="primary-button" disabled={actionLoading} onClick={saveViewerGrants} type="button">저장</button></div>
+          </div>
+        </div>
+      )}
       <ReportSettingsModal
         isOpen={reportSettingsOpen}
         onChange={setReportSettings}

@@ -18,6 +18,8 @@
 
 `staff_directory`는 active users 문서를 가진 내부 직원만 active 문서를 조회할 수 있다. 본인 projection은 users 문서의 이름·상태와 일치할 때만 쓸 수 있고, users 원본 collection의 read 정책은 확대하지 않는다.
 
+`viewerGrants`는 설문별 users 정본(active)과 grant를 함께 확인해 응답·보고서 read 및 허용된 결과 다운로드 audit만 허용한다. Viewer의 survey/response/quota/lock/grant/report write는 허용하지 않는다.
+
 | 기능 | super_admin | admin | creator | staff/viewer | 비로그인 |
 | --- | --- | --- | --- | --- | --- |
 | 공개 설문 읽기 | 가능 | 가능 | 가능 | 가능 | 가능 |

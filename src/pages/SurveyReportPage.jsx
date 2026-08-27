@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { hasOwnActiveViewerGrant } from '../firebase/viewerGrants';
 import {
   createAuditLog,
   fetchAllResponsesForSurveyExport,
@@ -191,6 +192,14 @@ function getReportAuditMetadata(reportMeta, survey) {
   };
 }
 
+function getViewerDownloadAuditMetadata(reportMeta, survey, reportId) {
+  return {
+    surveyTitle: survey?.title ?? '',
+    reportTitle: reportMeta?.title ?? '',
+    reportId: reportId ?? '',
+  };
+}
+
 function limitRowsWithEtc(rows, limit = 15) {
   if (!Array.isArray(rows) || rows.length <= limit) {
     return rows ?? [];
@@ -338,7 +347,8 @@ function FreeTextCategoryTable({ rows }) {
 export default function SurveyReportPage() {
   const { surveyId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, canEditSurvey } = useAuth();
+  const [viewerMode, setViewerMode] = useState(false);
   const [survey, setSurvey] = useState(null);
   const [responses, setResponses] = useState([]);
   const [savedReport, setSavedReport] = useState(null);
@@ -372,6 +382,7 @@ export default function SurveyReportPage() {
           setError('설문을 찾을 수 없습니다.');
           return;
         }
+        setViewerMode(!canEditSurvey(surveyData) && await hasOwnActiveViewerGrant(surveyId, user?.uid));
         setLoadingMsg('응답 데이터를 불러오는 중...');
         const [allResponses, reportData] = await Promise.all([
           fetchAllResponsesForSurveyExport(surveyData),
@@ -392,7 +403,7 @@ export default function SurveyReportPage() {
       }
     }
     load();
-  }, [reportNavigation.reportId, surveyId]);
+  }, [canEditSurvey, reportNavigation.reportId, surveyId, user?.uid]);
 
   // buildSurveyAnalytics()는 응답/문항 데이터 형태에 따라 예외를 던질 수 있다.
   // 이 값을 그냥 useMemo에서 던지게 두면 React 렌더 도중 예외가 발생해 페이지
@@ -522,6 +533,7 @@ export default function SurveyReportPage() {
   };
 
   const handleEditStart = () => {
+    if (viewerMode) return;
     setEditing(true);
     setStatusMessage('편집 모드입니다. 강조된 보고문 영역만 수정할 수 있습니다.');
     createAuditLog({
@@ -637,7 +649,9 @@ export default function SurveyReportPage() {
         surveyId,
         surveyTitle: survey.title ?? '',
         actor: auditActor,
-        metadata: getReportAuditMetadata(reportMeta, survey),
+        metadata: viewerMode
+          ? getViewerDownloadAuditMetadata(reportMeta, survey, savedReport?.id ?? reportNavigation.reportId)
+          : getReportAuditMetadata(reportMeta, survey),
       });
     }
 
@@ -713,12 +727,14 @@ export default function SurveyReportPage() {
         surveyId,
         surveyTitle: survey.title ?? '',
         actor: auditActor,
-        metadata: {
-          reportId: savedReport?.id ?? reportNavigation.reportId,
-          surveyId,
-          reportTitle: reportMeta.title,
-          surveyTitle: survey.title ?? '',
-        },
+        metadata: viewerMode
+          ? getViewerDownloadAuditMetadata(reportMeta, survey, savedReport?.id ?? reportNavigation.reportId)
+          : {
+              reportId: savedReport?.id ?? reportNavigation.reportId,
+              surveyId,
+              reportTitle: reportMeta.title,
+              surveyTitle: survey.title ?? '',
+            },
       });
     } catch (downloadError) {
       console.error('[Report] docx download failed', downloadError);
@@ -744,7 +760,9 @@ export default function SurveyReportPage() {
       surveyId,
       surveyTitle: survey?.title ?? '',
       actor: auditActor,
-      metadata: getReportAuditMetadata(reportMeta, survey),
+        metadata: viewerMode
+          ? getViewerDownloadAuditMetadata(reportMeta, survey, savedReport?.id ?? reportNavigation.reportId)
+          : getReportAuditMetadata(reportMeta, survey),
     });
 
     window.close();
@@ -899,9 +917,7 @@ export default function SurveyReportPage() {
               <button className="secondary-button" onClick={handleBackToAdmin} type="button">
                 관리자 화면으로 돌아가기
               </button>
-              <button className="primary-button" onClick={handleEditStart} type="button">
-                보고서 수정
-              </button>
+              {!viewerMode && <button className="primary-button" onClick={handleEditStart} type="button">보고서 수정</button>}
               <button
                 className="secondary-button"
                 disabled={downloadingDocx}

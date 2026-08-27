@@ -272,6 +272,10 @@
 
 ## 권한
 
+- [ ] Viewer grant가 있는 active 직원만 해당 설문의 응답·통계·결과 export를 볼 수 있는가
+- [ ] grant 제거 또는 users.status 비활성화 후 Viewer read가 즉시 차단되는가
+- [ ] Viewer가 설문·응답·quota/lock·grant·보고서를 변경할 수 없는가
+
 - [ ] active creator/viewer/admin만 staff_directory active 목록을 조회할 수 있는가
 - [ ] pending/inactive/blocked/anonymous 및 users 문서 없는 계정이 directory와 users 원본 목록을 읽지 못하는가
 - [ ] 본인 projection의 uid/name/active/timestamp 위조와 타인 projection 쓰기가 차단되는가

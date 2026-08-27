@@ -220,3 +220,6 @@ npx firebase deploy --only firestore:rules
 ## 10. 현재 감사 범위의 제한
 
 현재 action 목록은 결과보고서, 응답 처리 및 다운로드 중심입니다. 로그인·로그아웃과 모든 설문 생성·수정·상태 변경이 감사로그에 항상 기록된다고 가정하면 안 됩니다. 추가 감사 범위가 필요할 경우 action 정의, 화면 라벨, rules 허용 구조와 운영 문서를 함께 갱신해야 합니다.
+# Viewer download audit
+
+유효한 Viewer grant의 active 직원은 허용된 CSV, Excel, DOCX/PDF 결과 다운로드 action만 audit log에 기록할 수 있다. metadata에는 download 종류·집계·report 식별자만 담고 응답 원문이나 주민 개인정보를 넣지 않는다.

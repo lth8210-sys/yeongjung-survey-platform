@@ -69,7 +69,9 @@ updatedAt: timestamp
 
 1. Viewer — 결과 같이 보기
 
-Viewer 구현 전제: staff_directory 최소 projection 및 기존 active 직원 initial backfill 완료. viewerUids와 결과 접근 권한은 별도 Phase에서 검토한다.
+Viewer 1차는 staff_directory 선택 UI와 `surveys/{surveyId}/viewerGrants/{uid}` 권한 정본으로 완료했다. 공유받은 직원은 전달받은 응답관리 링크로 직접 진입해 결과를 read/analyze/export할 수 있다.
+
+후속 P2: **같이 보는 설문 통합 목록** — Viewer가 직접 응답관리 링크 외에도 공유받은 설문을 안전하게 찾을 수 있는 collection-group/index 또는 별도 설계를 검토한다.
 2. Owner 인수인계
 3. 필요성이 확인된 경우에만 Editor
 
