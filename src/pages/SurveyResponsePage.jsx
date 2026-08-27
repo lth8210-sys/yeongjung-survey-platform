@@ -12,6 +12,7 @@ import {
   getQuestionOptionItems,
   getScaleQuestionConfig,
   getQuotaSummary,
+  getSurveyCountDisplay,
   getReceptionPeriodText,
   buildAgeQuotaDashboard,
   resolveAgeQuota,
@@ -2003,11 +2004,8 @@ function SurveyResponsePage() {
           value: publicState.label,
         },
         {
-          label: '전체 접수 현황',
-          value:
-            quotaSummary.quotaEnabled && quotaSummary.maxResponses
-              ? `${quotaSummary.responseCount} / ${quotaSummary.maxResponses}`
-              : `${quotaSummary.responseCount}건 접수`,
+          label: '신청 현황',
+          value: getSurveyCountDisplay(survey),
         },
       ]
     : [];
@@ -2143,7 +2141,7 @@ function SurveyResponsePage() {
           <div className="form-message">
             {publicState.message}
             {quotaSummary.quotaEnabled && quotaSummary.maxResponses
-              ? ` 현재 ${quotaSummary.responseCount}/${quotaSummary.maxResponses}건이 접수되었습니다.`
+              ? ` 현재 신청 ${quotaSummary.responseCount}건 / 정원 ${quotaSummary.maxResponses}건입니다.`
               : ''}
           </div>
         </div>

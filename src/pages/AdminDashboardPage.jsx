@@ -10,6 +10,7 @@ import {
   getPublicSurveyState,
   getQuestionOptionItems,
   getQuotaSummary,
+  getSurveyCountDisplay,
   getResponseProcessingStatusMeta,
   getSurveyStatusMeta,
   hydrateSurveyResponseCounts,
@@ -221,10 +222,10 @@ function AdminDashboardPage() {
           <p>3일 이내 접수가 종료되는 신청형 폼입니다.</p>
         </article>
         <article className="dashboard-card metric-card">
-          <span className="status-chip published-chip">누적 응답</span>
-          <h2>총 응답 수</h2>
+          <span className="status-chip published-chip">현재 집계</span>
+          <h2>현재 유효 응답 수</h2>
           <strong className="metric-value">{totalResponses}건</strong>
-          <p>관리 중인 모든 설문과 신청서의 전체 제출 건수입니다.</p>
+          <p>일반 설문 응답과 신청형 현재 신청을 합산한 값입니다.</p>
         </article>
         <article className="dashboard-card metric-card">
           <span className="status-chip published-chip">정원 현황</span>
@@ -232,7 +233,7 @@ function AdminDashboardPage() {
           <strong className="metric-value">
             {applicationQuota.used} / {applicationQuota.max || '제한 없음'}
           </strong>
-          <p>신청형 폼 전체 응답 수와 설정된 최대 정원을 합산한 값입니다.</p>
+          <p>신청형 폼의 현재 신청 수와 설정된 정원을 합산한 값입니다.</p>
         </article>
         <article className="dashboard-card metric-card">
           <span className="status-chip closed-chip">슬롯 운영</span>
@@ -276,7 +277,6 @@ function AdminDashboardPage() {
           ) : (
             <div className="admin-list">
               {surveys.map((survey) => {
-                const quotaSummary = getQuotaSummary(survey);
                 const publicState = getPublicSurveyState(survey);
 
                 return (
@@ -288,10 +288,7 @@ function AdminDashboardPage() {
                         {getSurveyStatusMeta(survey.status).label} · 질문 수 {survey.questions?.length ?? 0}개
                       </p>
                       <p>
-                        {publicState.label} · 응답 {quotaSummary.responseCount}건
-                        {quotaSummary.quotaEnabled && quotaSummary.maxResponses
-                          ? ` / 최대 ${quotaSummary.maxResponses}건`
-                          : ' / 제한 없음'}
+                        {publicState.label} · {getSurveyCountDisplay(survey)}
                       </p>
                     </div>
                     <div className="mini-actions">

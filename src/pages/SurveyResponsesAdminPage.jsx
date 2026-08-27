@@ -30,6 +30,7 @@ import {
   getApplicationResponseCounts,
   getOrderedResponseAnswerItems,
   getQuotaSummary,
+  getSurveyCountDisplay,
   buildAgeQuotaDashboard,
   cancelApplicationResponse,
   getResponseStatusMeta,
@@ -817,6 +818,7 @@ function SurveyResponsesAdminPage() {
   const [showAllQuotaShortages, setShowAllQuotaShortages] = useState(false);
   const [statisticsExcelLoading, setStatisticsExcelLoading] = useState(false);
   const [statisticsExcelMessage, setStatisticsExcelMessage] = useState('');
+  const canDeleteSurveyResponses = canDeleteResponses(survey);
   const [reportSettingsOpen, setReportSettingsOpen] = useState(false);
   const [reportSettings, setReportSettings] = useState(() =>
     buildReportSettingsDefaults({ survey: null, responses: [], user: null }),
@@ -919,7 +921,9 @@ function SurveyResponsesAdminPage() {
       } else {
         setSurvey({
           ...surveyResult,
-          responseCount: Math.max(surveyResult.responseCount ?? 0, nextLoadedResponseCount),
+          // 정원 사용량은 survey 문서의 responseCount가 정본이다. 취소 응답도
+          // 포함하는 응답 이력 수를 합성하면 현재 신청 수가 부풀려진다.
+          responseCount: surveyResult.responseCount,
         });
         if (isDeletedSurvey(surveyResult)) {
           setMissingSurveyNotice('삭제된 설문입니다. 기존 응답 기록만 표시합니다.');
@@ -1225,27 +1229,32 @@ function SurveyResponsesAdminPage() {
   };
 
   const handleResponseDelete = async (responseId) => {
-    if (!responseId || !canDeleteResponses) {
+    if (!responseId || !canDeleteSurveyResponses) {
       return;
     }
 
     try {
       setActionLoading(true);
-      await deleteSurveyResponse(responseId, auditActor);
+      const result = await deleteSurveyResponse(responseId, auditActor);
+      if (!result?.deleted) {
+        return;
+      }
       setResponses((current) => current.filter((response) => response.id !== responseId));
       setAllResponses((current) => current.filter((response) => response.id !== responseId));
       setEditingStates((current) => {
         const { [responseId]: _removed, ...nextState } = current;
         return nextState;
       });
-      setSurvey((current) =>
-        current
-          ? {
-              ...current,
-              responseCount: Math.max(0, Number(current.responseCount ?? 0) - 1),
-            }
-          : current,
-      );
+      if (result.capacityReleased) {
+        setSurvey((current) =>
+          current
+            ? {
+                ...current,
+                responseCount: Math.max(0, Number(current.responseCount ?? 0) - 1),
+              }
+            : current,
+        );
+      }
     } catch (actionError) {
       setError(actionError.message || '응답 삭제에 실패했습니다.');
     } finally {
@@ -1883,6 +1892,7 @@ function SurveyResponsesAdminPage() {
     typeof window === 'undefined'
       ? `/surveys/${surveyId}`
       : `${window.location.origin}/surveys/${surveyId}`;
+  const applicationHistorySummary = `현재 신청 ${applicationResponseCounts.activeApplications}건 · 취소 ${applicationResponseCounts.cancelled}건 · 전체 접수 ${applicationResponseCounts.totalSubmitted}건`;
 
   return (
     <section className="stack-section">
@@ -1891,7 +1901,9 @@ function SurveyResponsesAdminPage() {
           <span className="eyebrow">응답 결과</span>
           <h1>{survey?.title}</h1>
           <p>
-            {searchTerm || statusFilter
+            {isApplicationForm && analyticsStatus === 'ready'
+              ? `${applicationHistorySummary}${searchTerm || statusFilter ? ` · 검색 결과 ${filteredResponses.length}건 표시 중` : ''}`
+              : searchTerm || statusFilter
               ? `전체 ${quotaSummary.responseCount}건 중 ${responses.length}건 불러옴 · 검색 결과 ${filteredResponses.length}건 표시 중`
               : `전체 ${quotaSummary.responseCount}건 중 ${responses.length}건 표시 중`}
           </p>
@@ -1946,12 +1958,7 @@ function SurveyResponsesAdminPage() {
             </span>
           )}
           <p className="meta-description">폼 유형: {formTypeMeta.label}</p>
-          <p className="meta-description">
-            응답 {quotaSummary.responseCount}건
-            {quotaSummary.quotaEnabled && quotaSummary.maxResponses
-              ? ` / 최대 ${quotaSummary.maxResponses}건`
-              : ' / 제한 없음'}
-          </p>
+          <p className="meta-description">{getSurveyCountDisplay(survey)}</p>
           {isApplicationForm && analyticsStatus === 'ready' && (
             <div className="application-status-summary" aria-label="신청 현황">
               <div>
@@ -2810,7 +2817,7 @@ function SurveyResponsesAdminPage() {
                                 {revealingResponseId === response.id ? '확인 중…' : '실명 보기'}
                               </button>
                             )}
-                          {canDeleteResponses && (
+                          {canDeleteSurveyResponses && (
                             <button
                               className="secondary-button danger-button"
                               disabled={actionLoading}
@@ -2914,7 +2921,7 @@ function SurveyResponsesAdminPage() {
                           {response.anonymizedAt ? '익명화 완료' : '개인정보 익명화'}
                         </button>
                       )}
-                      {canDeleteResponses && (
+                      {canDeleteSurveyResponses && (
                         <button
                           className="secondary-button danger-button"
                           disabled={actionLoading}
@@ -2965,11 +2972,19 @@ function SurveyResponsesAdminPage() {
           >
             {loadingMoreResponses ? '불러오는 중...' : '더 보기'}
           </button>
-          <span>전체 {quotaSummary.responseCount}건 중 {responses.length}건 표시 중</span>
+          <span>
+            {isApplicationForm && analyticsStatus === 'ready'
+              ? `전체 접수 ${applicationResponseCounts.totalSubmitted}건 중 ${responses.length}건 표시 중`
+              : `전체 ${quotaSummary.responseCount}건 중 ${responses.length}건 표시 중`}
+          </span>
         </div>
       ) : responses.length > 0 && (
         <div className="pagination-bar">
-          <span>전체 {quotaSummary.responseCount}건을 모두 표시 중입니다.</span>
+          <span>
+            {isApplicationForm && analyticsStatus === 'ready'
+              ? `전체 접수 ${applicationResponseCounts.totalSubmitted}건을 모두 표시 중입니다.`
+              : `전체 ${quotaSummary.responseCount}건을 모두 표시 중입니다.`}
+          </span>
         </div>
       )}
       </>
@@ -3090,7 +3105,7 @@ function SurveyResponsesAdminPage() {
       <ConfirmModal
         isOpen={pendingDeleteResponse !== null}
         title="이 응답을 삭제하시겠습니까?"
-        message="삭제된 응답은 복구할 수 없습니다."
+        message="삭제한 응답은 기본 응답 목록과 신청 현황 집계에서 제외됩니다. 현재 화면에서는 복구할 수 없습니다."
         confirmLabel="응답 삭제"
         cancelLabel="취소"
         onConfirm={() => {

@@ -325,6 +325,111 @@ describe('responses — delete는 항상 차단된다 (soft delete만 허용)', 
   });
 });
 
+describe('responses — soft delete 권한은 설문 관리 범위와 일치한다', () => {
+  const SURVEY_ID = 'response-delete-survey';
+  const RESPONSE_ID = 'response-delete-response';
+  const OWNER_UID = 'response-delete-owner';
+  const OWNER_EMAIL = 'response-delete-owner@yeongjung.or.kr';
+
+  async function seedDeleteTarget(ownerFields = { ownerUid: OWNER_UID, ownerEmail: OWNER_EMAIL }) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'surveys', SURVEY_ID), {
+        title: '응답 삭제 권한 설문',
+        status: 'published',
+        responseCount: 1,
+        ...ownerFields,
+      });
+      await setDoc(
+        doc(ctx.firestore(), 'responses', RESPONSE_ID),
+        minimalResponsePayload(SURVEY_ID, {
+          surveyOwnerUid: OWNER_UID,
+          surveyOwnerEmail: OWNER_EMAIL,
+        }),
+      );
+    });
+  }
+
+  async function seedActiveUser(uid, email, role) {
+    await seedUserDoc(uid, { uid, email, role, status: 'active' });
+  }
+
+  function softDeleteResponseBatch(firestore, actor) {
+    const batch = writeBatch(firestore);
+    batch.update(doc(firestore, 'responses', RESPONSE_ID), {
+      deleted: true,
+      hiddenFromDefaultList: true,
+      deletedAt: serverTimestamp(),
+      deletedBy: actor,
+    });
+    batch.set(doc(collection(firestore, 'audit_logs')), {
+      action: 'response_delete',
+      surveyId: SURVEY_ID,
+      responseId: RESPONSE_ID,
+      actor,
+      deletedBy: actor,
+      deletedAt: serverTimestamp(),
+      metadata: {},
+      createdAt: serverTimestamp(),
+    });
+    return batch.commit();
+  }
+
+  it('owner와 legacy owner, admin, super_admin은 soft delete와 audit 기록을 수행할 수 있다', async () => {
+    await seedDeleteTarget();
+    await seedActiveUser(OWNER_UID, OWNER_EMAIL, 'creator');
+    const owner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+    const ownerActor = { uid: OWNER_UID, email: OWNER_EMAIL, displayName: '' };
+    await assertSucceeds(softDeleteResponseBatch(owner.firestore(), ownerActor));
+
+    await testEnv.clearFirestore();
+    await seedDeleteTarget({ ownerId: OWNER_UID });
+    await seedActiveUser(OWNER_UID, OWNER_EMAIL, 'creator');
+    const legacyOwner = testEnv.authenticatedContext(OWNER_UID, { email: OWNER_EMAIL });
+    await assertSucceeds(softDeleteResponseBatch(legacyOwner.firestore(), ownerActor));
+
+    await testEnv.clearFirestore();
+    await seedDeleteTarget();
+    await seedActiveUser('response-delete-admin', 'response-delete-admin@yeongjung.or.kr', 'admin');
+    const admin = testEnv.authenticatedContext('response-delete-admin', {
+      email: 'response-delete-admin@yeongjung.or.kr',
+    });
+    await assertSucceeds(softDeleteResponseBatch(admin.firestore(), {
+      uid: 'response-delete-admin', email: 'response-delete-admin@yeongjung.or.kr', displayName: '',
+    }));
+
+    await testEnv.clearFirestore();
+    await seedDeleteTarget();
+    const superAdmin = testEnv.authenticatedContext('response-delete-super-admin', {
+      email: 'lth8210@yeongjung.or.kr',
+    });
+    await assertSucceeds(softDeleteResponseBatch(superAdmin.firestore(), {
+      uid: 'response-delete-super-admin', email: 'lth8210@yeongjung.or.kr', displayName: '',
+    }));
+  });
+
+  it('unrelated creator, organization-only creator, viewer, anonymous는 soft delete할 수 없다', async () => {
+    const cases = [
+      ['other-creator', 'other-creator@yeongjung.or.kr', 'creator', { ownerUid: OWNER_UID, ownerEmail: OWNER_EMAIL }],
+      ['organization-only', 'organization-only@yeongjung.or.kr', 'creator', {
+        ownerUid: OWNER_UID, ownerEmail: OWNER_EMAIL, visibility: 'organization',
+      }],
+      ['viewer', 'viewer@yeongjung.or.kr', 'viewer', { ownerUid: OWNER_UID, ownerEmail: OWNER_EMAIL }],
+    ];
+
+    for (const [uid, email, role, ownerFields] of cases) {
+      await seedDeleteTarget(ownerFields);
+      await seedActiveUser(uid, email, role);
+      const context = testEnv.authenticatedContext(uid, { email });
+      await assertFails(softDeleteResponseBatch(context.firestore(), { uid, email, displayName: '' }));
+      await testEnv.clearFirestore();
+    }
+
+    await seedDeleteTarget();
+    const anonymous = testEnv.unauthenticatedContext();
+    await assertFails(softDeleteResponseBatch(anonymous.firestore(), { uid: '', email: '', displayName: '' }));
+  });
+});
+
 describe('responses — 비로그인 사용자는 응답 목록을 조회할 수 없다', () => {
   it('unauthenticated list 쿼리는 빈 결과가 아니라 규칙 위반으로 차단된다', async () => {
     await seedPublishedSurvey('survey-e', { responseCount: 1 });

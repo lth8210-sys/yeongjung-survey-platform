@@ -364,6 +364,20 @@ export function getApplicationResponseCounts(responses = []) {
   );
 }
 
+// 응답 삭제는 상태별로 정원 반환 여부가 다르다. 취소 응답은 취소 transaction에서
+// 이미 정원·quota·lock을 반환했으므로, 삭제 시에는 이력 soft delete만 수행한다.
+export function getResponseDeletionOutcome(response = {}) {
+  if (response?.deleted === true) {
+    return { deleted: false, capacityReleased: false };
+  }
+
+  return {
+    deleted: true,
+    capacityReleased:
+      normalizeResponseStatus(response?.status ?? response?.applicationStatus) !== RESPONSE_STATUSES.CANCELLED,
+  };
+}
+
 export function getDraftSurveyMessage(formType) {
   return isApplicationFormType(formType)
     ? '아직 공개되지 않은 신청서입니다.'
@@ -518,11 +532,11 @@ function normalizeQuotaNumber(value, fallback = 0) {
 
 // 취소는 기존 사용량을 정확히 한 건 반환하는 작업이다. 0 미만을 0으로 보정하면
 // 이미 깨진 운영 데이터를 숨긴 채 응답만 취소할 수 있으므로, 정합성 오류로 중단한다.
-export function decrementCancellationCounter(value, label) {
+export function decrementCancellationCounter(value, label, operationLabel = '신청 취소') {
   const numericValue = Number(value);
 
   if (!Number.isFinite(numericValue) || numericValue < 1) {
-    const error = new Error(`${label} 값이 1 미만이거나 올바르지 않아 신청 취소를 중단했습니다.`);
+    const error = new Error(`${label} 값이 1 미만이거나 올바르지 않아 ${operationLabel}를 중단했습니다.`);
     error.code = 'failed-precondition';
     throw error;
   }
@@ -772,6 +786,24 @@ export function getQuotaSummary(survey = {}) {
       ...normalizedConfiguration,
     }),
   };
+}
+
+// responseCount는 신청형에서 취소 transaction과 함께 감소하는 현재 정원 점유 수다.
+// 일반 설문의 응답 이력 수와 같은 표현으로 보이지 않도록, 화면은 formType에 맞춰
+// 기존 schema 판별 기준만 사용해 문구를 결정한다.
+export function getSurveyCountDisplay(survey = {}) {
+  const quotaSummary = getQuotaSummary(survey);
+  const count = quotaSummary.responseCount;
+
+  if (isApplicationFormType(survey.formType)) {
+    return quotaSummary.quotaEnabled && quotaSummary.maxResponses
+      ? `현재 신청 ${count}건 / 정원 ${quotaSummary.maxResponses}건`
+      : `현재 신청 ${count}건`;
+  }
+
+  return quotaSummary.quotaEnabled && quotaSummary.maxResponses
+    ? `응답 ${count}건 / 최대 ${quotaSummary.maxResponses}건`
+    : `응답 ${count}건 / 제한 없음`;
 }
 
 function toComparableTime(value) {
@@ -1706,21 +1738,6 @@ function getSelectedQuotaValues(answer) {
 
   const normalizedAnswer = String(answer ?? '').trim();
   return normalizedAnswer ? [normalizedAnswer] : [];
-}
-
-function decrementOptionQuotaCounts(optionQuotaCounts = {}, questionId, selectedValues = []) {
-  const nextCounts = { ...optionQuotaCounts };
-
-  selectedValues.forEach((selectedValue) => {
-    const quotaKey = buildOptionQuotaKey(questionId, selectedValue);
-    const currentCount = Number(nextCounts[quotaKey] ?? 0);
-
-    nextCounts[quotaKey] = Number.isFinite(currentCount)
-      ? Math.max(0, currentCount - 1)
-      : 0;
-  });
-
-  return nextCounts;
 }
 
 function sortSurveysByCreatedAtDesc(items = []) {
@@ -3872,7 +3889,7 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
     displayName: String(deletedBy?.displayName ?? deletedBy?.name ?? ''),
   };
 
-  await runTransaction(db, async (transaction) => {
+  return runTransaction(db, async (transaction) => {
     const responseSnapshot = await transaction.get(responseRef);
 
     if (!responseSnapshot.exists()) {
@@ -3883,22 +3900,42 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
 
     const response = mapResponseDoc(responseSnapshot);
 
-    if (response.deleted) {
-      return;
+    const deletionOutcome = getResponseDeletionOutcome(response);
+
+    if (!deletionOutcome.deleted) {
+      return deletionOutcome;
     }
 
     const surveyId = String(response.surveyId ?? '').trim();
     const surveyRef = surveyId ? doc(db, 'surveys', surveyId) : null;
-    const surveySnapshot = surveyRef ? await transaction.get(surveyRef) : null;
     const quotaCountsRef = surveyId ? doc(db, 'surveys', surveyId, 'quotaCounts', 'main') : null;
     const quotaConfigRef = surveyId ? doc(db, 'surveys', surveyId, 'quotaConfig', 'main') : null;
-    const quotaConfigSnapshot = quotaConfigRef ? await transaction.get(quotaConfigRef) : null;
-    const quotaCountsSnapshot = quotaCountsRef ? await transaction.get(quotaCountsRef) : null;
+    let surveySnapshot = null;
+    let quotaConfigSnapshot = null;
+    let quotaCountsSnapshot = null;
     let nextOptionQuotaCounts = null;
     let nextResponseCount = null;
     let nextQuotaCounts = null;
 
-    if (surveySnapshot?.exists()) {
+    if (deletionOutcome.capacityReleased) {
+      if (!surveyRef) {
+        const error = new Error('응답에 연결된 설문 정보가 없어 응답 삭제를 중단했습니다.');
+        error.code = 'failed-precondition';
+        throw error;
+      }
+
+      [surveySnapshot, quotaConfigSnapshot, quotaCountsSnapshot] = await Promise.all([
+        transaction.get(surveyRef),
+        transaction.get(quotaConfigRef),
+        transaction.get(quotaCountsRef),
+      ]);
+
+      if (!surveySnapshot.exists()) {
+        const error = new Error('연결된 설문 정보를 찾을 수 없어 응답 삭제를 중단했습니다.');
+        error.code = 'not-found';
+        throw error;
+      }
+
       const survey = mapSurveyDoc(surveySnapshot);
       nextOptionQuotaCounts = { ...normalizeOptionQuotaCounts(survey.optionQuotaCounts) };
 
@@ -3918,14 +3955,17 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
           return;
         }
 
-        nextOptionQuotaCounts = decrementOptionQuotaCounts(
-          nextOptionQuotaCounts,
-          matchedQuestion.id,
-          selectedValues,
-        );
+        selectedValues.forEach((selectedValue) => {
+          const quotaKey = buildOptionQuotaKey(matchedQuestion.id, selectedValue);
+          nextOptionQuotaCounts[quotaKey] = decrementCancellationCounter(
+            nextOptionQuotaCounts[quotaKey],
+            `선택지 정원(${matchedQuestion.title || matchedQuestion.id} / ${selectedValue})`,
+            '응답 삭제',
+          );
+        });
       });
 
-      nextResponseCount = Math.max(0, Number(survey.responseCount ?? 0) - 1);
+      nextResponseCount = decrementCancellationCounter(survey.responseCount, '현재 신청 수', '응답 삭제');
     }
 
     // 중복신청/1인1슬롯 lock 정리: 응답이 삭제되어도 lock이 남으면 해당 신청자는
@@ -3936,7 +3976,7 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
     let applicantLockRefToDelete = null;
     const slotLockRefsToDelete = [];
 
-    if (canResolveLocks) {
+    if (deletionOutcome.capacityReleased && canResolveLocks) {
       const applicantLockRef = doc(
         db,
         'surveys',
@@ -3974,7 +4014,13 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
       }
     }
 
-    if (quotaCountsSnapshot?.exists() && response.quota?.ageGroupId) {
+    if (deletionOutcome.capacityReleased && response.quota?.ageGroupId && !quotaCountsSnapshot.exists()) {
+      const error = new Error('연령 정원 집계 문서가 없어 응답 삭제를 중단했습니다.');
+      error.code = 'failed-precondition';
+      throw error;
+    }
+
+    if (deletionOutcome.capacityReleased && quotaCountsSnapshot?.exists() && response.quota?.ageGroupId) {
       const quotaConfig = normalizeAgeQuotaConfig(
         quotaConfigSnapshot?.exists()
           ? quotaConfigSnapshot.data()
@@ -3986,10 +4032,14 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
 
       nextQuotaCounts = {
         ...quotaCounts,
-        total: Math.max(0, normalizeQuotaNumber(quotaCounts.total, 0) - 1),
+        total: decrementCancellationCounter(quotaCounts.total, '연령 정원 전체 집계', '응답 삭제'),
         cells: {
           ...quotaCounts.cells,
-          [ageGroupId]: Math.max(0, currentCellCount - 1),
+          [ageGroupId]: decrementCancellationCounter(
+            currentCellCount,
+            `연령 정원(${ageGroupId})`,
+            '응답 삭제',
+          ),
         },
       };
     }
@@ -4002,7 +4052,7 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
       updatedAt: getIsoTimestamp(),
     });
 
-    if (surveyRef && surveySnapshot?.exists()) {
+    if (deletionOutcome.capacityReleased && surveyRef && surveySnapshot?.exists()) {
       transaction.update(surveyRef, {
         responseCount: nextResponseCount,
         optionQuotaCounts: nextOptionQuotaCounts,
@@ -4035,6 +4085,8 @@ export async function deleteSurveyResponse(responseId, deletedBy = {}) {
       metadata: {},
       createdAt: serverTimestamp(),
     });
+
+    return deletionOutcome;
   });
 }
 

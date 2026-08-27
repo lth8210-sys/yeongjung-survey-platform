@@ -15,8 +15,10 @@ import {
   getFormTypeMeta,
   getFirestoreErrorMessage,
   getQuotaSummary,
+  getSurveyCountDisplay,
   getSurveyStatusMeta,
   hydrateSurveyResponseCounts,
+  isApplicationFormType,
   isDeletedSurvey,
   permanentlyDeleteSurvey,
   normalizeSurveyStatus,
@@ -409,12 +411,7 @@ function SurveyListPage() {
                 </p>
                 <small className="muted-label">폼 유형: {formTypeMeta.label}</small>
                 <small>질문 수 {survey.questions?.length ?? 0}개</small>
-                <small>
-                  응답 {quotaSummary.responseCount}건
-                  {quotaSummary.quotaEnabled && quotaSummary.maxResponses
-                    ? ` / 최대 ${quotaSummary.maxResponses}건`
-                    : ' / 제한 없음'}
-                </small>
+                <small>{getSurveyCountDisplay(survey)}</small>
 
                 <div className="card-actions">
                   {(normalizedStatus !== SURVEY_STATUSES.DRAFT || canEditTarget) && (
@@ -533,7 +530,9 @@ function SurveyListPage() {
                   <div className="inline-note">
                     {getClosedSurveyMessage(survey.formType)}
                     {quotaSummary.quotaEnabled && quotaSummary.maxResponses
-                      ? ` 현재 ${quotaSummary.responseCount}/${quotaSummary.maxResponses}건이며 공개 페이지에서는 제출할 수 없습니다.`
+                      ? isApplicationFormType(survey.formType)
+                        ? ` 현재 신청 ${quotaSummary.responseCount}건 / 정원 ${quotaSummary.maxResponses}건이며 공개 페이지에서는 제출할 수 없습니다.`
+                        : ` 현재 ${quotaSummary.responseCount}/${quotaSummary.maxResponses}건이며 공개 페이지에서는 제출할 수 없습니다.`
                       : ' 공개 페이지에서는 안내만 보이고 제출은 할 수 없습니다.'}
                   </div>
                 )}

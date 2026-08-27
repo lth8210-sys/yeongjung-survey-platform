@@ -102,8 +102,9 @@
 - 응답 삭제 함수: `deleteSurveyResponse(responseId, deletedBy)`
 - 실제 Firestore delete가 아니라 `responses/{responseId}`를 update합니다.
 - 설정 필드: `deleted: true`, `hiddenFromDefaultList: true`, `deletedAt`, `deletedBy`, `updatedAt`
-- 삭제 시 `surveys.responseCount`는 `Math.max(0, current - 1)`로 감소합니다.
-- 객관식/신청 슬롯 카운트는 삭제 응답의 선택값 기준으로 감소하며 음수 방어가 필요합니다.
+- submitted 응답 삭제만 `surveys.responseCount`와 객관식/신청 슬롯·연령 quota를 정확히 한 건 반환합니다.
+- cancelled 응답 삭제는 이미 취소 transaction에서 반환된 정원·quota·lock을 변경하지 않습니다.
+- submitted 응답의 counter/quota가 0·누락·비정상이면 삭제를 중단해 데이터 오류를 숨기지 않습니다.
 - 이미 삭제된 응답은 transaction 내부에서 재삭제하지 않습니다.
 
 ## audit log 구조
@@ -128,6 +129,7 @@
 - `canManageAllSurveys`: admin 이상
 - `canManageUsers`: admin 이상
 - `canDeleteResponses`: admin 이상
+- `canDeleteSurveyResponses`: admin 이상 또는 자기 설문의 creator/legacy owner
 - `canManageSurveyResponses`: admin 이상
 - `canDownloadResponses`: creator 이상
 - Firestore Rules의 super admin 이메일 목록과 `src/firebase/users.js`의 `SUPER_ADMIN_EMAILS`는 함께 관리해야 합니다.

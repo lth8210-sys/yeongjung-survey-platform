@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   fetchManagedRecentResponses,
   fetchManagedSurveys,
+  getSurveyCountDisplay,
   hydrateSurveyResponseCounts,
   normalizeResponseProcessingStatus,
   RESPONSE_PROCESSING_STATUSES,
@@ -205,7 +206,7 @@ function HomePage() {
                   <Link className="admin-list-item admin-list-item-link" key={survey.id} to={`/admin/surveys/${survey.id}/edit`}>
                     <div>
                       <strong>{survey.title}</strong>
-                      <p>{survey.responseCount ?? 0}건 응답 · {survey.status}</p>
+                      <p>{getSurveyCountDisplay(survey)} · {survey.status}</p>
                     </div>
                     <span>열기</span>
                   </Link>

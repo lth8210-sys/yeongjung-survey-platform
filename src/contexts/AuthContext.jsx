@@ -13,7 +13,7 @@ import {
 import {
   canCreateSurveys,
   canDownloadResponses,
-  canDeleteResponses,
+  canDeleteSurveyResponses,
   canManageUsers,
   canManageSurveyResponses,
   canViewSurveyResponses,
@@ -131,7 +131,8 @@ export function AuthProvider({ children }) {
     isInactiveUser: Boolean(user) && isInternalUser && status === USER_STATUSES.INACTIVE,
     canCreateSurvey: canAccessAdmin && canCreateSurveys(role),
     canDownloadResponses: canAccessAdmin && canDownloadResponses(role),
-    canDeleteResponses: canAccessAdmin && canDeleteResponses(role),
+    canDeleteResponses: (survey) =>
+      canAccessAdmin && canDeleteSurveyResponses(role, survey, user),
     canManageUsers: canAccessAdmin && canManageUsers(role),
     canManageSurveyResponses: canAccessAdmin && canManageSurveyResponses(role),
     canEditSurvey: (survey) => canAccessAdmin && canEditSurvey(role, survey, user),

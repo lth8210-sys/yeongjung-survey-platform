@@ -3,6 +3,7 @@ import {
   isSurveyOwner,
   canReadManagedSurvey,
   canEditSurvey,
+  canDeleteSurveyResponses,
   canViewSurveyResponses,
   USER_ROLES,
 } from '../src/firebase/users.js';
@@ -81,5 +82,15 @@ describe('canReadManagedSurvey / canEditSurvey — creator 권한 경계', () =>
     expect(canViewSurveyResponses(USER_ROLES.CREATOR, { ownerId: 'user-1' }, user)).toBe(true);
     expect(canViewSurveyResponses(USER_ROLES.ADMIN, otherPrivateSurvey, user)).toBe(true);
     expect(canViewSurveyResponses(USER_ROLES.SUPER_ADMIN, otherPrivateSurvey, user)).toBe(true);
+  });
+
+  it('응답 삭제는 admin 이상 또는 자기·legacy 소유 설문의 creator로 제한한다', () => {
+    expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, ownSurvey, user)).toBe(true);
+    expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, { ownerId: 'user-1' }, user)).toBe(true);
+    expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, otherPrivateSurvey, user)).toBe(false);
+    expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, orgSurvey, user)).toBe(false);
+    expect(canDeleteSurveyResponses(USER_ROLES.VIEWER, ownSurvey, user)).toBe(false);
+    expect(canDeleteSurveyResponses(USER_ROLES.ADMIN, otherPrivateSurvey, user)).toBe(true);
+    expect(canDeleteSurveyResponses(USER_ROLES.SUPER_ADMIN, otherPrivateSurvey, user)).toBe(true);
   });
 });
