@@ -61,6 +61,18 @@ describe('feedback admin reply — 독립 보안 계약', () => {
   it('reply 없는 legacy completed는 읽을 수 있으나 변경할 수 없다', async()=>{await users();await seedFeedback('legacy',{status:'completed',createdByUid:CREATOR,createdByName:'작성자',completedAt:new Date()}); const legacy=doc(creator(),'feedback','legacy');await assertSucceeds(getDoc(legacy));await assertFails(updateDoc(legacy,{adminReply:'추가'}));await assertFails(updateDoc(doc(admin(),'feedback','legacy'),{status:'reviewing',updatedAt:serverTimestamp()}));});
 });
 
+describe('staff_directory — 최소 직원 projection', () => {
+  const ACTIVE = 'directory-active'; const VIEWER = 'directory-viewer'; const PENDING = 'directory-pending'; const ADMIN = 'directory-admin';
+  const context = (uid) => testEnv.authenticatedContext(uid, { email: `${uid}@yeongjung.or.kr` }).firestore();
+  const payload = (uid, displayName, active = true, extra = {}) => ({ uid, displayName, active, updatedAt: serverTimestamp(), ...extra });
+  async function seedUsers() { await Promise.all([seedUserDoc(ACTIVE,{uid:ACTIVE,email:`${ACTIVE}@yeongjung.or.kr`,displayName:'제작자',role:'creator',status:'active'}),seedUserDoc(VIEWER,{uid:VIEWER,email:`${VIEWER}@yeongjung.or.kr`,displayName:'조회자',role:'viewer',status:'active'}),seedUserDoc(PENDING,{uid:PENDING,email:`${PENDING}@yeongjung.or.kr`,displayName:'대기자',role:'viewer',status:'pending'}),seedUserDoc(ADMIN,{uid:ADMIN,email:`${ADMIN}@yeongjung.or.kr`,displayName:'관리자',role:'admin',status:'active'})]); }
+  async function seedDirectory() { await testEnv.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(),'staff_directory',ACTIVE),{uid:ACTIVE,displayName:'제작자',active:true,updatedAt:new Date()}); }); }
+  it('active creator/viewer/admin read, inactive states and anonymous are denied', async()=>{await seedUsers();await seedDirectory();await assertSucceeds(getDoc(doc(context(ACTIVE),'staff_directory',ACTIVE)));await assertSucceeds(getDocs(query(collection(context(VIEWER),'staff_directory'),where('active','==',true))));await assertSucceeds(getDoc(doc(context(ADMIN),'staff_directory',ACTIVE)));await assertFails(getDocs(query(collection(testEnv.unauthenticatedContext().firestore(),'staff_directory'),where('active','==',true))));await assertFails(getDocs(query(collection(context(PENDING),'staff_directory'),where('active','==',true))));});
+  it('does not expand users reads for creator or viewer', async()=>{await seedUsers();await assertFails(getDocs(collection(context(ACTIVE),'users')));await assertFails(getDoc(doc(context(VIEWER),'users',ACTIVE)));});
+  it('allows only self projection with canonical values and blocks spoofing', async()=>{await seedUsers();await assertSucceeds(setDoc(doc(context(ACTIVE),'staff_directory',ACTIVE),payload(ACTIVE,'제작자')));await assertFails(setDoc(doc(context(ACTIVE),'staff_directory',VIEWER),payload(VIEWER,'조회자')));await assertFails(setDoc(doc(context(ACTIVE),'staff_directory',ACTIVE),payload(ACTIVE,'위조')));await assertFails(setDoc(doc(context(ACTIVE),'staff_directory',ACTIVE),payload(ACTIVE,'제작자',false)));await assertFails(setDoc(doc(context(ACTIVE),'staff_directory',ACTIVE),payload(ACTIVE,'제작자',true,{email:'x'})));});
+  it('admin can sync only canonical fields', async()=>{await seedUsers();await assertSucceeds(setDoc(doc(context(ADMIN),'staff_directory',VIEWER),payload(VIEWER,'조회자')));await assertFails(setDoc(doc(context(ADMIN),'staff_directory',VIEWER),payload(VIEWER,'다른 이름')));});
+});
+
 afterAll(async () => {
   await testEnv?.cleanup();
 });

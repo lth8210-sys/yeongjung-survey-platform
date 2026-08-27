@@ -6,6 +6,10 @@
 
 직원 계정, 권한, 상태를 관리한다.
 
+## staff_directory
+
+향후 직원 선택 UI용 최소 projection이다. `uid`, `displayName`, `active`, `updatedAt`만 저장하며 email·부서·역할 등 users 원본 필드는 복제하지 않는다. `active`는 directory UX용 값이며 실제 권한 정본은 users 상태다.
+
 | Field | 의미 |
 | --- | --- |
 | `uid` | Firebase Auth 사용자 UID |

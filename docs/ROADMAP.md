@@ -68,6 +68,8 @@ updatedAt: timestamp
 의견 보내기 1차 이후에는 다음 순서를 권장한다.
 
 1. Viewer — 결과 같이 보기
+
+Viewer 구현 전제: staff_directory 최소 projection 및 기존 active 직원 backfill 운영 절차. viewerUids와 결과 접근 권한은 별도 Phase에서 검토한다.
 2. Owner 인수인계
 3. 필요성이 확인된 경우에만 Editor
 

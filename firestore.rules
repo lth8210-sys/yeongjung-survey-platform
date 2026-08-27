@@ -640,6 +640,22 @@ service cloud.firestore {
       allow delete: if isAtLeastAdmin() && (!protectedSuperAdminData(resource.data) || isSuperAdminEmail());
     }
 
+    match /staff_directory/{userId} {
+      function validDirectoryProjection(data) {
+        return data.keys().hasOnly(['uid', 'displayName', 'active', 'updatedAt']) &&
+          data.uid == userId && data.uid is string && data.displayName is string &&
+          data.active is bool && data.updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId)) &&
+          data.displayName == (get(/databases/$(database)/documents/users/$(userId)).data.keys().hasAny(['displayName']) ? get(/databases/$(database)/documents/users/$(userId)).data.displayName : get(/databases/$(database)/documents/users/$(userId)).data.name) &&
+          data.active == (get(/databases/$(database)/documents/users/$(userId)).data.status == 'active');
+      }
+      allow get: if isAtLeastAdmin() || (isSignedIn() && hasUserDoc() && currentStatus() == 'active' && resource.data.active == true);
+      allow list: if isAtLeastAdmin() || (isSignedIn() && hasUserDoc() && currentStatus() == 'active' && resource.data.active == true);
+      allow create, update: if validDirectoryProjection(request.resource.data) &&
+        (isAtLeastAdmin() || (request.auth.uid == userId && currentStatus() == 'active'));
+      allow delete: if isAtLeastAdmin();
+    }
+
     match /memberships/{membershipId} {
       allow read: if isAtLeastAdmin() || (
         isInternalUser() &&

@@ -11,6 +11,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db, getFirebaseStatusMessage, isFirebaseConfigured } from './config';
+import { syncStaffDirectoryProjection } from './staffDirectory';
 
 export const INTERNAL_EMAIL_DOMAIN = 'yeongjung.or.kr';
 // SYNC REQUIRED: 이 목록을 변경하면 firestore.rules의 isSuperAdminEmail()과
@@ -178,10 +179,13 @@ async function findMembershipByEmail(normalizedEmail) {
   }
 
   const [firstDoc] = querySnapshot.docs;
-  return {
+  const profile = {
     id: firstDoc.id,
     ...firstDoc.data(),
   };
+  // directory는 선택 UI용 projection이다. 동기화 실패가 로그인/기존 권한을 막지 않게 한다.
+  syncStaffDirectoryProjection(profile).catch(() => {});
+  return profile;
 }
 
 export function getRoleLabel(role) {
@@ -666,6 +670,7 @@ export async function updateUserProfile(userId, { displayName, department, role,
       team: nextTeam,
     });
   }
+  await syncStaffDirectoryProjection({ uid: userId, displayName: typeof displayName === 'string' ? displayName.trim() : userData.displayName ?? userData.name ?? '', status: nextStatus });
 }
 
 export async function deactivateUser(userId) {
@@ -674,4 +679,6 @@ export async function deactivateUser(userId) {
     status: USER_STATUSES.INACTIVE,
     updatedAt: serverTimestamp(),
   });
+  const snapshot = await getDoc(doc(db, 'users', userId));
+  await syncStaffDirectoryProjection({ uid: userId, displayName: snapshot.data()?.displayName ?? snapshot.data()?.name ?? '', status: USER_STATUSES.INACTIVE });
 }

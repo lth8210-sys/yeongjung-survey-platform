@@ -12,6 +12,8 @@
 - `src/pages/`: 화면 단위 페이지
 - `src/contexts/AuthContext.jsx`: 로그인, 사용자 role, 권한 상태
 - `src/firebase/`: Firestore 접근 함수, 설문 정규화, 사용자 권한 유틸
+
+`src/firebase/staffDirectory.js`는 향후 직원 선택을 위한 최소 projection만 다룬다. 이는 users 원본 권한이나 Viewer 설문 결과 권한을 대체하지 않는다.
 - `src/utils/`: 통계, 보고서, 응답 흐름, 개인정보 마스킹 등 도메인 유틸
 - `src/data/`: 템플릿과 질문 블록 데이터
 

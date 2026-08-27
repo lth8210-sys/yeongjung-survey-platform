@@ -272,6 +272,10 @@
 
 ## 권한
 
+- [ ] active creator/viewer/admin만 staff_directory active 목록을 조회할 수 있는가
+- [ ] pending/inactive/blocked/anonymous 및 users 문서 없는 계정이 directory와 users 원본 목록을 읽지 못하는가
+- [ ] 본인 projection의 uid/name/active/timestamp 위조와 타인 projection 쓰기가 차단되는가
+
 - [ ] super_admin 전체 설문 조회
 - [ ] super_admin 전체 응답 조회
 - [ ] super_admin 사용자 관리

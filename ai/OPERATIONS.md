@@ -12,6 +12,8 @@
 
 역할은 `super_admin`, `admin`, `creator`, `viewer`를 사용하며 `status`가 `active`여야 관리 권한이 정상 적용됩니다.
 
+`staff_directory` 초기 backfill은 별도 승인 후 admin 권한으로 수행한다. backfill에는 uid, displayName, active, updatedAt만 기록하며 users 원본을 일반 직원에게 공개하지 않는다.
+
 ## 2. 관리자 메뉴별 사용 방법
 
 ### 설문 관리
