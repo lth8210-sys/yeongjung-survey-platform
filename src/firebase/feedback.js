@@ -5,6 +5,7 @@ export const FEEDBACK_TYPES = { bug: '오류', suggestion: '개선 제안', ques
 export const FEEDBACK_STATUSES = { received: '접수', reviewing: '확인 중', completed: '완료' };
 export const FEEDBACK_NEXT_STATUSES = { received: 'reviewing', reviewing: 'completed' };
 export const FEEDBACK_MAX_LENGTH = 2000;
+export const ADMIN_REPLY_MAX_LENGTH = 2000;
 const ready = () => { if (!isFirebaseConfigured || !db) throw new Error(getFirebaseStatusMessage() || 'Firebase 설정이 필요합니다.'); };
 export function getFeedbackContext(pathname = '') {
   const survey = pathname.match(/^\/(?:admin\/)?surveys\/([^/]+)/);
@@ -18,6 +19,9 @@ export function getFeedbackContext(pathname = '') {
   return { surveyId, pageName: '기타' };
 }
 export function normalizeFeedbackContent(value) { return String(value ?? '').trim(); }
+export function normalizeAdminReply(value) { return String(value ?? '').trim(); }
+export function getFeedbackReplyMessage(status, adminReply) { if (normalizeAdminReply(adminReply)) return ''; if (status === 'completed') return '이 의견은 기존 방식으로 처리 완료되어 별도의 관리자 답변이 기록되어 있지 않습니다.'; if (status === 'reviewing') return '관리자가 내용을 확인하고 있습니다.'; return '관리자 확인을 기다리고 있습니다.'; }
+export function canCompleteFeedback(item) { return item?.status === 'reviewing' && Boolean(normalizeAdminReply(item.adminReply)); }
 export async function createFeedback({ type, content, user, pathname }) {
   ready(); const normalized = normalizeFeedbackContent(content);
   if (!Object.hasOwn(FEEDBACK_TYPES, type)) throw new Error('의견 유형을 선택해주세요.');
@@ -39,5 +43,12 @@ export async function updateFeedbackStatus(id, currentStatus, nextStatus, uid) {
     patch.reviewedAt = serverTimestamp();
   }
   if (nextStatus === 'completed') patch.completedAt = serverTimestamp();
+  return updateDoc(doc(db, 'feedback', id), patch);
+}
+export async function saveFeedbackReply(id, reply, user, complete = false) {
+  ready(); const adminReply = normalizeAdminReply(reply);
+  if (!adminReply || adminReply.length > ADMIN_REPLY_MAX_LENGTH) throw new Error(`처리 내용은 1~${ADMIN_REPLY_MAX_LENGTH}자로 입력해주세요.`);
+  const patch = { adminReply, repliedByUid: user.uid, repliedByName: user.displayName ?? '', repliedAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  if (complete) { patch.status = 'completed'; patch.completedAt = serverTimestamp(); }
   return updateDoc(doc(db, 'feedback', id), patch);
 }

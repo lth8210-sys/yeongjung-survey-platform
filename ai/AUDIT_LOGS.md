@@ -14,6 +14,8 @@
 - 필터: action, 설문 ID
 
 자유의견 원문 전체, 개별 응답 내용, 보고서 본문 전체는 감사로그에 저장하지 않습니다.
+feedback의 관리자 답변(`adminReply`)도 감사로그 metadata에 복제하지 않으며, feedback 문서의
+reviewer/reply metadata 자체를 처리 이력으로 사용합니다.
 
 ## 2. 저장 구조
 

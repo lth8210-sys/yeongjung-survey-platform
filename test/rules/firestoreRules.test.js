@@ -45,6 +45,22 @@ beforeAll(async () => {
   });
 });
 
+describe('feedback admin reply — 독립 보안 계약', () => {
+  const ADMIN = 'reply-admin'; const CREATOR = 'reply-creator'; const VIEWER = 'reply-viewer';
+  const admin = () => testEnv.authenticatedContext(ADMIN, { email: 'reply-admin@yeongjung.or.kr' }).firestore();
+  const creator = () => testEnv.authenticatedContext(CREATOR, { email: 'reply-creator@yeongjung.or.kr' }).firestore();
+  const viewer = () => testEnv.authenticatedContext(VIEWER, { email: 'reply-viewer@yeongjung.or.kr' }).firestore();
+  async function users() { await Promise.all([seedUserDoc(ADMIN,{uid:ADMIN,email:'reply-admin@yeongjung.or.kr',displayName:'관리자',role:'admin',status:'active'}),seedUserDoc(CREATOR,{uid:CREATOR,email:'reply-creator@yeongjung.or.kr',displayName:'작성자',role:'creator',status:'active'}),seedUserDoc(VIEWER,{uid:VIEWER,email:'reply-viewer@yeongjung.or.kr',displayName:'조회자',role:'viewer',status:'active'})]); }
+  async function reviewing(id, extra={}) { await seedFeedback(id,{status:'reviewing',createdByUid:CREATOR,createdByName:'작성자',reviewedByUid:ADMIN,reviewedAt:new Date(),...extra}); }
+  const reply = (extra={}) => ({adminReply:'처리',repliedByUid:ADMIN,repliedByName:'관리자',repliedAt:serverTimestamp(),updatedAt:serverTimestamp(),...extra});
+  it('admin만 received → reviewing으로 전이할 수 있다', async()=>{await users();await seedFeedback('rr');await assertSucceeds(updateDoc(doc(admin(),'feedback','rr'),{status:'reviewing',reviewedByUid:ADMIN,reviewedAt:serverTimestamp(),updatedAt:serverTimestamp()}));await seedFeedback('rc');await assertFails(updateDoc(doc(creator(),'feedback','rc'),{status:'reviewing',reviewedByUid:CREATOR,reviewedAt:serverTimestamp(),updatedAt:serverTimestamp()}));});
+  it('reviewing에서 admin reply의 길이와 공백을 검증한다', async()=>{await users(); for (const [id,text,ok] of [['one','x',true],['max','x'.repeat(2000),true],['empty','',false],['space','   ',false],['long','x'.repeat(2001),false]]) {await reviewing(id); const op=updateDoc(doc(admin(),'feedback',id),reply({adminReply:text})); if(ok) await assertSucceeds(op); else await assertFails(op);}});
+  it('reply metadata 위조와 일반 직원 reply write를 차단한다', async()=>{await users();await reviewing('meta');await assertFails(updateDoc(doc(admin(),'feedback','meta'),reply({repliedByUid:CREATOR})));await assertFails(updateDoc(doc(admin(),'feedback','meta'),reply({repliedByName:'위조'})));await assertFails(updateDoc(doc(admin(),'feedback','meta'),reply({reviewedByUid:CREATOR})));await assertFails(updateDoc(doc(creator(),'feedback','meta'),reply({repliedByUid:CREATOR,repliedByName:'작성자'})));await assertFails(updateDoc(doc(viewer(),'feedback','meta'),reply({repliedByUid:VIEWER,repliedByName:'조회자'})));});
+  it('reply 저장 중 직원 원문과 진단정보 변경을 차단한다', async()=>{await users(); for (const [id,patch] of [['content',{content:'변조'}],['type',{type:'other'}],['creator',{createdByUid:'x'}],['route',{route:'/x'}],['created',{createdAt:new Date()}]]) {await reviewing(id);await assertFails(updateDoc(doc(admin(),'feedback',id),reply(patch)));}});
+  it('유효 reply가 있어야 completed 가능하고 completed는 immutable이다', async()=>{await users();await reviewing('no-reply');await assertFails(updateDoc(doc(admin(),'feedback','no-reply'),{status:'completed',completedAt:serverTimestamp(),updatedAt:serverTimestamp()}));await reviewing('with-reply',{adminReply:'처리',repliedByUid:ADMIN,repliedByName:'관리자',repliedAt:new Date()});await assertSucceeds(updateDoc(doc(admin(),'feedback','with-reply'),{status:'completed',completedAt:serverTimestamp(),updatedAt:serverTimestamp()}));await assertFails(updateDoc(doc(admin(),'feedback','with-reply'),{adminReply:'변경',updatedAt:serverTimestamp()}));});
+  it('reply 없는 legacy completed는 읽을 수 있으나 변경할 수 없다', async()=>{await users();await seedFeedback('legacy',{status:'completed',createdByUid:CREATOR,createdByName:'작성자',completedAt:new Date()}); const legacy=doc(creator(),'feedback','legacy');await assertSucceeds(getDoc(legacy));await assertFails(updateDoc(legacy,{adminReply:'추가'}));await assertFails(updateDoc(doc(admin(),'feedback','legacy'),{status:'reviewing',updatedAt:serverTimestamp()}));});
+});
+
 afterAll(async () => {
   await testEnv?.cleanup();
 });
@@ -1127,8 +1143,8 @@ describe('feedback — 내부 직원 의견 권한과 상태 전이', () => {
     await assertSucceeds(updateDoc(doc(adminDb, 'feedback', 'to-review'), { status: 'reviewing', updatedAt: serverTimestamp(), reviewedByUid: ADMIN_UID, reviewedAt: serverTimestamp() }));
   });
 
-  it('admin은 reviewing → completed 전이를 reviewer 보존과 completedAt 설정으로 수행할 수 있다', async () => {
-    await seedFeedbackUsers(); await seedFeedback('to-complete', { status: 'reviewing', reviewedByUid: ADMIN_UID, reviewedAt: new Date(), updatedAt: new Date() });
+  it('admin은 유효한 관리자 답변을 보존한 reviewing → completed 전이를 수행할 수 있다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('to-complete', { status: 'reviewing', reviewedByUid: ADMIN_UID, reviewedAt: new Date(), adminReply: '처리 결과', repliedByUid: ADMIN_UID, repliedByName: '관리자', repliedAt: new Date(), updatedAt: new Date() });
     const adminDb = context(ADMIN_UID, ADMIN_EMAIL).firestore();
     await assertSucceeds(updateDoc(doc(adminDb, 'feedback', 'to-complete'), { status: 'completed', updatedAt: serverTimestamp(), completedAt: serverTimestamp() }));
   });

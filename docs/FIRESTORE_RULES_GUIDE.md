@@ -136,6 +136,9 @@ anonymous, organization-only staff/viewer, unrelated creator는 closed lock을 �
   수정할 수 없고 delete는 항상 거부된다.
 - `feedback` 목록은 내 의견(`createdByUid`, `createdAt desc`)과 관리자 상태 필터(`status`,
   `createdAt desc`)를 위한 composite index를 사용한다.
+- `adminReply`는 reviewing 상태에서 admin/super_admin만 1~2,000자로 작성·수정할 수 있다.
+  completed는 유효 reply가 저장된 경우에만 가능하며 이후 status/reply를 포함해 immutable이다.
+  직원 원문과 작성자·진단정보는 관리자도 수정할 수 없다.
 
 - role 정규화가 클라이언트와 일치하는가
 - `superadmin`, `super_admin`, `superAdmin` 호환이 필요한가

@@ -187,7 +187,11 @@ counter/quota/lock은 자동 migration하지 않는다.
 | `reviewedByUid`, `reviewedAt`, `completedAt` | 관리자 상태 처리 이력 |
 
 본문에는 주민 이름·연락처·생년월일·주소·응답 원문을 입력하지 않는다. 의견은 물리/soft delete
-대상이 아니며, 관리자는 상태와 상태 처리 시각만 변경할 수 있다.
+대상이 아니며, 관리자는 허용된 상태 전이와 `reviewing` 상태의 처리 답변·답변 메타데이터만 변경할 수 있다.
+
+`adminReply`, `repliedByUid`, `repliedByName`, `repliedAt`은 관리자 처리 답변의 선택 필드다.
+`reviewedByUid`/`reviewedAt`은 확인 시작 작업자·시각이고, `completedAt`은 완료 시각이다.
+기존 completed 의견에는 reply 필드가 없을 수 있으며 migration 없이 읽기 호환한다.
 
 ```text
 users

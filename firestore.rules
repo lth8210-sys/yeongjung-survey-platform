@@ -958,9 +958,10 @@ service cloud.firestore {
       // 의견 작성 권한과 동일하게 활성화된 내부 직원만 자신의 의견을 읽을 수 있다.
       // 상태가 pending/inactive/blocked로 바뀌면 기존 의견도 조회할 수 없어야 한다.
       allow read: if isAtLeastAdmin() || (isSignedIn() && hasUserDoc() && currentStatus() == 'active' && resource.data.createdByUid == request.auth.uid);
-      allow update: if isAtLeastAdmin() && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status','updatedAt','reviewedByUid','reviewedAt','completedAt']) &&
+      allow update: if isAtLeastAdmin() && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status','updatedAt','reviewedByUid','reviewedAt','completedAt','adminReply','repliedByUid','repliedByName','repliedAt']) && request.resource.data.updatedAt == request.time &&
         ((resource.data.status == 'received' && request.resource.data.status == 'reviewing' && request.resource.data.reviewedByUid == request.auth.uid && request.resource.data.reviewedAt == request.time && request.resource.data.completedAt == null) ||
-         (resource.data.status == 'reviewing' && request.resource.data.status == 'completed' && request.resource.data.reviewedByUid == resource.data.reviewedByUid && request.resource.data.reviewedAt == resource.data.reviewedAt && request.resource.data.completedAt == request.time)) && request.resource.data.updatedAt == request.time;
+         (resource.data.status == 'reviewing' && request.resource.data.status == 'reviewing' && request.resource.data.reviewedByUid == resource.data.reviewedByUid && request.resource.data.reviewedAt == resource.data.reviewedAt && request.resource.data.completedAt == resource.data.completedAt && request.resource.data.adminReply is string && request.resource.data.adminReply.size() > 0 && request.resource.data.adminReply.size() <= 2000 && request.resource.data.adminReply.matches('.*[^\\s].*') && request.resource.data.repliedByUid == request.auth.uid && request.resource.data.repliedByName == userDoc().data.displayName && request.resource.data.repliedAt == request.time) ||
+         (resource.data.status == 'reviewing' && request.resource.data.status == 'completed' && resource.data.keys().hasAll(['adminReply','repliedByUid','repliedByName','repliedAt']) && request.resource.data.adminReply == resource.data.adminReply && request.resource.data.repliedByUid == resource.data.repliedByUid && request.resource.data.repliedByName == resource.data.repliedByName && request.resource.data.repliedAt == resource.data.repliedAt && request.resource.data.completedAt == request.time));
       allow delete: if false;
     }
 
