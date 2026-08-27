@@ -22,6 +22,8 @@ const SurveyReportsAdminPage = lazy(() => import('./pages/SurveyReportsAdminPage
 const SurveyResponsesAdminPage = lazy(() => import('./pages/SurveyResponsesAdminPage'));
 const SurveyTemplatesAdminPage = lazy(() => import('./pages/SurveyTemplatesAdminPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
+const FeedbackPage = lazy(() => import('./pages/FeedbackPage'));
+const AdminFeedbackPage = lazy(() => import('./pages/AdminFeedbackPage'));
 
 function RouteLoadingFallback() {
   return <div className="empty-state">불러오는 중입니다.</div>;
@@ -44,6 +46,11 @@ function App() {
         <Route path="/" element={<AppLayout />}>
           <Route index element={<HomePage />} />
           <Route path="surveys" element={<SurveyListPage />} />
+          <Route path="feedback" element={<FeedbackPage />} />
+          <Route
+            path="admin/feedback"
+            element={<AdminRoute requireManageUsers><AdminFeedbackPage /></AdminRoute>}
+          />
           <Route
             path="admin"
             element={

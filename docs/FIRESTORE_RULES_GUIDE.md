@@ -123,6 +123,20 @@ anonymous, organization-only staff/viewer, unrelated creator는 closed lock을 �
 
 ## Rules 변경 체크리스트
 
+## feedback 권한 계약
+
+- `users/{uid}`가 존재하고 상태가 `active`인 내부 `super_admin`, `admin`, `creator`, `viewer`만
+  의견을 만들고 자신의 의견을 조회할 수 있다.
+- 일반 직원은 다른 직원 의견을 조회·수정·삭제할 수 없다. `pending`, `inactive`, `blocked`,
+  anonymous 및 users 문서가 없는 계정은 의견 create/read가 거부된다.
+- `admin`과 `super_admin`만 전체 목록/상태별 목록을 읽고 `received → reviewing → completed`
+  순서의 상태 변경을 수행할 수 있다.
+- 상태 변경에서는 `updatedAt == request.time`을 강제하며, `reviewing` 전이에서 reviewer와
+  `reviewedAt`, `completed` 전이에서 `completedAt`을 기록한다. 본문·작성자·진단 정보는 누구도
+  수정할 수 없고 delete는 항상 거부된다.
+- `feedback` 목록은 내 의견(`createdByUid`, `createdAt desc`)과 관리자 상태 필터(`status`,
+  `createdAt desc`)를 위한 composite index를 사용한다.
+
 - role 정규화가 클라이언트와 일치하는가
 - `superadmin`, `super_admin`, `superAdmin` 호환이 필요한가
 - collection list query가 rules에서 증명 가능한가

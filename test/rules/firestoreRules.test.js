@@ -15,6 +15,8 @@ import {
   getDocs,
   query,
   where,
+  orderBy,
+  limit,
   serverTimestamp,
   updateDoc,
   writeBatch,
@@ -65,6 +67,48 @@ async function seedPublishedSurvey(surveyId, overrides = {}) {
 async function seedUserDoc(uid, data) {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'users', uid), data);
+  });
+}
+
+function feedbackPayload(uid, displayName = '테스트 직원', overrides = {}) {
+  return {
+    type: 'bug',
+    content: '테스트 의견',
+    status: 'received',
+    createdByUid: uid,
+    createdByName: displayName,
+    surveyId: null,
+    route: '/admin',
+    pageName: '관리자',
+    appVersion: '0.1.0',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    reviewedByUid: null,
+    reviewedAt: null,
+    completedAt: null,
+    ...overrides,
+  };
+}
+
+async function seedFeedback(feedbackId, overrides = {}) {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'feedback', feedbackId), {
+      type: 'bug',
+      content: '저장된 테스트 의견',
+      status: 'received',
+      createdByUid: 'feedback-creator',
+      createdByName: '작성자',
+      surveyId: null,
+      route: '/admin',
+      pageName: '관리자',
+      appVersion: '0.1.0',
+      createdAt: new Date('2026-08-27T00:00:00Z'),
+      updatedAt: new Date('2026-08-27T00:00:00Z'),
+      reviewedByUid: null,
+      reviewedAt: null,
+      completedAt: null,
+      ...overrides,
+    });
   });
 }
 
@@ -970,5 +1014,146 @@ describe('responses — organization visibility가 응답 원문 열람 권한�
     const otherCreator = testEnv.authenticatedContext(OTHER_CREATOR_UID, { email: OTHER_CREATOR_EMAIL });
 
     await assertFails(getDoc(doc(otherCreator.firestore(), 'responses', 'private-response-10')));
+  });
+});
+
+describe('feedback — 내부 직원 의견 권한과 상태 전이', () => {
+  const CREATOR_UID = 'feedback-creator';
+  const OTHER_UID = 'feedback-other';
+  const VIEWER_UID = 'feedback-viewer';
+  const ADMIN_UID = 'feedback-admin';
+  const LEGACY_UID = 'feedback-legacy-owner';
+  const CREATOR_EMAIL = 'feedback-creator@yeongjung.or.kr';
+  const OTHER_EMAIL = 'feedback-other@yeongjung.or.kr';
+  const VIEWER_EMAIL = 'feedback-viewer@yeongjung.or.kr';
+  const ADMIN_EMAIL = 'feedback-admin@yeongjung.or.kr';
+
+  async function seedFeedbackUsers() {
+    await Promise.all([
+      seedUserDoc(CREATOR_UID, { uid: CREATOR_UID, email: CREATOR_EMAIL, displayName: '작성자', role: 'creator', status: 'active' }),
+      seedUserDoc(OTHER_UID, { uid: OTHER_UID, email: OTHER_EMAIL, displayName: '다른 직원', role: 'creator', status: 'active' }),
+      seedUserDoc(VIEWER_UID, { uid: VIEWER_UID, email: VIEWER_EMAIL, displayName: '조회 직원', role: 'viewer', status: 'active' }),
+      seedUserDoc(ADMIN_UID, { uid: ADMIN_UID, email: ADMIN_EMAIL, displayName: '관리자', role: 'admin', status: 'active' }),
+      seedUserDoc(LEGACY_UID, { uid: LEGACY_UID, email: 'feedback-legacy@yeongjung.or.kr', displayName: '기존 제작자', role: 'owner', status: 'active' }),
+    ]);
+  }
+
+  function context(uid, email) { return testEnv.authenticatedContext(uid, { email }); }
+
+  it('active creator·viewer는 자신의 의견을 생성할 수 있다', async () => {
+    await seedFeedbackUsers();
+    await assertSucceeds(setDoc(doc(context(CREATOR_UID, CREATOR_EMAIL).firestore(), 'feedback', 'creator-create'), feedbackPayload(CREATOR_UID, '작성자')));
+    await assertSucceeds(setDoc(doc(context(VIEWER_UID, VIEWER_EMAIL).firestore(), 'feedback', 'viewer-create'), feedbackPayload(VIEWER_UID, '조회 직원')));
+  });
+
+  it('admin과 protected super_admin도 자신의 의견을 생성할 수 있다', async () => {
+    await seedFeedbackUsers();
+    await seedUserDoc('feedback-super', { uid: 'feedback-super', email: 'lth8210@yeongjung.or.kr', displayName: '슈퍼관리자', role: 'super_admin', status: 'active' });
+    await assertSucceeds(setDoc(doc(context(ADMIN_UID, ADMIN_EMAIL).firestore(), 'feedback', 'admin-create'), feedbackPayload(ADMIN_UID, '관리자')));
+    await assertSucceeds(setDoc(doc(context('feedback-super', 'lth8210@yeongjung.or.kr').firestore(), 'feedback', 'super-create'), feedbackPayload('feedback-super', '슈퍼관리자')));
+  });
+
+  it('anonymous, users 문서 없음, pending/inactive/blocked 계정은 생성할 수 없다', async () => {
+    await seedFeedbackUsers();
+    await Promise.all([
+      seedUserDoc('feedback-pending', { uid: 'feedback-pending', email: 'feedback-pending@yeongjung.or.kr', displayName: '대기', role: 'viewer', status: 'pending' }),
+      seedUserDoc('feedback-inactive', { uid: 'feedback-inactive', email: 'feedback-inactive@yeongjung.or.kr', displayName: '비활성', role: 'viewer', status: 'inactive' }),
+      seedUserDoc('feedback-blocked', { uid: 'feedback-blocked', email: 'feedback-blocked@yeongjung.or.kr', displayName: '차단', role: 'viewer', status: 'blocked' }),
+    ]);
+    await assertFails(setDoc(doc(testEnv.unauthenticatedContext().firestore(), 'feedback', 'anonymous-create'), feedbackPayload('x')));
+    await assertFails(setDoc(doc(context('feedback-no-doc', 'feedback-no-doc@yeongjung.or.kr').firestore(), 'feedback', 'nodoc-create'), feedbackPayload('feedback-no-doc')));
+    await assertFails(setDoc(doc(context('feedback-pending', 'feedback-pending@yeongjung.or.kr').firestore(), 'feedback', 'pending-create'), feedbackPayload('feedback-pending', '대기')));
+    await assertFails(setDoc(doc(context('feedback-inactive', 'feedback-inactive@yeongjung.or.kr').firestore(), 'feedback', 'inactive-create'), feedbackPayload('feedback-inactive', '비활성')));
+    await assertFails(setDoc(doc(context('feedback-blocked', 'feedback-blocked@yeongjung.or.kr').firestore(), 'feedback', 'blocked-create'), feedbackPayload('feedback-blocked', '차단')));
+  });
+
+  it('작성자 UID·이름, received 초기 상태, 허용 type, 1~2,000자, field allowlist를 강제한다', async () => {
+    await seedFeedbackUsers();
+    const db = context(CREATOR_UID, CREATOR_EMAIL).firestore();
+    await assertFails(setDoc(doc(db, 'feedback', 'wrong-uid'), feedbackPayload(OTHER_UID, '작성자')));
+    await assertFails(setDoc(doc(db, 'feedback', 'wrong-name'), feedbackPayload(CREATOR_UID, '위조 이름')));
+    await assertFails(setDoc(doc(db, 'feedback', 'wrong-status'), feedbackPayload(CREATOR_UID, '작성자', { status: 'completed' })));
+    await assertFails(setDoc(doc(db, 'feedback', 'wrong-type'), feedbackPayload(CREATOR_UID, '작성자', { type: 'unknown' })));
+    await assertFails(setDoc(doc(db, 'feedback', 'empty'), feedbackPayload(CREATOR_UID, '작성자', { content: '' })));
+    await assertFails(setDoc(doc(db, 'feedback', 'long'), feedbackPayload(CREATOR_UID, '작성자', { content: 'a'.repeat(2001) })));
+    await assertFails(setDoc(doc(db, 'feedback', 'extra-field'), feedbackPayload(CREATOR_UID, '작성자', { extra: 'nope' })));
+    await assertFails(setDoc(doc(db, 'feedback', 'client-time'), feedbackPayload(CREATOR_UID, '작성자', { createdAt: new Date(), updatedAt: new Date() })));
+  });
+
+  it('작성자는 자기 의견 단건 조회와 createdByUid 조건의 목록 조회만 할 수 있다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('mine'); await seedFeedback('other', { createdByUid: OTHER_UID, createdByName: '다른 직원' });
+    const db = context(CREATOR_UID, CREATOR_EMAIL).firestore();
+    await assertSucceeds(getDoc(doc(db, 'feedback', 'mine')));
+    await assertSucceeds(getDocs(query(collection(db, 'feedback'), where('createdByUid', '==', CREATOR_UID), orderBy('createdAt', 'desc'), limit(25))));
+    await assertFails(getDoc(doc(db, 'feedback', 'other')));
+    await assertFails(getDocs(query(collection(db, 'feedback'), orderBy('createdAt', 'desc'), limit(25))));
+  });
+
+  it('다른 직원, viewer, legacy owner는 타인 의견을 조회할 수 없고 자기 의견만 조회한다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('creator-item'); await seedFeedback('viewer-item', { createdByUid: VIEWER_UID, createdByName: '조회 직원' });
+    await assertFails(getDoc(doc(context(OTHER_UID, OTHER_EMAIL).firestore(), 'feedback', 'creator-item')));
+    await assertSucceeds(getDoc(doc(context(VIEWER_UID, VIEWER_EMAIL).firestore(), 'feedback', 'viewer-item')));
+    await assertFails(getDoc(doc(context(LEGACY_UID, 'feedback-legacy@yeongjung.or.kr').firestore(), 'feedback', 'creator-item')));
+  });
+
+  it('pending/inactive/blocked 계정은 기존 자기 의견도 조회할 수 없다', async () => {
+    for (const [uid, status] of [['feedback-pending', 'pending'], ['feedback-inactive', 'inactive'], ['feedback-blocked', 'blocked']]) {
+      await seedFeedback('status-item-' + status, { createdByUid: uid, createdByName: '직원' });
+      await seedUserDoc(uid, { uid, email: `${uid}@yeongjung.or.kr`, displayName: '직원', role: 'viewer', status });
+      await assertFails(getDoc(doc(context(uid, `${uid}@yeongjung.or.kr`).firestore(), 'feedback', 'status-item-' + status)));
+    }
+  });
+
+  it('admin과 super_admin은 전체 목록, status 필터 목록, 단건 조회를 할 수 있다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('received-item'); await seedFeedback('reviewing-item', { status: 'reviewing', reviewedByUid: ADMIN_UID, reviewedAt: new Date(), updatedAt: new Date() });
+    await seedUserDoc('feedback-super-list', { uid: 'feedback-super-list', email: 'lth8210@yeongjung.or.kr', displayName: '슈퍼관리자', role: 'super_admin', status: 'active' });
+    const adminDb = context(ADMIN_UID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(getDocs(query(collection(adminDb, 'feedback'), orderBy('createdAt', 'desc'), limit(25))));
+    await assertSucceeds(getDocs(query(collection(adminDb, 'feedback'), where('status', '==', 'reviewing'), orderBy('createdAt', 'desc'), limit(25))));
+    await assertSucceeds(getDoc(doc(context('feedback-super-list', 'lth8210@yeongjung.or.kr').firestore(), 'feedback', 'received-item')));
+  });
+
+  it('일반 직원은 의견 본문·작성자·진단정보·상태를 수정하거나 삭제할 수 없다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('immutable');
+    const creatorDb = context(CREATOR_UID, CREATOR_EMAIL).firestore();
+    await assertFails(updateDoc(doc(creatorDb, 'feedback', 'immutable'), { content: '변조' }));
+    await assertFails(updateDoc(doc(creatorDb, 'feedback', 'immutable'), { status: 'reviewing', updatedAt: serverTimestamp(), reviewedByUid: CREATOR_UID, reviewedAt: serverTimestamp() }));
+    await assertFails(deleteDoc(doc(creatorDb, 'feedback', 'immutable')));
+  });
+
+  it('admin은 received → reviewing 전이를 정확한 reviewer/timestamp와 함께 수행할 수 있다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('to-review');
+    const adminDb = context(ADMIN_UID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(updateDoc(doc(adminDb, 'feedback', 'to-review'), { status: 'reviewing', updatedAt: serverTimestamp(), reviewedByUid: ADMIN_UID, reviewedAt: serverTimestamp() }));
+  });
+
+  it('admin은 reviewing → completed 전이를 reviewer 보존과 completedAt 설정으로 수행할 수 있다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('to-complete', { status: 'reviewing', reviewedByUid: ADMIN_UID, reviewedAt: new Date(), updatedAt: new Date() });
+    const adminDb = context(ADMIN_UID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(updateDoc(doc(adminDb, 'feedback', 'to-complete'), { status: 'completed', updatedAt: serverTimestamp(), completedAt: serverTimestamp() }));
+  });
+
+  it('admin도 received → completed 직접 전이, 되돌리기, reviewer 위조, timestamp 누락은 할 수 없다', async () => {
+    await seedFeedbackUsers();
+    const adminDb = context(ADMIN_UID, ADMIN_EMAIL).firestore();
+    await seedFeedback('direct-complete');
+    await seedFeedback('completed-item', { status: 'completed', reviewedByUid: ADMIN_UID, reviewedAt: new Date(), completedAt: new Date(), updatedAt: new Date() });
+    await seedFeedback('reviewer-spoof');
+    await assertFails(updateDoc(doc(adminDb, 'feedback', 'direct-complete'), { status: 'completed', updatedAt: serverTimestamp(), completedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(adminDb, 'feedback', 'completed-item'), { status: 'reviewing', updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(adminDb, 'feedback', 'reviewer-spoof'), { status: 'reviewing', updatedAt: serverTimestamp(), reviewedByUid: OTHER_UID, reviewedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(adminDb, 'feedback', 'reviewer-spoof'), { status: 'reviewing', reviewedByUid: ADMIN_UID, reviewedAt: serverTimestamp() }));
+  });
+
+  it('admin은 상태 외 모든 필드와 삭제를 변경할 수 없고 super_admin도 같은 불변 계약을 따른다', async () => {
+    await seedFeedbackUsers(); await seedFeedback('admin-immutable');
+    await seedUserDoc('feedback-super-update', { uid: 'feedback-super-update', email: 'lth8210@yeongjung.or.kr', displayName: '슈퍼관리자', role: 'super_admin', status: 'active' });
+    const adminDb = context(ADMIN_UID, ADMIN_EMAIL).firestore();
+    const superDb = context('feedback-super-update', 'lth8210@yeongjung.or.kr').firestore();
+    await assertFails(updateDoc(doc(adminDb, 'feedback', 'admin-immutable'), { content: '수정 금지' }));
+    await assertFails(updateDoc(doc(adminDb, 'feedback', 'admin-immutable'), { createdByName: '수정 금지' }));
+    await assertFails(deleteDoc(doc(adminDb, 'feedback', 'admin-immutable')));
+    await assertFails(updateDoc(doc(superDb, 'feedback', 'admin-immutable'), { route: '/changed' }));
+    await assertFails(deleteDoc(doc(superDb, 'feedback', 'admin-immutable')));
   });
 });

@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import FeedbackModal from './FeedbackModal';
 
 function AppLayout() {
   const { pathname } = useLocation();
@@ -10,6 +11,7 @@ function AppLayout() {
     canCreateSurvey,
     canManageUsers,
     isInternalUser,
+    canSendFeedback,
     isSuperAdmin,
     roleLabel,
     statusLabel,
@@ -20,6 +22,8 @@ function AppLayout() {
     profileError,
   } = useAuth();
   const [loginMessage, setLoginMessage] = useState('');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
   const navClassName = (isActive) => (isActive ? 'active' : undefined);
   const isSurveyManagementActive =
     pathname === '/admin/surveys' ||
@@ -96,6 +100,7 @@ function AppLayout() {
           )}
           {canManageUsers && <NavLink to="/admin/users">사용자 관리</NavLink>}
           {canManageUsers && <NavLink to="/admin/audit-logs">감사로그</NavLink>}
+          {canManageUsers && <NavLink to="/admin/feedback">의견 관리</NavLink>}
           {isSuperAdmin && <NavLink to="/admin/settings">관리자 설정</NavLink>}
         </nav>
 
@@ -111,6 +116,7 @@ function AppLayout() {
               <button className="secondary-button" onClick={logout} type="button">
                 로그아웃
               </button>
+              {canSendFeedback && <button className="secondary-button" onClick={() => setFeedbackOpen(true)} type="button">의견 보내기</button>}
             </>
           ) : (
             <button className="primary-button" onClick={handleGoogleLogin} type="button">
@@ -121,8 +127,10 @@ function AppLayout() {
       </header>
 
       <main className="page-content">
+        {feedbackMessage && <div className="config-notice">{feedbackMessage} <Link to="/feedback">내 의견 보기</Link></div>}
         <Outlet />
       </main>
+      <FeedbackModal isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} user={user} pathname={pathname} onSent={() => setFeedbackMessage('의견을 보냈습니다.')} />
     </div>
   );
 }

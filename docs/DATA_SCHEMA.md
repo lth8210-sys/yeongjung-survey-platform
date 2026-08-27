@@ -170,6 +170,25 @@ counter/quota/lock은 자동 migration하지 않는다.
 
 ## Collection 관계
 
+## feedback
+
+경로: `feedback/{feedbackId}`. 설문 및 응답 컬렉션과 독립된 내부 직원 의견 수집용 문서다.
+설문 응답 원문이나 주민 개인정보를 자동 복제하지 않는다.
+
+| Field | 의미 |
+| --- | --- |
+| `type` | `bug`, `suggestion`, `question`, `other` |
+| `content` | 공백 제거 후 1~2,000자 의견 본문 |
+| `status` | `received` → `reviewing` → `completed` |
+| `createdByUid`, `createdByName` | 작성자의 UID 및 `users/{uid}.displayName` |
+| `surveyId` | 설문 화면에서만 자동 기록되는 선택적 ID |
+| `route`, `pageName`, `appVersion` | 비민감 진단 정보 |
+| `createdAt`, `updatedAt` | 생성·최종 상태 변경 시각 |
+| `reviewedByUid`, `reviewedAt`, `completedAt` | 관리자 상태 처리 이력 |
+
+본문에는 주민 이름·연락처·생년월일·주소·응답 원문을 입력하지 않는다. 의견은 물리/soft delete
+대상이 아니며, 관리자는 상태와 상태 처리 시각만 변경할 수 있다.
+
 ```text
 users
   ↓ owns / manages

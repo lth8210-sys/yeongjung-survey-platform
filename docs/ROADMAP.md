@@ -26,27 +26,28 @@
 - 관리자 화면 안내 문구 정리
 - 오류 메시지와 진단 로그 개선
 
-## 차기 기능 후보 — 의견 보내기
+## 구현됨 — 내부 직원 의견 보내기 1차
 
-이번 release에는 구현하지 않는다. 향후 로그인한 내부 직원이 오류·개선 제안·사용 문의를
-서비스 안에서 전달할 수 있도록 하는 기능 후보로 관리한다. 주민 공개 응답 화면에는 우선
-제공하지 않으며, 1차 버전에는 현재 Storage 정책과 기관 카드 미등록 상태를 고려해 이미지·문서
-첨부를 넣지 않는다.
+로그인하고 활성화된 내부 직원이 오류·개선 제안·사용 문의를 서비스 안에서 전달할 수 있다.
+주민 공개 응답 화면에는 제공하지 않으며, Storage 정책과 기관 카드 미등록 상태를 고려해
+이미지·문서 첨부는 포함하지 않는다.
 
-### 1차 권장 범위
+### 현재 1차 범위
 
-- 대상: 로그인한 내부 직원
+- 대상: users 문서가 있고 active 상태인 `super_admin`, `admin`, `creator`, `viewer`
 - 유형: 오류 신고, 개선 제안, 사용 문의, 기타
 - 내용: 필수 입력 및 개인정보 입력 금지 안내
 - 자동 기록: 현재 route, page name, 설문 화면이면 `surveyId`, app version/release, 제출자 UID·이름,
   생성 시각
 - 상태: `received`(접수), `reviewing`(확인 중), `completed`(완료)
-- 화면: 내가 보낸 의견 조회와 관리자 의견 관리 화면
+- 화면: 내가 보낸 의견 조회(`/feedback`)와 관리자 의견 관리(`/admin/feedback`)
 - 금지: 현재 설문의 응답 원문이나 PII 자동 복제
+- 권한: 일반 직원은 자기 의견만 조회하며, `admin`/`super_admin`만 전체 조회 및
+  `received → reviewing → completed` 상태 변경을 할 수 있음
 
-### 설계 후보
+### 데이터 계약
 
-구현 시 후보 컬렉션은 `feedback/{feedbackId}`다.
+컬렉션은 `feedback/{feedbackId}`다.
 
 ```text
 type: bug | suggestion | question | other
@@ -62,15 +63,13 @@ createdAt: timestamp
 updatedAt: timestamp
 ```
 
-### 권장 개발 순서
+### 다음 개발 순서
 
-현재 로드맵에 Viewer·인수인계의 선행 우선순위는 별도로 확정돼 있지 않으므로, 운영 안정화
-완료 후 다음 순서를 권장한다.
+의견 보내기 1차 이후에는 다음 순서를 권장한다.
 
-1. 의견 보내기
-2. Viewer — 결과 같이 보기
-3. Owner 인수인계
-4. 필요성이 확인된 경우에만 Editor
+1. Viewer — 결과 같이 보기
+2. Owner 인수인계
+3. 필요성이 확인된 경우에만 Editor
 
 ## v1.2.x Draft 저장 / Publish 구조 준비
 

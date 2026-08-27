@@ -124,6 +124,7 @@ export function AuthProvider({ children }) {
     loading,
     isAdmin: canAccessAdmin,
     isInternalUser,
+    canSendFeedback: isActiveAccount,
     canAccessAdmin,
     isPendingApproval: Boolean(user) && isInternalUser && status === USER_STATUSES.PENDING,
     isBlockedUser: Boolean(user) && isInternalUser && status === USER_STATUSES.BLOCKED,

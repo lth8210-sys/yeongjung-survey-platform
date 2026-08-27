@@ -946,6 +946,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /feedback/{feedbackId} {
+      function feedbackFieldsAreValid(data) {
+        return data.keys().hasOnly(['type','content','status','createdByUid','createdByName','surveyId','route','pageName','appVersion','createdAt','updatedAt','reviewedByUid','reviewedAt','completedAt']) &&
+          data.type in ['bug','suggestion','question','other'] && data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+          data.createdByUid is string && data.createdByName is string && (data.surveyId == null || data.surveyId is string) && data.route is string && data.pageName is string && data.appVersion is string;
+      }
+      allow create: if isSignedIn() && hasUserDoc() && currentStatus() == 'active' && feedbackFieldsAreValid(request.resource.data) &&
+        request.resource.data.createdByUid == request.auth.uid && request.resource.data.createdByName == userDoc().data.displayName &&
+        request.resource.data.status == 'received' && request.resource.data.reviewedByUid == null && request.resource.data.reviewedAt == null && request.resource.data.completedAt == null && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      // 의견 작성 권한과 동일하게 활성화된 내부 직원만 자신의 의견을 읽을 수 있다.
+      // 상태가 pending/inactive/blocked로 바뀌면 기존 의견도 조회할 수 없어야 한다.
+      allow read: if isAtLeastAdmin() || (isSignedIn() && hasUserDoc() && currentStatus() == 'active' && resource.data.createdByUid == request.auth.uid);
+      allow update: if isAtLeastAdmin() && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status','updatedAt','reviewedByUid','reviewedAt','completedAt']) &&
+        ((resource.data.status == 'received' && request.resource.data.status == 'reviewing' && request.resource.data.reviewedByUid == request.auth.uid && request.resource.data.reviewedAt == request.time && request.resource.data.completedAt == null) ||
+         (resource.data.status == 'reviewing' && request.resource.data.status == 'completed' && request.resource.data.reviewedByUid == resource.data.reviewedByUid && request.resource.data.reviewedAt == resource.data.reviewedAt && request.resource.data.completedAt == request.time)) && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
     match /audit_logs/{logId} {
       allow create: if canCreateAuditLog() &&
         request.resource.data.keys().hasOnly([

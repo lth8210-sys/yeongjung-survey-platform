@@ -1,6 +1,16 @@
 {
   "indexes": [
     {
+      "collectionGroup": "feedback",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "createdByUid", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }]
+    },
+    {
+      "collectionGroup": "feedback",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }]
+    },
+    {
       "collectionGroup": "surveys",
       "queryScope": "COLLECTION",
       "fields": [
