@@ -4,11 +4,14 @@ import { db, getFirebaseStatusMessage, isFirebaseConfigured } from './config';
 const directoryCollection = db ? collection(db, 'staff_directory') : null;
 const ready = () => { if (!isFirebaseConfigured || !db) throw new Error(getFirebaseStatusMessage() || 'Firebase 설정이 필요합니다.'); };
 
-export function buildStaffDirectoryProjection({ uid, displayName, status } = {}) {
+export function buildStaffDirectoryProjection({ uid, displayName, status, active } = {}) {
   return {
     uid: String(uid ?? ''),
     displayName: String(displayName ?? '').trim() || '이름 없음',
-    active: status === 'active',
+    // Firestore에서 읽은 projection은 status 대신 active만 가진다. 기존
+    // projection의 active 값을 status 부재로 false로 바꾸면 active query가
+    // 성공해도 Viewer 선택 UI가 빈 목록이 된다.
+    active: typeof active === 'boolean' ? active : status === 'active',
   };
 }
 
