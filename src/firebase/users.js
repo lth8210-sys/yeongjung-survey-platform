@@ -179,13 +179,10 @@ async function findMembershipByEmail(normalizedEmail) {
   }
 
   const [firstDoc] = querySnapshot.docs;
-  const profile = {
+  return {
     id: firstDoc.id,
     ...firstDoc.data(),
   };
-  // directory는 선택 UI용 projection이다. 동기화 실패가 로그인/기존 권한을 막지 않게 한다.
-  syncStaffDirectoryProjection(profile).catch(() => {});
-  return profile;
 }
 
 export function getRoleLabel(role) {
@@ -425,7 +422,7 @@ export async function upsertInternalUserProfile(firebaseUser) {
     });
   }
 
-  return {
+  const profile = {
     uid: firebaseUser.uid,
     email: normalizedEmail,
     displayName,
@@ -437,6 +434,10 @@ export async function upsertInternalUserProfile(firebaseUser) {
     source: profileSource,
     membershipId,
   };
+  // directory는 선택 UI용 projection이다. 로그인 직후 실제 users 정본 값으로 동기화하되,
+  // 동기화 실패가 기존 로그인·권한 흐름을 막지는 않게 한다.
+  syncStaffDirectoryProjection(profile).catch(() => {});
+  return profile;
 }
 
 export async function ensureUserProfile(firebaseUser) {
