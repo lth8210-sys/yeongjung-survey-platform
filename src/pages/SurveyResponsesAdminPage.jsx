@@ -37,7 +37,6 @@ import {
   getSurveyStatusMeta,
   isApplicationFormType,
   isDeletedSurvey,
-  isNonResponseQuestionType,
   isOptionQuotaQuestion,
   isOriginalPiiLost,
   isScaleQuestionType,
@@ -50,6 +49,7 @@ import {
 } from '../firebase/surveys';
 import { revealResponsePii } from '../firebase/piiReveal';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
+import { buildRawExportColumns, keepStoredResponseAnswerItems } from '../utils/rawExportColumns';
 import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
 import {
   maskAnswerByQuestion,
@@ -1363,17 +1363,7 @@ function SurveyResponsesAdminPage() {
     }
 
     const exportSource = allResponses.length > 0 ? allResponses : responses;
-    const orderedQuestions =
-      survey.questions.length > 0
-        ? survey.questions.filter((question) => !isNonResponseQuestionType(question.type))
-        : exportSource.flatMap((response) =>
-            getOrderedResponseAnswerItems(survey.questions, response.answers),
-          ).reduce((result, item) => {
-            if (!result.some((existing) => existing.id === item.questionId)) {
-              result.push({ id: item.questionId, title: item.questionTitle });
-            }
-            return result;
-          }, []);
+    const orderedQuestions = buildRawExportColumns(survey.questions ?? [], exportSource);
     const addressQuestionId = survey.questions.find((question) => question.meta?.addressField)?.id ?? '';
 
     const headerRow = [
@@ -1386,11 +1376,14 @@ function SurveyResponsesAdminPage() {
       '출생년도',
       '나이',
       '초과응답',
-      ...orderedQuestions.map((question) => question.title || question.label || question.id),
+      ...orderedQuestions.map((question) => question.exportLabel),
     ];
 
     const dataRows = exportSource.map((response) => {
-      const answerItems = getOrderedResponseAnswerItems(survey.questions, response.answers);
+      const answerItems = keepStoredResponseAnswerItems(
+        getOrderedResponseAnswerItems(survey.questions, response.answers),
+        response.answers,
+      );
       // 2026-07-14: 원본이 이미 유실된 응답(isOriginalPiiLost, docs/admin-original-pii-export-fix.md
       // 참고)은 저장된 answers[]의 PII 문항 값이 사실 마스킹 텍스트다 — 정상적으로 마스킹된
       // 값처럼 보이면 관리자가 이를 실제로 확인 가능한 값으로 착각할 수 있으므로 명시적으로

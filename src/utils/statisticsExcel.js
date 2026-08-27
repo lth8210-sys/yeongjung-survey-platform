@@ -9,6 +9,7 @@ import {
   isScaleQuestionType,
   QUESTION_TYPES,
 } from '../firebase/surveys';
+import { buildRawExportColumns, keepStoredResponseAnswerItems } from './rawExportColumns';
 import {
   buildSurveyAnalytics,
   generateRuleBasedReportSummary,
@@ -158,35 +159,20 @@ function finalizeSheet(sheet, {
   };
 }
 
-function getOrderedQuestions(survey, responses) {
-  if (survey.questions?.length) {
-    return survey.questions.filter((question) => !isNonResponseQuestionType(question.type));
-  }
-  return responses
-    .flatMap((response) => getOrderedResponseAnswerItems([], response.answers))
-    .reduce((result, item) => {
-      if (!result.some((question) => question.id === item.questionId)) {
-        result.push({
-          id: item.questionId,
-          title: item.questionTitle,
-          type: item.questionType,
-        });
-      }
-      return result;
-    }, []);
-}
-
-function buildRawResponseRows(survey, responses) {
-  const questions = getOrderedQuestions(survey, responses);
+export function buildRawResponseRows(survey, responses) {
+  const questions = buildRawExportColumns(survey.questions ?? [], responses);
   const headers = [
     '제출일',
     '응답 ID',
     '처리 상태',
     '관리자 비고',
-    ...questions.map((question) => question.title || question.label || question.id),
+    ...questions.map((question) => question.exportLabel),
   ];
   const rows = responses.map((response) => {
-    const items = getOrderedResponseAnswerItems(survey.questions ?? [], response.answers);
+    const items = keepStoredResponseAnswerItems(
+      getOrderedResponseAnswerItems(survey.questions ?? [], response.answers),
+      response.answers,
+    );
     const answerMap = new Map(
       items.map((item) => [item.questionId, formatSurveyAnswer(item.answer, item)]),
     );
@@ -199,6 +185,10 @@ function buildRawResponseRows(survey, responses) {
     ];
   });
   return { headers, rows, questions };
+}
+
+function getCurrentResponseQuestions(survey) {
+  return (survey.questions ?? []).filter((question) => !isNonResponseQuestionType(question.type));
 }
 
 function getRawAnswer(response, questionId) {
@@ -329,7 +319,9 @@ function createRawSheet(workbook, survey, responses) {
     freezeRow: 3,
     autoFilterRange: `A3:${sheet.getColumn(headers.length).letter}${Math.max(3, 3 + rows.length)}`,
   });
-  return questions;
+  // Raw export may include historical-only columns, but statistical sheets stay
+  // intentionally bound to the current survey schema.
+  return getCurrentResponseQuestions(survey);
 }
 
 function createChoiceSheet(workbook, questions, responses) {

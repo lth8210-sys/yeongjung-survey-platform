@@ -54,7 +54,7 @@
 | --- | --- |
 | `surveyId` | 연결된 설문 ID |
 | `surveyTitle` | 제출 시점 설문 제목 |
-| `answers` | 응답 배열 또는 응답 데이터. 주소(예: "2026 영중 지역주민 욕구조사" Q1)도 별도 top-level 필드 없이 이 배열 안에 일반 문항 답변으로 저장된다(`meta.addressField: true`가 붙은 문항으로 식별) |
+| `answers` | 응답 배열 또는 응답 데이터. 각 항목은 제출 당시의 `questionId`, `questionTitle`, `questionType`, `answer`를 보존한다. 주소(예: "2026 영중 지역주민 욕구조사" Q1)도 별도 top-level 필드 없이 이 배열 안에 일반 문항 답변으로 저장된다(`meta.addressField: true`가 붙은 문항으로 식별) |
 | `respondent` | 응답자 메타데이터 |
 | `submittedAt` | 제출 시각 |
 | `quota` | 연령대 quota 매칭 결과(`{ birthYear, age, ageGroupId, ageGroupLabel, isOverQuota }`, 2026-07부터 지역 필드 없음) |
