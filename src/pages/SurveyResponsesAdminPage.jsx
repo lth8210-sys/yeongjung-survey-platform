@@ -61,6 +61,8 @@ import {
 } from '../utils/privacy';
 import { sanitizeRow } from '../utils/csvSafeCell';
 import { logger } from '../utils/logger';
+import { copyTextToClipboard } from '../utils/clipboard';
+import { getPublicSurveyUrl } from '../utils/publicSurveyUrl';
 
 const RESPONSE_PAGE_SIZE = 20;
 const RESIDENT_ASSET_TEMPLATE_ID = 'resident_asset_interview_v1';
@@ -1887,21 +1889,7 @@ function SurveyResponsesAdminPage() {
 
   const handleCopyShareText = async () => {
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareText);
-      } else if (typeof document !== 'undefined') {
-        const textarea = document.createElement('textarea');
-        textarea.value = shareText;
-        textarea.setAttribute('readonly', '');
-        textarea.style.position = 'fixed';
-        textarea.style.top = '-9999px';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      } else {
-        throw new Error('clipboard unavailable');
-      }
+      await copyTextToClipboard(shareText);
 
       setShareCopyMessage('공유 문구가 복사되었습니다. Google Chat, 이메일, 카카오톡 등에 붙여넣어 사용하세요.');
     } catch {
@@ -1921,10 +1909,7 @@ function SurveyResponsesAdminPage() {
   const statusMeta = getSurveyStatusMeta(normalizedStatus);
   const formTypeMeta = getFormTypeMeta(survey?.formType);
   const quotaSummary = shareQuotaSummary;
-  const publicUrl =
-    typeof window === 'undefined'
-      ? `/surveys/${surveyId}`
-      : `${window.location.origin}/surveys/${surveyId}`;
+  const publicUrl = getPublicSurveyUrl(surveyId);
   const applicationHistorySummary = `현재 신청 ${applicationResponseCounts.activeApplications}건 · 취소 ${applicationResponseCounts.cancelled}건 · 전체 접수 ${applicationResponseCounts.totalSubmitted}건`;
 
   return (

@@ -30,6 +30,7 @@ import {
   SURVEY_TEMPLATE_CATEGORIES,
 } from '../firebase/surveyTemplates';
 import { logger } from '../utils/logger';
+import { getPublicSurveyUrl } from '../utils/publicSurveyUrl';
 
 function TemplateSaveModal({ survey, saving, onClose, onSave }) {
   const [name, setName] = useState(survey?.title ?? '');
@@ -197,14 +198,6 @@ function SurveyListPage() {
   useEffect(() => {
     loadSurveys();
   }, [canAccessAdmin, firebaseStatusMessage, isFirebaseConfigured, profile, role, showDeleted, user?.email, user?.uid]);
-
-  const getPublicSurveyUrl = (targetSurveyId) => {
-    if (typeof window === 'undefined') {
-      return `/surveys/${targetSurveyId}`;
-    }
-
-    return `${window.location.origin}/surveys/${targetSurveyId}`;
-  };
 
   const handleDuplicate = async (surveyId) => {
     try {

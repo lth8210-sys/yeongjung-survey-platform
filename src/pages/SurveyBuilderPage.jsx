@@ -58,6 +58,8 @@ import {
   normalizeQuestions,
 } from '../firebase/surveyNormalize';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
+import { copyTextToClipboard } from '../utils/clipboard';
+import { getPublicSurveyUrl } from '../utils/publicSurveyUrl';
 
 const createEmptyQuestion = () => ({
   id: createQuestionId(),
@@ -960,16 +962,13 @@ function SurveyBuilderPage() {
       return;
     }
 
-    const shareUrl =
-      typeof window === 'undefined'
-        ? `/surveys/${surveyId}`
-        : `${window.location.origin}/surveys/${surveyId}`;
+    const shareUrl = getPublicSurveyUrl(surveyId);
 
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      setMessage('공유 링크를 복사했습니다.');
-    } catch (error) {
-      setMessage('공유 링크 복사에 실패했습니다. 브라우저 권한을 확인해주세요.');
+      await copyTextToClipboard(shareUrl);
+      setMessage('응답 링크를 복사했습니다.');
+    } catch {
+      setMessage('응답 링크 복사에 실패했습니다. 링크를 직접 복사해주세요.');
     }
   };
 
@@ -2491,7 +2490,7 @@ function SurveyBuilderPage() {
           </div>
         )}
 
-      {message && <div className="form-message">{message}</div>}
+      {message && <div className="form-message" role="status">{message}</div>}
       {saveDisabledReason && <div className="inline-note">{saveDisabledReason}</div>}
       {questions.length >= 300 && (
         <div className="inline-note">
@@ -2516,7 +2515,7 @@ function SurveyBuilderPage() {
             {saving ? '저장 중...' : isEditMode ? '설문 수정하기' : '설문 저장하기'}
           </button>
             <button className="secondary-button" onClick={handleCopyShareLink} type="button">
-              공유 링크 복사
+              응답 링크 복사
             </button>
           </div>
         </div>
