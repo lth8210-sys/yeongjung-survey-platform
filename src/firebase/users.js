@@ -222,7 +222,7 @@ export function canDeleteResponses(role) {
 
 export function canDeleteSurveyResponses(role, survey, user) {
   return hasRoleAtLeast(role, USER_ROLES.ADMIN) || (
-    role === USER_ROLES.CREATOR && isSurveyOwner(survey, user)
+    [USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(role) && isSurveyOwner(survey, user)
   );
 }
 
@@ -249,7 +249,7 @@ export function canReadManagedSurvey(role, survey, user) {
     return true;
   }
 
-  if (role === USER_ROLES.CREATOR && isSurveyOwner(survey, user)) {
+  if ([USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(role) && isSurveyOwner(survey, user)) {
     return true;
   }
 
@@ -261,10 +261,20 @@ export function isSurveyOwner(survey, user) {
     return false;
   }
 
+  const ownerUid = String(survey.ownerUid ?? '').trim();
+  const userUid = String(user.uid ?? '').trim();
+
+  // ownerUid is the canonical current-owner identifier.  Legacy aliases are
+  // intentionally considered only for surveys that genuinely predate it;
+  // otherwise a stale ownerEmail/createdBy snapshot could restore a previous
+  // owner's authority after an ownership transfer.
+  if (ownerUid) {
+    return ownerUid === userUid;
+  }
+
   const normalizedUserEmail = normalizeEmailKey(user.email);
 
   return (
-    survey.ownerUid === user.uid ||
     survey.createdByUid === user.uid ||
     survey.ownerId === user.uid ||
     survey.userId === user.uid ||
@@ -280,7 +290,7 @@ export function canEditSurvey(role, survey, user) {
     return true;
   }
 
-  if (role === USER_ROLES.CREATOR) {
+  if ([USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(role)) {
     return isSurveyOwner(survey, user);
   }
 
@@ -292,7 +302,7 @@ export function canViewSurveyResponses(role, survey, user) {
   // 응답 원문 열람 권한은 아니다. Firestore Rules의
   // canReadSurveyResponsesWithAccess()와 동일하게 admin 이상 또는 설문 소유자만 허용한다.
   return hasRoleAtLeast(role, USER_ROLES.ADMIN) || (
-    role === USER_ROLES.CREATOR && isSurveyOwner(survey, user)
+    [USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(role) && isSurveyOwner(survey, user)
   );
 }
 

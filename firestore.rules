@@ -229,9 +229,18 @@ service cloud.firestore {
       return data.status == "published" || isLegacyPublishedStatus(data);
     }
 
+    // ownerUid is the sole canonical identifier for the current survey
+    // owner. Every other field below is historical compatibility only and
+    // must never revive an old owner's authority once ownerUid exists.
+    function hasCanonicalSurveyOwner(data) {
+      return data.keys().hasAll(['ownerUid']) &&
+        data.ownerUid is string && data.ownerUid.size() > 0;
+    }
+
     function isSurveyOwner(data) {
       return isSignedIn() && (
-        data.ownerUid == request.auth.uid ||
+        (hasCanonicalSurveyOwner(data) && data.ownerUid == request.auth.uid) ||
+        (!hasCanonicalSurveyOwner(data) && (
         data.createdByUid == request.auth.uid ||
         data.ownerId == request.auth.uid ||
         data.userId == request.auth.uid ||
@@ -240,6 +249,7 @@ service cloud.firestore {
         (data.createdBy is map && (
           data.createdBy.uid == request.auth.uid ||
           data.createdBy.email == userEmail()
+        ))
         ))
       );
     }
@@ -256,7 +266,7 @@ service cloud.firestore {
     function canReadManagedSurveyWithAccess(data, role, status) {
       return status == 'active' && (
         role in ['super_admin', 'admin'] ||
-        (role == 'creator' && isSurveyOwner(data)) ||
+        (role in ['creator', 'viewer'] && isSurveyOwner(data)) ||
         isOrganizationVisibleSurvey(data)
       );
     }
@@ -264,7 +274,7 @@ service cloud.firestore {
     function canEditManagedSurveyWithAccess(data, role, status) {
       return status == 'active' && (
         role in ['super_admin', 'admin'] ||
-        (role == 'creator' && isSurveyOwner(data))
+        (role in ['creator', 'viewer'] && isSurveyOwner(data))
       );
     }
 
@@ -321,7 +331,7 @@ service cloud.firestore {
     function canReadSurveyResponsesWithAccess(data, role, status) {
       return status == 'active' && (
         role in ['super_admin', 'admin'] ||
-        (role == 'creator' && isSurveyOwner(data))
+        (role in ['creator', 'viewer'] && isSurveyOwner(data))
       );
     }
 
@@ -358,6 +368,17 @@ service cloud.firestore {
       let status = resolvedStatus(hasDoc, userData, email, role);
 
       return canEditSurveyByIdWithAccess(surveyId, role, status);
+    }
+
+    // A response linked to a normal survey always follows that survey's
+    // current canonical owner. Snapshot aliases remain only for genuinely
+    // legacy responses whose linked survey is gone or lacks ownerUid.
+    function canUseResponseSnapshotFallback(surveyId) {
+      let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+      let surveyExists = surveyId is string && exists(surveyPath);
+      let surveyData = surveyExists ? get(surveyPath).data : {};
+
+      return surveyId is string && (!surveyExists || !hasCanonicalSurveyOwner(surveyData));
     }
 
     function canReadSurveyTemplates() {
@@ -514,7 +535,8 @@ service cloud.firestore {
           canReadSurveyResponsesById(data.surveyId, role, status) ||
           (
             status == 'active' &&
-            role == 'creator' &&
+            role in ['creator', 'viewer'] &&
+            canUseResponseSnapshotFallback(data.surveyId) &&
             isResponseOwner(data)
           )
         )
@@ -533,9 +555,9 @@ service cloud.firestore {
         (
           role in ['super_admin', 'admin'] ||
           (
-            role == 'creator' &&
+            role in ['creator', 'viewer'] &&
             (
-              isResponseOwner(data) ||
+              (canUseResponseSnapshotFallback(data.surveyId) && isResponseOwner(data)) ||
               canEditSurveyByIdWithAccess(data.surveyId, role, status)
             )
           )
@@ -575,6 +597,20 @@ service cloud.firestore {
           (resource.data.responseCount is int &&
             request.resource.data.responseCount == resource.data.responseCount + 1)
         );
+    }
+
+    function validOwnerTransfer(surveyId, data) {
+      let changedKeys = request.resource.data.diff(data).changedKeys();
+      let nextOwnerUid = request.resource.data.ownerUid;
+
+      return canEditManagedSurvey(data) &&
+        changedKeys.hasOnly(['ownerUid', 'updatedAt']) &&
+        nextOwnerUid is string && nextOwnerUid.size() > 0 &&
+        (!hasCanonicalSurveyOwner(data) || nextOwnerUid != data.ownerUid) &&
+        request.resource.data.updatedAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(nextOwnerUid)) &&
+        get(/databases/$(database)/documents/users/$(nextOwnerUid)).data.status == 'active' &&
+        !existsAfter(/databases/$(database)/documents/surveys/$(surveyId)/viewerGrants/$(nextOwnerUid));
     }
 
     function canReadSurveySubdoc(surveyId) {
@@ -707,7 +743,12 @@ service cloud.firestore {
       // "응답 문서 생성 없이 카운터만 올리는" 경로를 열어주는 기존 한계는 여전히 남아있다
       // (§4/§6 최종 보고 참조) — 서버 콜러블 전환 완료 후 다시 이 줄을 canEditManagedSurvey()만
       // 남기고 제거할 것.
-      allow update: if canEditManagedSurvey(resource.data) || validPublicSurveyCounterUpdate();
+      allow update: if (canEditManagedSurvey(resource.data) &&
+          !request.resource.data.diff(resource.data).changedKeys().hasAny([
+            'ownerUid', 'ownerEmail', 'createdBy', 'createdByUid', 'createdByEmail', 'createdByRole'
+          ])) ||
+        validOwnerTransfer(surveyId, resource.data) ||
+        validPublicSurveyCounterUpdate();
     }
 
     match /surveys/{surveyId}/viewerGrants/{targetUid} {
@@ -720,9 +761,29 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/users/$(targetUid)) &&
           get(/databases/$(database)/documents/users/$(targetUid)).data.status == 'active';
       }
+      // The prior owner may optionally keep read-only Viewer access in the
+      // same transaction that transfers ownership. The survey's post-write
+      // ownerUid must be someone else; this never permits a self-grant on an
+      // otherwise unchanged survey.
+      function validPreviousOwnerViewerGrant() {
+        let surveyPath = /databases/$(database)/documents/surveys/$(surveyId);
+        let surveyBefore = get(surveyPath).data;
+        let surveyAfter = getAfter(surveyPath).data;
+
+        return request.resource.data.keys().hasOnly(['uid', 'grantedByUid', 'createdAt']) &&
+          request.resource.data.uid == targetUid && request.resource.data.uid is string &&
+          request.resource.data.grantedByUid == request.auth.uid &&
+          request.resource.data.createdAt == request.time &&
+          targetUid == request.auth.uid &&
+          isSurveyOwner(surveyBefore) &&
+          surveyAfter.ownerUid is string && surveyAfter.ownerUid.size() > 0 &&
+          surveyAfter.ownerUid != request.auth.uid &&
+          exists(/databases/$(database)/documents/users/$(targetUid)) &&
+          get(/databases/$(database)/documents/users/$(targetUid)).data.status == 'active';
+      }
       allow get: if canEditSurveyById(surveyId) || isActiveSurveyViewerById(surveyId);
       allow list: if canEditSurveyById(surveyId);
-      allow create: if canEditSurveyById(surveyId) && validViewerGrant();
+      allow create: if canEditSurveyById(surveyId) && (validViewerGrant() || validPreviousOwnerViewerGrant());
       allow update: if false;
       allow delete: if canEditSurveyById(surveyId);
     }

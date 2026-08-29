@@ -85,6 +85,39 @@ describe('viewerGrants — 설문별 결과 열람 grant', () => {
   it('viewer download audit은 grant·actor·survey·timestamp·metadata를 독립적으로 검증한다', async()=>{await seed();await testEnv.withSecurityRulesDisabled(async(ctx)=>{await setDoc(doc(ctx.firestore(),'surveys',surveyId,'viewerGrants',VIEWER),{uid:VIEWER,grantedByUid:OWNER,createdAt:new Date()});await setDoc(doc(ctx.firestore(),'surveys','other-survey'),{title:'다른 설문',status:'published'});});const base={surveyId,responseId:null,action:'responses_csv_downloaded',actor:{uid:VIEWER,email:`${VIEWER}@yeongjung.or.kr`,displayName:'조회자'},metadata:{downloadType:'raw',totalCount:1},createdAt:serverTimestamp()};await assertFails(addDoc(collection(fs(OTHER),'audit_logs'),{...base,actor:{uid:OTHER,email:`${OTHER}@yeongjung.or.kr`,displayName:'다른 직원'}}));await assertFails(addDoc(collection(fs(VIEWER),'audit_logs'),{...base,action:'response_cancelled'}));await assertFails(addDoc(collection(fs(VIEWER),'audit_logs'),{...base,actor:{...base.actor,uid:OWNER}}));await assertFails(addDoc(collection(fs(VIEWER),'audit_logs'),{...base,surveyId:'other-survey'}));await assertFails(addDoc(collection(fs(VIEWER),'audit_logs'),{...base,createdAt:new Date()}));await assertFails(addDoc(collection(fs(VIEWER),'audit_logs'),{...base,metadata:{answer:'PII'}}));});
 });
 
+describe('Owner Transfer — ownerUid canonical authorization', () => {
+  const OLD = 'transfer-old'; const NEW = 'transfer-new'; const OTHER = 'transfer-other'; const ADMIN = 'transfer-admin'; const surveyId = 'transfer-survey';
+  const fs = (uid) => testEnv.authenticatedContext(uid, { email: `${uid}@yeongjung.or.kr` }).firestore();
+  const actor = (uid) => ({ uid, email: `${uid}@yeongjung.or.kr`, displayName: uid });
+  async function seed() {
+    await Promise.all([
+      seedUserDoc(OLD,{uid:OLD,email:`${OLD}@yeongjung.or.kr`,role:'creator',status:'active'}),
+      seedUserDoc(NEW,{uid:NEW,email:`${NEW}@yeongjung.or.kr`,role:'viewer',status:'active'}),
+      seedUserDoc(OTHER,{uid:OTHER,email:`${OTHER}@yeongjung.or.kr`,role:'viewer',status:'active'}),
+      seedUserDoc(ADMIN,{uid:ADMIN,email:`${ADMIN}@yeongjung.or.kr`,role:'admin',status:'active'}),
+    ]);
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(),'surveys',surveyId),{title:'인계 설문',status:'published',ownerUid:OLD,ownerEmail:`${OLD}@yeongjung.or.kr`,createdByUid:OLD,createdByEmail:`${OLD}@yeongjung.or.kr`,createdBy:{uid:OLD,email:`${OLD}@yeongjung.or.kr`},responseCount:1});
+      await setDoc(doc(ctx.firestore(),'responses','transfer-response'),minimalResponsePayload(surveyId,{surveyOwnerUid:OLD,surveyOwnerEmail:`${OLD}@yeongjung.or.kr`,surveyCreatedByUid:OLD,surveyCreatedByEmail:`${OLD}@yeongjung.or.kr`}));
+      await setDoc(doc(ctx.firestore(),'surveys',surveyId,'viewerGrants',NEW),{uid:NEW,grantedByUid:OLD,createdAt:new Date()});
+    });
+  }
+  function transferBatch(firestore, actorUid, retain = false) {
+    const batch = writeBatch(firestore);
+    batch.update(doc(firestore,'surveys',surveyId),{ownerUid:NEW,updatedAt:serverTimestamp()});
+    batch.delete(doc(firestore,'surveys',surveyId,'viewerGrants',NEW));
+    if (retain) batch.set(doc(firestore,'surveys',surveyId,'viewerGrants',OLD),{uid:OLD,grantedByUid:actorUid,createdAt:serverTimestamp()});
+    batch.set(doc(collection(firestore,'audit_logs')),{action:'survey_owner_transferred',surveyId,responseId:null,actor:actor(actorUid),metadata:{previousOwnerUid:OLD,nextOwnerUid:NEW,previousOwnerRetainedAsViewer:retain},createdAt:serverTimestamp()});
+    return batch.commit();
+  }
+  it('현재 owner와 admin은 active 직원에게 ownerUid만 원자적으로 인계하고 새 owner viewer grant를 제거한다', async()=>{await seed();await assertSucceeds(transferBatch(fs(OLD),OLD));await assertSucceeds(getDoc(doc(fs(NEW),'surveys',surveyId)));await assertSucceeds(updateDoc(doc(fs(NEW),'surveys',surveyId),{title:'새 담당자 수정'}));await assertSucceeds(setDoc(doc(fs(NEW),'surveys',surveyId,'viewerGrants',OTHER),{uid:OTHER,grantedByUid:NEW,createdAt:serverTimestamp()}));await seed();await assertSucceeds(transferBatch(fs(ADMIN),ADMIN));});
+  it('stale ownerEmail과 createdBy snapshot은 인계 뒤 OLD 권한을 복원하지 않으며 response도 현재 owner를 따른다', async()=>{await seed();await assertSucceeds(transferBatch(fs(OLD),OLD));await assertFails(updateDoc(doc(fs(OLD),'surveys',surveyId),{title:'이전 담당자 변조'}));await assertFails(getDoc(doc(fs(OLD),'responses','transfer-response')));await assertSucceeds(getDoc(doc(fs(NEW),'responses','transfer-response')));});
+  it('이전 담당자 Viewer 유지는 동일 transaction에서만 가능하며 읽기만 허용한다', async()=>{await seed();await assertSucceeds(transferBatch(fs(OLD),OLD,true));await assertSucceeds(getDoc(doc(fs(OLD),'responses','transfer-response')));await assertFails(updateDoc(doc(fs(OLD),'responses','transfer-response'),{adminNote:'변조'}));});
+  it('inactive target·ownerUid 외 필드 변경·새 owner viewer grant 미삭제를 차단한다', async()=>{await seed();await testEnv.withSecurityRulesDisabled(async(ctx)=>updateDoc(doc(ctx.firestore(),'users',NEW),{status:'inactive'}));const oldClient=fs(OLD);const inactive=writeBatch(oldClient);inactive.update(doc(oldClient,'surveys',surveyId),{ownerUid:NEW,updatedAt:serverTimestamp()});inactive.delete(doc(oldClient,'surveys',surveyId,'viewerGrants',NEW));await assertFails(inactive.commit());await seed();const tamperClient=fs(OLD);const tamper=writeBatch(tamperClient);tamper.update(doc(tamperClient,'surveys',surveyId),{ownerUid:NEW,ownerEmail:'new@yeongjung.or.kr',updatedAt:serverTimestamp()});tamper.delete(doc(tamperClient,'surveys',surveyId,'viewerGrants',NEW));await assertFails(tamper.commit());await seed();await assertFails(updateDoc(doc(fs(OLD),'surveys',surveyId),{ownerUid:NEW,updatedAt:serverTimestamp()}));await assertFails(updateDoc(doc(fs(OLD),'surveys',surveyId),{ownerEmail:'new@yeongjung.or.kr'}));await assertFails(updateDoc(doc(fs(OLD),'surveys',surveyId),{createdByUid:NEW}));});
+  it('ownerUid 없는 진짜 legacy 설문은 기존 alias owner 호환을 유지한다', async()=>{await seedPublishedSurvey('legacy-transfer',{ownerEmail:`${OLD}@yeongjung.or.kr`,createdByUid:OLD});await seedUserDoc(OLD,{uid:OLD,email:`${OLD}@yeongjung.or.kr`,role:'creator',status:'active'});await assertSucceeds(updateDoc(doc(fs(OLD),'surveys','legacy-transfer'),{title:'legacy 수정'}));});
+  it('creator/viewer는 target users 문서를 읽을 수 없고 directory projection만 읽는다', async()=>{await seed();await assertFails(getDoc(doc(fs(OLD),'users',NEW)));});
+});
+
 afterAll(async () => {
   await testEnv?.cleanup();
 });

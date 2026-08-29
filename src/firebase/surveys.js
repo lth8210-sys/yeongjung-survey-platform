@@ -1814,10 +1814,14 @@ function isSurveyOwnedByUser(survey = {}, userAccess = {}) {
   const uid = String(userAccess.uid ?? '').trim();
   const email = String(userAccess.email ?? '').trim().toLowerCase();
 
+  const ownerUid = String(survey.ownerUid ?? '').trim();
+  if (ownerUid) {
+    return Boolean(uid && ownerUid === uid);
+  }
+
   return Boolean(
     uid &&
-      (survey.ownerUid === uid ||
-        survey.createdByUid === uid ||
+      (survey.createdByUid === uid ||
         survey.ownerId === uid ||
         survey.userId === uid ||
         survey.createdBy?.uid === uid),
@@ -1860,7 +1864,7 @@ export async function fetchManagedSurveys(userAccess = {}, options = {}) {
 
   const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
 
-  if (userAccess.role === USER_ROLES.CREATOR && (userAccess.uid || normalizedEmail)) {
+  if ([USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(userAccess.role) && (userAccess.uid || normalizedEmail)) {
     const queryTasks = [
       fetchSurveysByConstraint('surveys?visibility==organization', where('visibility', '==', SURVEY_VISIBILITIES.ORGANIZATION)),
     ];
@@ -2052,21 +2056,8 @@ export async function getManageSurvey(surveyId, userAccess = {}) {
     return null;
   }
 
-  const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
   const canManageAll = canManageAllSurveys(userAccess.role);
-  const isOwner = Boolean(
-    userAccess.uid &&
-      (survey.ownerUid === userAccess.uid ||
-        survey.createdByUid === userAccess.uid ||
-        survey.ownerId === userAccess.uid ||
-        survey.userId === userAccess.uid ||
-        survey.createdBy?.uid === userAccess.uid),
-  ) || Boolean(
-    normalizedEmail &&
-      (String(survey.ownerEmail ?? '').trim().toLowerCase() === normalizedEmail ||
-        String(survey.createdByEmail ?? '').trim().toLowerCase() === normalizedEmail ||
-        String(survey.createdBy?.email ?? '').trim().toLowerCase() === normalizedEmail),
-  );
+  const isOwner = isSurveyOwnedByUser(survey, userAccess);
 
   if (!canManageAll && !isOwner) {
     const error = new Error('이 설문을 미리보기할 권한이 없습니다.');
@@ -2245,14 +2236,6 @@ export async function updateSurvey(
   const { responseCount, ...persistedConfiguration } = normalizedConfiguration;
   const currentSnapshot = await getDoc(doc(db, 'surveys', surveyId));
   const currentData = currentSnapshot.exists() ? currentSnapshot.data() : {};
-  const nextOwnerUid = currentData.ownerUid || currentData.createdBy?.uid || updatedBy?.uid || '';
-  const nextOwnerEmail =
-    currentData.ownerEmail || currentData.createdBy?.email || updatedBy?.email || '';
-  const nextCreatedByUid =
-    currentData.createdByUid || currentData.createdBy?.uid || updatedBy?.uid || '';
-  const nextCreatedByEmail =
-    currentData.createdByEmail || currentData.createdBy?.email || updatedBy?.email || '';
-  const nextCreatedByRole = currentData.createdByRole || updatedBy?.role || '';
   const nextDescriptionFormat = descriptionFormat || currentData.descriptionFormat || 'markdown';
   const nextTableBlocks =
     tableBlocks === undefined ? currentData.tableBlocks ?? [] : tableBlocks;
@@ -2285,24 +2268,8 @@ export async function updateSurvey(
     tableBlocks: normalizeSurveyTableBlocks(nextTableBlocks),
     ...questionPayload,
     status,
-    ownerUid: nextOwnerUid,
-    ownerEmail: nextOwnerEmail,
     visibility: normalizeSurveyVisibility(visibility ?? currentData.visibility),
-    createdByUid: nextCreatedByUid,
-    createdByEmail: nextCreatedByEmail,
-    createdByRole: nextCreatedByRole,
     deleted: currentData.deleted === true,
-    ...(currentData.createdBy
-      ? {}
-      : updatedBy && typeof updatedBy === 'object'
-        ? {
-            createdBy: {
-              uid: updatedBy.uid ?? '',
-              email: updatedBy.email ?? '',
-              name: updatedBy.name ?? '',
-            },
-          }
-        : {}),
     ...persistedConfiguration,
     ...persistedTemplateMetadata,
     ...(updatedBy && typeof updatedBy === 'object'
@@ -3216,7 +3183,7 @@ export async function fetchManagedSurveyReports(userAccess = {}) {
   const surveys = await fetchManagedSurveys(userAccess);
   const readableSurveys = canManageAllSurveys(userAccess.role)
     ? surveys
-    : userAccess.role === USER_ROLES.CREATOR
+    : [USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(userAccess.role)
       ? surveys.filter((survey) => isSurveyOwnedByUser(survey, userAccess))
       : surveys.filter(
           (survey) => normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
@@ -3381,7 +3348,7 @@ export async function fetchManagedRecentResponses(userAccess = {}, limitCount = 
   }
 
   const managedSurveys = await fetchManagedSurveys(userAccess, { includeDeleted: options.includeDeleted });
-  const readableSurveys = userAccess.role === USER_ROLES.CREATOR
+  const readableSurveys = [USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(userAccess.role)
     ? managedSurveys.filter((survey) => isSurveyOwnedByUser(survey, userAccess))
     : managedSurveys.filter(
         (survey) => normalizeSurveyVisibility(survey.visibility) === SURVEY_VISIBILITIES.ORGANIZATION,
@@ -3564,7 +3531,7 @@ export async function fetchResponsesForSurvey(survey, userAccess = {}, options =
     });
   }
 
-  if (userAccess.role === USER_ROLES.CREATOR) {
+  if ([USER_ROLES.CREATOR, USER_ROLES.VIEWER].includes(userAccess.role)) {
     const normalizedEmail = String(userAccess.email ?? '').trim().toLowerCase();
     const responseQueries = [];
 

@@ -73,6 +73,9 @@ Viewer 1차는 staff_directory 선택 UI와 `surveys/{surveyId}/viewerGrants/{ui
 
 후속 P2: **같이 보는 설문 통합 목록** — Viewer가 직접 응답관리 링크 외에도 공유받은 설문을 안전하게 찾을 수 있는 collection-group/index 또는 별도 설계를 검토한다.
 2. Owner 인수인계
+
+Owner Transfer 1차는 `ownerUid`를 현재 담당자 권한의 유일한 정본으로 하여 구현한다. 인계 대상 선택은
+`staff_directory` 최소 projection만 사용하고, 기존 `ownerEmail`은 migration 없이 legacy 호환 field로 보존한다.
 3. 필요성이 확인된 경우에만 Editor
 
 ## v1.2.x Draft 저장 / Publish 구조 준비

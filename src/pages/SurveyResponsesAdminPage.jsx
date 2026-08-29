@@ -50,6 +50,7 @@ import {
 import { revealResponsePii } from '../firebase/piiReveal';
 import { listActiveStaffDirectory } from '../firebase/staffDirectory';
 import { fetchViewerGrantUids, hasOwnActiveViewerGrant, searchStaffDirectory, syncViewerGrants } from '../firebase/viewerGrants';
+import { getOwnerTransferCandidates, resolveSurveyOwnerUid, transferSurveyOwner } from '../firebase/ownerTransfer';
 import { buildQuestionDisplayMap } from '../utils/questionNumbering';
 import { buildRawExportColumns, keepStoredResponseAnswerItems } from '../utils/rawExportColumns';
 import { buildSurveyAnalytics, formatAverage } from '../utils/surveyAnalytics';
@@ -816,6 +817,10 @@ function SurveyResponsesAdminPage() {
   const [viewerGrantStaff, setViewerGrantStaff] = useState([]);
   const [viewerGrantUids, setViewerGrantUids] = useState([]);
   const [viewerGrantSearch, setViewerGrantSearch] = useState('');
+  const [ownerTransferOpen, setOwnerTransferOpen] = useState(false);
+  const [ownerTransferStaff, setOwnerTransferStaff] = useState([]);
+  const [nextOwnerUid, setNextOwnerUid] = useState('');
+  const [keepPreviousOwnerAsViewer, setKeepPreviousOwnerAsViewer] = useState(false);
   const [revealPiiError, setRevealPiiError] = useState('');
   const [responseLastDoc, setResponseLastDoc] = useState(null);
   const [hasMoreResponses, setHasMoreResponses] = useState(false);
@@ -1017,9 +1022,16 @@ function SurveyResponsesAdminPage() {
   }, [canViewSurveyResponses, role, surveyId, user?.email, user?.uid]);
 
   const canManageViewerGrants = Boolean(survey && canEditSurvey(survey));
+  const canManageOwnerTransfer = Boolean(survey && canEditSurvey(survey));
+  const isCurrentSurveyOwner = Boolean(survey && isSurveyOwner(survey));
+  const currentOwnerUid = resolveSurveyOwnerUid(survey ?? {});
+  const ownerTransferCandidates = getOwnerTransferCandidates(ownerTransferStaff, currentOwnerUid);
+  const currentOwnerDisplayName = ownerTransferStaff.find((staff) => staff.uid === currentOwnerUid)?.displayName
+    ?? survey?.createdBy?.name
+    ?? '현재 담당자';
   // 결과 공유 Viewer는 설문별 명시적 업무 권한으로 기존 결과 활용/다운로드를 사용할 수 있다.
   // 설문·응답·grant 변경 권한은 canEdit/canDelete 경로로 계속 분리된다.
-  const canDownloadForCurrentAccess = canDownloadResponses || viewerMode;
+  const canDownloadForCurrentAccess = canDownloadResponses || viewerMode || isCurrentSurveyOwner;
 
   const openViewerGrantModal = async () => {
     try {
@@ -1042,6 +1054,45 @@ function SurveyResponsesAdminPage() {
     } catch (grantError) {
       setError(grantError.message || '결과 공유 저장에 실패했습니다.');
     } finally { setActionLoading(false); }
+  };
+
+  const openOwnerTransferModal = async () => {
+    try {
+      setActionLoading(true);
+      setOwnerTransferStaff(await listActiveStaffDirectory());
+      setNextOwnerUid('');
+      setKeepPreviousOwnerAsViewer(false);
+      setOwnerTransferOpen(true);
+    } catch (transferError) {
+      setError(transferError.message || '인계할 직원 목록을 불러오지 못했습니다.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const saveOwnerTransfer = async () => {
+    try {
+      setActionLoading(true);
+      setError('');
+      const result = await transferSurveyOwner({
+        surveyId,
+        nextOwnerUid,
+        actor: auditActor,
+        keepPreviousOwnerAsViewer,
+      });
+      setOwnerTransferOpen(false);
+
+      const isAdmin = ['admin', 'super_admin'].includes(role);
+      if (!isAdmin && result.previousOwnerUid === user?.uid && !result.previousOwnerRetainedAsViewer) {
+        navigate('/admin/surveys', { replace: true });
+        return;
+      }
+      await loadPageData();
+    } catch (transferError) {
+      setError(transferError.message || '담당자 인계에 실패했습니다.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -1954,7 +2005,7 @@ function SurveyResponsesAdminPage() {
           )}
           {normalizedStatus !== SURVEY_STATUSES.DRAFT &&
             normalizedStatus !== SURVEY_STATUSES.DELETED &&
-            canDownloadResponses && (
+            canDownloadForCurrentAccess && (
             <button className="secondary-button" onClick={() => setQrOpen(true)} type="button">
               QR 보기
             </button>
@@ -1963,6 +2014,7 @@ function SurveyResponsesAdminPage() {
             관리자 홈
           </Link>
           {canManageViewerGrants && <button className="secondary-button" disabled={actionLoading} onClick={openViewerGrantModal} type="button">결과 같이 보기</button>}
+          {canManageOwnerTransfer && <button className="secondary-button" disabled={actionLoading} onClick={openOwnerTransferModal} type="button">담당자 인계</button>}
         </div>
       </div>
 
@@ -3086,6 +3138,20 @@ function SurveyResponsesAdminPage() {
               {searchStaffDirectory(viewerGrantStaff, viewerGrantSearch).map((staff) => <label key={staff.uid} className="checkbox-row"><input type="checkbox" checked={viewerGrantUids.includes(staff.uid)} onChange={(event) => setViewerGrantUids((current) => event.target.checked ? [...current, staff.uid] : current.filter((uid) => uid !== staff.uid))} />{staff.displayName}</label>)}
             </div>
             <div className="report-settings-actions"><button className="secondary-button" disabled={actionLoading} onClick={() => setViewerGrantOpen(false)} type="button">취소</button><button className="primary-button" disabled={actionLoading} onClick={saveViewerGrants} type="button">저장</button></div>
+          </div>
+        </div>
+      )}
+      {ownerTransferOpen && (
+        <div className="modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !actionLoading) setOwnerTransferOpen(false); }}>
+          <div aria-modal="true" className="template-modal panel" role="dialog" aria-label="설문 담당자 인계">
+            <div className="builder-header-row"><div><span className="eyebrow">설문 담당자 인계</span><h2>담당자 변경</h2></div><button className="secondary-button" disabled={actionLoading} onClick={() => setOwnerTransferOpen(false)} type="button">닫기</button></div>
+            <p className="inline-note">현재 담당자: {currentOwnerDisplayName}</p>
+            <p className="inline-note">인계하면 새 담당자가 설문·응답·결과·공유 설정을 관리합니다. 기존 담당자는 기본적으로 관리 권한을 잃습니다.</p>
+            <label className="field"><span>새 담당자</span><select value={nextOwnerUid} disabled={actionLoading} onChange={(event) => setNextOwnerUid(event.target.value)}><option value="">활성 직원을 선택하세요</option>{ownerTransferCandidates.map((staff) => <option key={staff.uid} value={staff.uid}>{staff.displayName}</option>)}</select></label>
+            {ownerTransferCandidates.length === 0 && <p className="form-error">인계할 다른 활성 직원을 찾지 못했습니다.</p>}
+            <label className="checkbox-row"><input type="checkbox" checked={keepPreviousOwnerAsViewer} disabled={actionLoading} onChange={(event) => setKeepPreviousOwnerAsViewer(event.target.checked)} />기존 담당자에게 결과 조회(Viewer) 권한 유지</label>
+            <p className="inline-note">Viewer는 결과와 다운로드만 조회할 수 있으며 설문·응답·공유 설정을 수정할 수 없습니다.</p>
+            <div className="report-settings-actions"><button className="secondary-button" disabled={actionLoading} onClick={() => setOwnerTransferOpen(false)} type="button">취소</button><button className="primary-button" disabled={actionLoading || !nextOwnerUid} onClick={saveOwnerTransfer} type="button">인계 저장</button></div>
           </div>
         </div>
       )}

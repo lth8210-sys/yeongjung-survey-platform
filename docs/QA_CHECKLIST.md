@@ -276,6 +276,13 @@
 - [ ] grant 제거 또는 users.status 비활성화 후 Viewer read가 즉시 차단되는가
 - [ ] Viewer가 설문·응답·quota/lock·grant·보고서를 변경할 수 없는가
 
+- [ ] Owner Transfer 후 새 `ownerUid`만 설문·응답·보고서·Viewer grant를 관리할 수 있는가
+- [ ] stale `ownerEmail` 또는 `createdBy*`가 이전 담당자 권한을 복원하지 않는가
+- [ ] 새 Owner가 기존 Viewer인 경우 기존 viewerGrant가 transaction에서 제거되는가
+- [ ] 기본 인계 후 이전 Owner의 설문 수정·응답 취소/삭제·보고서/공유 설정이 차단되는가
+- [ ] 선택한 이전 Owner Viewer는 조회/다운로드만 가능하고 수정은 차단되는가
+- [ ] 대상 선택에 users 원본 read나 email field가 필요하지 않은가
+
 - [ ] active creator/viewer/admin만 staff_directory active 목록을 조회할 수 있는가
 - [ ] pending/inactive/blocked/anonymous 및 users 문서 없는 계정이 directory와 users 원본 목록을 읽지 못하는가
 - [ ] 본인 projection의 uid/name/active/timestamp 위조와 타인 projection 쓰기가 차단되는가

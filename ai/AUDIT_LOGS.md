@@ -223,3 +223,9 @@ npx firebase deploy --only firestore:rules
 # Viewer download audit
 
 유효한 Viewer grant의 active 직원은 허용된 CSV, Excel, DOCX/PDF 결과 다운로드 action만 audit log에 기록할 수 있다. metadata에는 download 종류·집계·report 식별자만 담고 응답 원문이나 주민 개인정보를 넣지 않는다.
+
+# Owner Transfer audit
+
+`survey_owner_transferred`는 담당자 인계 transaction에서 함께 생성한다. `surveyId`, actor, timestamp와
+`previousOwnerUid`, `nextOwnerUid`, `previousOwnerRetainedAsViewer`만 metadata에 남긴다. 이메일·응답 원문·주민
+개인정보는 audit metadata에 복제하지 않는다.

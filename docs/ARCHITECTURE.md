@@ -16,6 +16,10 @@
 `src/firebase/staffDirectory.js`는 향후 직원 선택을 위한 최소 projection만 다룬다. 이는 users 원본 권한이나 Viewer 설문 결과 권한을 대체하지 않는다.
 
 `src/firebase/viewerGrants.js`는 설문 하위 grant와 audit batch를 다룬다. 권한 정본은 `users/{uid}`와 `surveys/{surveyId}/viewerGrants/{uid}`의 조합이다.
+
+`src/firebase/ownerTransfer.js`는 담당자 인계를 하나의 Firestore transaction으로 처리한다. 설문에는
+`ownerUid`와 `updatedAt`만 기록하고 `ownerEmail`·`createdBy*`는 변경하지 않는다. 새 Owner의 기존 Viewer grant
+제거, 선택한 이전 Owner Viewer grant, `survey_owner_transferred` audit도 같은 transaction에 포함한다.
 - `src/utils/`: 통계, 보고서, 응답 흐름, 개인정보 마스킹 등 도메인 유틸
 - `src/data/`: 템플릿과 질문 블록 데이터
 

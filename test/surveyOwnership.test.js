@@ -7,6 +7,7 @@ import {
   canViewSurveyResponses,
   USER_ROLES,
 } from '../src/firebase/users.js';
+import { getOwnerTransferCandidates, resolveSurveyOwnerUid } from '../src/firebase/ownerTransfer.js';
 
 // "제작자가 자기 설문을 못 보는" 재발 버그(KI-001) 회귀 방지 테스트.
 // surveys 문서의 소유자 필드는 역사적으로 6종(ownerUid/createdByUid/ownerId/userId/
@@ -36,9 +37,40 @@ describe('isSurveyOwner — 소유자 필드 6종 호환', () => {
     expect(isSurveyOwner({ ownerUid: 'someone-else', ownerEmail: 'other@yeongjung.or.kr' }, user)).toBe(false);
   });
 
+  it('ownerUid가 있으면 stale ownerEmail·최초 제작자 alias는 이전 담당자 권한을 복원하지 않는다', () => {
+    const transferred = {
+      ownerUid: 'new-owner',
+      ownerEmail: 'creator@yeongjung.or.kr',
+      createdByUid: 'user-1',
+      createdByEmail: 'creator@yeongjung.or.kr',
+      createdBy: { uid: 'user-1', email: 'creator@yeongjung.or.kr' },
+    };
+
+    expect(isSurveyOwner(transferred, user)).toBe(false);
+    expect(isSurveyOwner(transferred, { uid: 'new-owner', email: 'new@yeongjung.or.kr' })).toBe(true);
+  });
+
   it('survey 또는 user가 없으면 false', () => {
     expect(isSurveyOwner(null, user)).toBe(false);
     expect(isSurveyOwner({ ownerUid: 'user-1' }, null)).toBe(false);
+  });
+});
+
+describe('Owner Transfer 대상 선택 — directory 최소 projection', () => {
+  it('현재 담당자만 제외하고 active uid/displayName projection으로 대상 선택한다', () => {
+    const staff = [
+      { uid: 'old', displayName: '기존 담당자', active: true },
+      { uid: 'new', displayName: '새 담당자', active: true },
+      { uid: 'inactive', displayName: '비활성', active: false },
+    ];
+    expect(resolveSurveyOwnerUid({ ownerUid: 'old', createdByUid: 'legacy' })).toBe('old');
+    expect(getOwnerTransferCandidates(staff, 'old')).toEqual([
+      { uid: 'new', displayName: '새 담당자', active: true },
+    ]);
+  });
+
+  it('ownerUid가 없는 진짜 legacy 설문은 기존 UID alias를 현재 담당자 후보 기준으로 사용한다', () => {
+    expect(resolveSurveyOwnerUid({ createdByUid: 'legacy-owner' })).toBe('legacy-owner');
   });
 });
 
@@ -89,8 +121,16 @@ describe('canReadManagedSurvey / canEditSurvey — creator 권한 경계', () =>
     expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, { ownerId: 'user-1' }, user)).toBe(true);
     expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, otherPrivateSurvey, user)).toBe(false);
     expect(canDeleteSurveyResponses(USER_ROLES.CREATOR, orgSurvey, user)).toBe(false);
-    expect(canDeleteSurveyResponses(USER_ROLES.VIEWER, ownSurvey, user)).toBe(false);
+    expect(canDeleteSurveyResponses(USER_ROLES.VIEWER, ownSurvey, user)).toBe(true);
     expect(canDeleteSurveyResponses(USER_ROLES.ADMIN, otherPrivateSurvey, user)).toBe(true);
     expect(canDeleteSurveyResponses(USER_ROLES.SUPER_ADMIN, otherPrivateSurvey, user)).toBe(true);
+  });
+
+  it('Viewer가 Owner로 인계되면 자기 설문·응답을 기존 Owner와 같이 관리할 수 있다', () => {
+    const promotedViewer = { uid: 'viewer-owner', email: 'viewer@yeongjung.or.kr' };
+    const transferredSurvey = { ownerUid: 'viewer-owner', visibility: 'private' };
+    expect(canEditSurvey(USER_ROLES.VIEWER, transferredSurvey, promotedViewer)).toBe(true);
+    expect(canViewSurveyResponses(USER_ROLES.VIEWER, transferredSurvey, promotedViewer)).toBe(true);
+    expect(canDeleteSurveyResponses(USER_ROLES.VIEWER, transferredSurvey, promotedViewer)).toBe(true);
   });
 });

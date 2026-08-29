@@ -20,6 +20,18 @@
 
 `viewerGrants`는 설문별 users 정본(active)과 grant를 함께 확인해 응답·보고서 read 및 허용된 결과 다운로드 audit만 허용한다. Viewer의 survey/response/quota/lock/grant/report write는 허용하지 않는다.
 
+### Owner Transfer 정본 계약
+
+- `ownerUid`가 있는 설문은 오직 `request.auth.uid == ownerUid`만 현재 담당자다. `ownerEmail`,
+  `createdBy*`, `ownerId`, `userId`와 응답 snapshot은 이전 담당자의 권한을 되살릴 수 없다.
+- `ownerUid`가 없는 진짜 legacy 설문에만 기존 UID/email alias fallback을 제한적으로 허용한다.
+- 인계 update는 `ownerUid`, `updatedAt`만 바꾸며 대상 `users/{uid}.status == active`를 Rules에서 검증한다.
+  대상 직원의 users 원본 read는 UI에 열지 않고 `staff_directory`의 `uid`, `displayName`, `active`만 사용한다.
+- 새 담당자가 기존 Viewer이면 같은 transaction에서 해당 viewerGrant를 삭제한다. 이전 담당자 Viewer 유지는
+  같은 transaction의 명시적 선택일 때만 가능하다.
+- linked response는 현재 survey `ownerUid`를 우선하며, survey가 없거나 `ownerUid`가 없는 legacy response만
+  기존 snapshot fallback을 사용한다.
+
 | 기능 | super_admin | admin | creator | staff/viewer | 비로그인 |
 | --- | --- | --- | --- | --- | --- |
 | 공개 설문 읽기 | 가능 | 가능 | 가능 | 가능 | 가능 |

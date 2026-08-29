@@ -39,9 +39,9 @@
 | `questions` | 운영 설문 문항 배열 |
 | `sections` | 페이지/섹션 구조 |
 | `responseCount` | 현재 유효 응답 수. 신청 취소·soft delete 응답은 제외 |
-| `ownerUid` | 설문 소유자 UID |
-| `ownerEmail` | 설문 소유자 이메일 |
-| `createdBy` | 생성자 메타데이터 |
+| `ownerUid` | **현재 담당자 권한의 유일한 정본** UID. 인계 시 이 필드와 `updatedAt`만 변경 |
+| `ownerEmail` | 기존 설문 호환용 legacy field. 현재 담당자 표시·권한 판정·인계에 사용하지 않으며 인계 시 보존 |
+| `createdBy`, `createdByUid`, `createdByEmail` | 최초 제작자 이력. 인계 후에도 immutable |
 | `createdAt` | 생성 시각 |
 | `updatedAt` | 수정 시각 |
 | `quotaEnabled` | 전체 정원 제한 사용 여부 |

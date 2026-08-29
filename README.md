@@ -58,6 +58,8 @@ Raw Excel/CSV 다운로드는 현재 문항뿐 아니라 기존 응답에만 남
 
 설문별 **결과 같이 보기** 권한은 특정 내부 직원에게 해당 설문의 응답·통계·기존 보고서와 CSV/Excel/DOCX/PDF 결과 활용을 허용하는 read/export 권한입니다. 설문·응답·grant·보고서 원본 변경 권한은 포함하지 않으며, 공유는 개인정보가 포함될 수 있음을 고지한 뒤에만 설정합니다.
 
+설문 **담당자 인계**는 응답 관리 화면에서 활성 직원에게 설문 운영 권한을 넘기는 기능입니다. 현재 담당자 권한의 유일한 정본은 `ownerUid`이며, `createdBy*`는 최초 제작 이력으로 변경되지 않습니다. `ownerEmail`은 기존 데이터 호환을 위한 legacy field로만 유지하며 권한 판정이나 인계 대상 선택에 사용하지 않습니다. 인계 시 기존 담당자는 기본적으로 권한을 잃고, 선택하면 결과 조회(Viewer)만 유지할 수 있습니다.
+
 ## 시작 방법
 
 ```bash
@@ -101,7 +103,7 @@ Authentication > Settings > Authorized domains에는 아래 도메인을 등록�
 
 - 누구나 활성 설문은 읽을 수 있음
 - 활성 상태의 `super_admin`, `admin`, `creator`는 설문 생성 가능
-- `creator`는 본인이 만든 설문만 수정 가능
+- `creator`와 Owner로 인계된 `viewer`는 `ownerUid`가 일치하는 설문만 수정 가능
 - 응답 작성은 누구나 가능
 - 응답 조회는 관리자와 해당 설문 제작자만 가능
 - `organization` visibility는 설문 양식 공유이며, organization-only 사용자에게 응답 원문
